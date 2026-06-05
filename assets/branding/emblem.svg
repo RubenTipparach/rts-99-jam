@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Sol Dominion emblem">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="44%" r="62%">
+      <stop offset="0%" stop-color="#0d1730"/>
+      <stop offset="62%" stop-color="#0a1022"/>
+      <stop offset="100%" stop-color="#05080f"/>
+    </radialGradient>
+    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="28%" stop-color="#ffe6a6"/>
+      <stop offset="58%" stop-color="#ff9a3c"/>
+      <stop offset="100%" stop-color="#ff6a1e"/>
+    </radialGradient>
+    <radialGradient id="corona" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff9a3c" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ff6a1e" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="planetHot" cx="38%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#ffd9a8"/>
+      <stop offset="60%" stop-color="#ff8b46"/>
+      <stop offset="100%" stop-color="#b8431a"/>
+    </radialGradient>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+    <filter id="emberGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3.2"/>
+    </filter>
+    <clipPath id="disc"><circle cx="256" cy="256" r="246"/></clipPath>
+  </defs>
+
+  <!-- field -->
+  <circle cx="256" cy="256" r="246" fill="url(#bg)"/>
+
+  <g clip-path="url(#disc)">
+    <!-- faction tints, split along the y=x fault line -->
+    <polygon points="0,0 512,0 512,512" fill="#ff5a2c" opacity="0.07"/>
+    <polygon points="0,0 0,512 512,512" fill="#2f74da" opacity="0.07"/>
+
+    <!-- orbital rings -->
+    <g fill="none" stroke="#5b81b3">
+      <ellipse cx="256" cy="256" rx="200" ry="66" stroke-opacity="0.32" stroke-width="1.6"/>
+      <ellipse cx="256" cy="256" rx="150" ry="50" stroke-opacity="0.44" stroke-width="1.6"/>
+      <ellipse cx="256" cy="256" rx="104" ry="35" stroke-opacity="0.58" stroke-width="1.6"/>
+    </g>
+
+    <!-- planets on their orbits -->
+    <circle cx="75"  cy="228" r="6" fill="#84b6ec"/>
+    <circle cx="166" cy="274" r="5" fill="#6fa3da"/>
+    <circle cx="444" cy="279" r="4.5" fill="#5d86bb" opacity="0.85"/>
+    <circle cx="386" cy="281" r="9" fill="url(#planetHot)"/>
+    <circle cx="386" cy="281" r="11.5" fill="none" stroke="#ff7a3c" stroke-opacity="0.5" stroke-width="1.4"/>
+
+    <!-- the sun -->
+    <circle cx="256" cy="256" r="64" fill="url(#corona)" filter="url(#soft)"/>
+    <circle cx="256" cy="256" r="25" fill="url(#sun)"/>
+    <circle cx="256" cy="256" r="9" fill="#ffffff"/>
+
+    <!-- the fault line: a divided Sol -->
+    <line x1="81" y1="81" x2="431" y2="431" stroke="#ff7a3c" stroke-width="6" stroke-opacity="0.35" filter="url(#emberGlow)"/>
+    <line x1="81" y1="81" x2="431" y2="431" stroke="#ff5a2c" stroke-width="2.4"/>
+    <circle cx="256" cy="256" r="3.5" fill="#ffd98a"/>
+  </g>
+
+  <!-- navigation / reticle rings -->
+  <circle cx="256" cy="256" r="232" fill="none" stroke="#3f5f8a" stroke-width="2" stroke-dasharray="1.5 9" stroke-opacity="0.9"/>
+  <circle cx="256" cy="256" r="224" fill="none" stroke="#33507a" stroke-width="1" stroke-opacity="0.6"/>
+  <circle cx="256" cy="256" r="246" fill="none" stroke="#6f93c4" stroke-width="2"/>
+
+  <!-- cardinal ticks -->
+  <g stroke="#9bbce6" stroke-width="2.4">
+    <line x1="256" y1="14" x2="256" y2="30"/>
+    <line x1="256" y1="482" x2="256" y2="498"/>
+    <line x1="14" y1="256" x2="30" y2="256"/>
+    <line x1="482" y1="256" x2="498" y2="256"/>
+  </g>
+</svg>

@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="assets/branding/logo.png" alt="Sol Dominion (working title)" width="680">
+</p>
+
+<p align="center"><em>Working title — branding in <a href="assets/branding/">assets/branding/</a></em></p>
+
 # rts-99-jam
 
 A deterministic, lockstep real-time strategy engine in the lineage of *StarCraft*
