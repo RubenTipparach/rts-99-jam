@@ -125,7 +125,7 @@ keep egui for tools regardless.
 │  │  (Bevy + wgpu) │   interpolated    │   (engine-agnostic crate)    │  │
 │  │                │                   │                              │  │
 │  │ • render @120+ │   local commands  │ • fixed-point math           │  │
-│  │ • input/UI     │──────────────────►│ • fixed tick @ 20–30 Hz      │  │
+│  │ • input/UI     │──────────────────►│ • fixed tick @ 30 Hz         │  │
 │  │ • egui tools   │                   │ • command-driven             │  │
 │  │ • audio        │                   │ • bit-identical everywhere   │  │
 │  └────────────────┘                   │ • produces checksums         │  │
@@ -200,7 +200,7 @@ Determinism also demands:
 - **Deterministic iteration order.** No `HashMap` iteration in sim logic (use
   sorted/`IndexMap`-style or dense arrays keyed by entity id). This alone rules
   out naively running the sim inside Bevy's parallel ECS.
-- **A single fixed timestep.** Simulate at e.g. **20–30 Hz** (StarCraft ran its
+- **A single fixed timestep.** Simulate at e.g. **30 Hz** (StarCraft ran its
   "game turns" far slower than its frame rate). All randomness comes from a
   seeded, deterministic PRNG advanced in lockstep.
 - **No wall-clock, no `f32` time deltas** inside the sim. Tick counts only.
@@ -312,7 +312,7 @@ connection protocol) for native.
 
 160 fps = **6.25 ms/frame**; 144 fps ≈ 6.9 ms; 120 fps ≈ 8.3 ms. That is the entire
 CPU+GPU budget. You cannot afford to run a 1000-unit simulation step inside that
-budget every frame — and you don't need to. Run the **sim at 20–30 Hz** (33–50 ms
+budget every frame — and you don't need to. Run the **sim at 30 Hz** (≈33 ms
 between ticks) on a fixed timestep, and have the renderer **interpolate** unit
 transforms between the last two sim snapshots every display frame. This is standard
 "fixed timestep, interpolated rendering."
@@ -354,7 +354,7 @@ Three independent scaling problems, three different solutions:
 
 | Problem | Solution | Reference |
 | --- | --- | --- |
-| **Simulating** thousands of entities | Data-oriented ECS / SoA; sim at 20–30 Hz, not per-frame | Bevy ECS "scales to millions of entities"; [RTS-in-ECS design](https://github.com/bevyengine/bevy/discussions/2659) |
+| **Simulating** thousands of entities | Data-oriented ECS / SoA; sim at 30 Hz, not per-frame | Bevy ECS "scales to millions of entities"; [RTS-in-ECS design](https://github.com/bevyengine/bevy/discussions/2659) |
 | **Drawing** thousands of entities | GPU instancing + indirect + LOD/impostors (see [§7.3](#73-gpu-driven-rendering-for-crowds)) | [vkguide](https://vkguide.dev/docs/gpudriven/gpu_driven_engines/) |
 | **Moving** thousands of entities | Flow fields (shared path) + local steering/ORCA (see [§13](#13-movement--pathfinding)) | [Crowd Pathfinding & Steering Using Flow-Field Tiles (Game AI Pro)](https://www.gameaipro.com/GameAIPro/GameAIPro_Chapter23_Crowd_Pathfinding_and_Steering_Using_Flow_Field_Tiles.pdf) |
 
@@ -615,7 +615,7 @@ Web-first imposes real limits — design for them now, not after they bite:
   **cross-origin isolation** (COOP/COEP headers) and Wasm atomics/bulk-memory.
   Without it, your WASM build is single-threaded. Bevy *can* run multithreaded on
   the web with the right build flags, but plan for: (a) a deterministic sim core
-  that runs comfortably **single-threaded** at 20–30 Hz, and (b) shipping those
+  that runs comfortably **single-threaded** at 30 Hz, and (b) shipping those
   headers from your host/CDN. The sim/render split helps — the heavy parallelism
   (rendering) is on the GPU, and the sim is light.
 - **WebGPU vs WebGL2.** Prefer WebGPU (compute shaders → GPU particles, GPU culling,
@@ -646,7 +646,7 @@ rts-99-jam/
 ├── crates/
 │   ├── sim/                    # ⭐ deterministic core: NO engine deps
 │   │   ├── fixed-point math (fixed + cordic), seeded PRNG
-│   │   ├── ECS/SoA world, components, systems (fixed 20–30 Hz tick)
+│   │   ├── ECS/SoA world, components, systems (fixed 30 Hz tick)
 │   │   ├── commands (the ONLY way to mutate state)
 │   │   ├── pathfinding (HPA*, flow fields, ORCA) — fixed-point
 │   │   └── state checksum / snapshot / replay

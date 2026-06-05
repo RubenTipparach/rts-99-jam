@@ -36,7 +36,7 @@ There is **one deterministic source-of-truth simulation**, organized as two coup
 | Layer | Frame | Cadence | Contents |
 | --- | --- | --- | --- |
 | **System layer** | Sun-centered inertial (heliocentric) | low (orbits evolve slowly; can sub-tick) | planet/moon ephemeris, ship orbits & transfers (patched conics), interplanetary freight |
-| **Surface/local layer** | per-body planet-fixed + planet-centered inertial | full sim tick (20–30 Hz) | ground RTS units, buildings, economy, **per-planet pathfinding**, local-orbit ship combat |
+| **Surface/local layer** | per-body planet-fixed + planet-centered inertial | full sim tick (**30 Hz**) | ground RTS units, buildings, economy, **per-planet pathfinding**, local-orbit ship combat |
 
 The layers are coupled only at **hand-off points**: launch/landing (surface ↔ local orbit) and SOI transitions (local orbit ↔ interplanetary). Everything is deterministic and fixed-point so all clients stay bit-identical (see [architecture.md §5](architecture.md#5-the-deterministic-simulation-core)).
 
@@ -110,7 +110,7 @@ Each body carries Keplerian elements `(a, e, i, Ω, ω, M₀)`; moons' elements 
 > primitive as the fixed-point trig in the sim core — so the orbital layer drops
 > straight into fixed-point with a bounded, deterministic iteration count.
 
-Varying inclination/eccentricity (slight inter-planet `i`, eccentric moons) are just element values, and they create real strategy: plane changes and eccentric arrivals cost Δv, and transfer windows open and close.
+**Simplification (locked): all orbits are perfectly circular (`e = 0`).** Eccentricity is dropped; *inclination still varies* (slight inter-planet `i`, and ship-commanded tilt — §6.4), so "circular orbits" and "varying orbital planes" coexist fine. With `e = 0` the Kepler-equation solve vanishes for bodies — angular position is simply `θ(t) = θ₀ + √(μ/r³)·t` — though the solver stays available for powered transfer arcs and any future eccentricity. Plane changes still cost Δv (`≈ 2v·sin(Δi/2)`), so inclination is a real tradeoff, not free.
 
 ---
 
@@ -173,6 +173,21 @@ Trajectory **shape becomes readable information**, because the physics — not a
 
 A **KSP-style predicted-path overlay** (projected arc + flip point + the orbit it will capture into) is then just a *visualization of the real planned trajectory* — it shows where the ship will actually be, which is what sells "we're making actual transfers."
 
+### 5.3 Derelicts: drift, stasis, rescue, scuttle
+
+A ship that **runs out of fuel** or is **disabled** (engine/reactor knocked out, §8) stops thrusting — and because the trajectory is real, it keeps whatever state it had and **drifts** on the ballistic conic from that point (back to analytic Kepler, on-rails, deterministic). The consequences are emergent, not scripted:
+
+- Lose thrust mid-brachistochrone and you keep the velocity — often onto an **escape/hyperbolic** path that sails out of the SOI (or the whole system) unless intercepted in time.
+- Lose it near a body and you may settle into a capture orbit, or fall onto an impact trajectory.
+
+**Crew ride it out indefinitely in stasis** — no death timer — so a derelict is a *persistent, recoverable object*, yours or salvage:
+
+- **Rescue** = intercept the (coasting, hence perfectly predictable) derelict with another ship, match orbits via CW close-approach (§7), then **refuel** (it reactivates) or **tow** (combined mass → recompute the tug's Δv). Rescue is a genuine navigation problem precisely because the drift path is real.
+- **Scuttle** = self-destruct to deny **capture** (§9) — the counter to an enemy boarding your powered-down hull for its ship/tech.
+- **Salvage** = derelicts (yours or the enemy's) are a recoverable resource, adding a salvage layer to the economy.
+
+A derelict is still simulated (cheap — it's on Kepler rails) and still carries its subsystems (so it stays capturable). The whole mechanic falls out for free from two earlier choices — *trajectories are real* and *fuel is real*.
+
 ---
 
 ## 6. The trajectory spectrum: Lambert ↔ brachistochrone
@@ -223,6 +238,16 @@ Given (ship state, target trajectory, **urgency**), the planner:
 3. Picks the fastest *feasible* profile that meets the order's urgency, or reports the constraint to the player.
 
 Player-facing UI stays simple — "travel time + fuel cost," an urgency slider — while the model underneath is real. (This is the "Lambert under the hood" UX with the brachistochrone extreme added for warships.)
+
+### 6.4 Commanding orbits: the navigation UI
+
+Two ways to issue a destination, both feeding the same real planner + flight system. Orbits the player commands are **circular** (§4), so a target orbit is just `(radius r, phase, inclination i)`:
+
+**A. Manual orbit** — *click the orbital plane* of the body you orbit (or the sun) to drop a point; its polar coordinates set **orbital distance `r`** (distance from the body) and **phase** (angle) in one click. An **inclination slider** then tilts the orbit out of the reference plane — implemented as a rotation about the radius line through the clicked point, so the point you picked stays on the orbit while it tilts (intuitive), with the live Δv readout climbing as `≈ 2v·sin(Δi/2)` so steep plane changes visibly cost fuel.
+
+**B. Auto-intercept** — *click a planet/target* and the planner auto-solves a **brachistochrone intercept** (rendezvous matched to the moving target, settling into a default circular parking orbit) and immediately reports **whether you have the fuel** (available Δv from the rocket equation vs. the maneuver cost) plus arrival time. Feasible → confirm and fly; infeasible → it shows how far short you are.
+
+Both modes render a **live preview**: the candidate circular orbit ring (radius `r`, tilt `i`), the predicted transfer arc and flip point from the current state, and the time + fuel cost — i.e. the §5.1 real trajectory drawn *before* you commit. The spectrum still bites: a brachistochrone intercept is *available anytime* but fuel-hungry, while an efficient near-Hohmann transfer between circular orbits is cheaper but **phase-gated** — so transfer windows still matter for the budget-conscious.
 
 ---
 
@@ -310,8 +335,12 @@ A logistics/production RTS where the **gravity well sets the rules**:
 
 1. **Orbit→ground reach:** lighting + day/night + **solar-power availability**; ground physics stay in the stable rotating frame. (Not full eclipse/sensor tactical coupling — for now.)
 2. **Orbital combat:** **Clohessy–Wiltshire** relative dynamics in LVLH (authentic drift), with a validity-envelope fallback to translational steering.
-3. **Transfers:** unified **Lambert ↔ brachistochrone** trajectory spectrum; simple "time + fuel" UI over a real model.
+3. **Transfers:** unified **Lambert ↔ brachistochrone** trajectory spectrum; simple "time + fuel" UI over a real model. The trajectory is **real simulated motion** (§5.1), never an animation.
 4. **Sim scaling:** **full-sim every colonized body**; keep the `BodySim` seam so deterministic sim-LOD can be added later if needed.
+5. **Sim tick: 30 Hz** fixed timestep; render interpolates to 120–160 fps.
+6. **All orbits circular** (`e = 0`); inclination still varies and is player-commandable (plane changes cost Δv). Supersedes the earlier "eccentric moons" idea.
+7. **Navigation UI:** click-the-plane to set a circular orbit `(r, phase)` + inclination slider, *or* click-a-planet for an auto **brachistochrone intercept with a fuel check**; live trajectory preview either way (§6.4).
+8. **Derelicts:** out-of-fuel/disabled ships drift on real Kepler paths; crew in stasis indefinitely; **rescue** (refuel/tow) or **scuttle** (deny capture); salvageable (§5.3).
 
 **Still open:**
 
