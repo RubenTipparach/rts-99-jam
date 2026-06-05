@@ -481,6 +481,12 @@ a 3D space volume) and hand units between them at defined transition points. Try
 to make one literal continuous simulation from orbit to ground is where projects
 drown; fake the seam visually, switch domains logically.
 
+> **The full ground-to-space design lives in [`ground-to-space.md`](ground-to-space.md):**
+> the nested reference-frame model (focusing a planet = change of basis), the
+> sim-LOD vs. render-LOD rule, the orbital ephemeris, the ship flight model with the
+> **Lambert ↔ brachistochrone trajectory spectrum**, Clohessy–Wiltshire orbital
+> combat, and the construction → mobility → combat loop.
+
 ---
 
 ## 13. Movement & pathfinding
@@ -743,6 +749,11 @@ deferred until the foundation is proven. Each phase ends in a demoable build.
 | Bevy upgrade churn | Medium | Isolate Bevy behind `render`/`app`; keep `sim`/`ai`/`net` engine-free |
 | WASM binary size / load time | Medium | `wasm-opt`, LTO, asset streaming, egui for UI |
 
+**Ground-to-space decisions (settled — see [`ground-to-space.md §11`](ground-to-space.md#11-decisions-locked--still-open)):**
+orbit→ground reach = lighting + solar power · orbital combat = Clohessy–Wiltshire ·
+transfers = Lambert ↔ brachistochrone spectrum · sim scaling = full-sim every body
+(with a `BodySim` seam preserved for later sim-LOD).
+
 **Open questions to resolve before/while building:**
 1. **Is `rts-99-jam` a time-boxed game jam?** If so, scope to Phase 1 (single-player
    flat-map slice) — Phases 2–4 are post-jam. This materially changes everything.
@@ -755,6 +766,8 @@ deferred until the foundation is proven. Each phase ends in a demoable build.
    for web) vs. detailed? This drives the rendering budget hard.
 5. **Bevy vs. custom wgpu** — confirm the Option C hybrid, or do you specifically
    want to avoid Bevy and build directly on wgpu (much more plumbing)?
+6. **Ship fuel model, solar-power-gated combat, boarding/capture rules, 2D-vs-3D CW**
+   — the open items in [`ground-to-space.md §11`](ground-to-space.md#11-decisions-locked--still-open).
 
 ---
 

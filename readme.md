@@ -19,13 +19,21 @@ AI bots, network peers, and replays are all just *command sources* feeding that 
 This single seam is what makes lockstep netcode, replays, server validation, and
 headless AI fall out almost for free.
 
-📄 **Read the full design & architecture document: [`docs/architecture.md`](docs/architecture.md)**
+📄 **Design & architecture: [`docs/architecture.md`](docs/architecture.md)**
 
-It surveys the technologies and algorithms for every engine requirement — rendering,
+Surveys the technologies and algorithms for every engine requirement — rendering,
 animation, particles, lighting, netcode, large maps, procedural planets, surface /
 spherical / 3D-space pathfinding, collision avoidance, and AI — each with primary
 references, and proposes a concrete workspace layout, tech stack, phased roadmap, and
 risk register.
+
+🪐 **Ground-to-space: [`docs/ground-to-space.md`](docs/ground-to-space.md)**
+
+The planetary/orbital/space layer — nested reference frames (focusing a planet = a
+change of basis), sim-LOD vs. render-LOD, the orbital ephemeris, the ship flight model
+with the **Lambert ↔ brachistochrone trajectory spectrum**, Clohessy–Wiltshire orbital
+combat, and the construction → mobility → combat loop where one physics model generates
+the strategy.
 
 ## Status
 
