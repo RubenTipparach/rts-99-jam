@@ -1,0 +1,13 @@
+[package]
+name = "protocol"
+description = "Command and message types shared by sim, net, and replay. The only thing the network carries."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+math = { path = "../math" }
+
+[lints.rust]
+unsafe_code = "forbid"
