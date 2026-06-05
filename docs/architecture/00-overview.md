@@ -84,7 +84,8 @@ in tests.
 - **"Fix Your Timestep!" (Gaffer on Games)** — the fixed-update + interpolation
   loop in [ARCHITECTURE.md §4](../../ARCHITECTURE.md).
 - **Recast/Detour** — navmesh generation; we port the *ideas*, not the C++.
-- **ORCA / RVO2** — reciprocal collision avoidance; reimplemented in fixed-point.
+- **ORCA / RVO2** — reciprocal collision avoidance; **our chosen local-avoidance
+  algorithm**, reimplemented in fixed-point ([Ch.07 §5](07-pathfinding-navigation.md)).
 
 ## Non-goals (initially)
 

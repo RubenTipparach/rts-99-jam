@@ -25,7 +25,7 @@ The design is documented in full:
   | 04 | [Rendering (wgpu)](docs/architecture/04-rendering-wgpu.md) | Instancing, vertex/clustered lighting, scale |
   | 05 | [Animation](docs/architecture/05-animation.md) | Baked bone textures at crowd scale |
   | 06 | [Particles](docs/architecture/06-particles.md) | GPU-driven, cosmetic |
-  | 07 | [Pathfinding](docs/architecture/07-pathfinding-navigation.md) | Flow fields, HPA*, RVO, spherical |
+  | 07 | [Pathfinding](docs/architecture/07-pathfinding-navigation.md) | Flow fields, HPA*, ORCA, spherical |
   | 08 | [Procedural Generation](docs/architecture/08-procedural-generation.md) | Deterministic large maps |
   | 09 | [AI Bots](docs/architecture/09-ai-bots.md) | "AI is a player," built alongside |
   | 10 | [Roadmap & Testing](docs/architecture/10-roadmap-testing.md) | Milestones, determinism CI, tooling |

@@ -83,7 +83,7 @@ rts-99-jam/
 │   ├── math        # fixed-point scalar/vec/quat + deterministic trig (CORDIC/LUT)
 │   ├── sim         # deterministic core: world state, systems, step(). NO I/O.
 │   ├── protocol    # Command/Message types, wire format, versioning (serde)
-│   ├── pathfind    # flow fields, hierarchical A*, navmesh, RVO avoidance
+│   ├── pathfind    # flow fields, hierarchical A*, navmesh, ORCA avoidance
 │   ├── worldgen    # deterministic procedural maps (flat + spherical)
 │   ├── ai          # Commander trait + bot brains (run inside sim)
 │   ├── net         # transport (WebRTC/WS/QUIC) + lockstep turn coordinator
@@ -266,7 +266,7 @@ core of "AI is a player." See [AI Bots](docs/architecture/09-ai-bots.md).
 | Serialization | `serde` + `bincode` (protocol), `rkyv` (assets, zero-copy) | Compact commands; fast asset loads |
 | Assets | `gltf`, `image` | Standard model/animation/texture pipeline |
 | ECS | custom **SoA arena** in `sim` (deterministic), optional `hecs` for render scene | Determinism needs controlled iteration order |
-| Pathfinding | flow fields + hierarchical A* + RVO (all fixed-point) | RTS-scale group movement; PA-style spherical option |
+| Pathfinding | flow fields + hierarchical A* + ORCA (all fixed-point) | RTS-scale group movement; PA-style spherical option |
 | Parallelism | `rayon` in presentation/asset/particle prep; sim single-threaded first, then *deterministic* data-parallelism | Determinism forbids naive threading in sim |
 | Profiling | `tracing` + **Tracy** (`tracing-tracy`), `puffin` | Frame + tick profiling |
 

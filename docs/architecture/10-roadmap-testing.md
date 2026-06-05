@@ -23,7 +23,7 @@ graph LR
     M4 --> M5
     M5 --> M6["M6 GPU particles + FX"]
     M5 --> M7["M7 Worldgen (flat -> spherical)"]
-    M5 --> M8["M8 RVO avoidance, formations, AI tactics/strategy"]
+    M5 --> M8["M8 ORCA avoidance, formations, AI tactics/strategy"]
     M6 --> M9["M9 Replays, spectating, reconnection, polish"]
     M7 --> M9
     M8 --> M9
@@ -43,7 +43,7 @@ graph LR
 | **M5** | Scale | GPU cull + indirect draws; LOD; baked-animation atlas ([Ch.05](05-animation.md)); clustered+vertex lighting ([Ch.04 §4](04-rendering-wgpu.md)) | **1000+ animated, lit units at 120–160 FPS** |
 | **M6** | Juice | GPU particle system + effect library ([Ch.06](06-particles.md)); dynamic lights from FX | Explosions/muzzle flashes/smoke at scale, within frame budget |
 | **M7** | Worlds | Deterministic worldgen, flat then spherical ([Ch.08](08-procedural-generation.md)); `map_hash` handshake | Seed → identical playable map on all peers; spherical `Topology` works |
-| **M8** | Smart & smooth | RVO avoidance + formations ([Ch.07 §5](07-pathfinding-navigation.md)); AI operational + strategic layers + influence maps ([Ch.09 §4](09-ai-bots.md)) | Crowds don't clump; bots macro, expand, and attack competently |
+| **M8** | Smart & smooth | ORCA avoidance + formations ([Ch.07 §5](07-pathfinding-navigation.md)); AI operational + strategic layers + influence maps ([Ch.09 §4](09-ai-bots.md)) | Crowds don't clump; bots macro, expand, and attack competently |
 | **M9** | Ship-shape | Replays, spectating, reconnection ([Ch.03 §3,§6](03-networking-lockstep.md)); UI/HUD; audio; settings | Record/watch matches; rejoin after drop; polished build |
 
 > M3 and M4 can proceed in parallel after M2 (different crates, both built on the

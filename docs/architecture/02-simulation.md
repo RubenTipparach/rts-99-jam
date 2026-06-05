@@ -78,7 +78,7 @@ impl World {
         systems::sensing(self);       // target acquisition (uses grid)
         systems::pathing(self);       // flow-field sampling (Ch.07)
         systems::movement(self);      // integrate velocity (fixed-point)
-        systems::avoidance(self);     // RVO local avoidance (Ch.07)
+        systems::avoidance(self);     // ORCA local avoidance (Ch.07)
         systems::combat(self);        // damage, projectiles
         systems::death(self);         // resolve deaths, free entities
         self.grid.rebuild(self);      // maintain broadphase

@@ -19,14 +19,14 @@ graph TD
     A["1. Long-range plan: Hierarchical A* on a coarse sector graph<br/>(per group, infrequent)"] --> B
     B["2. Group movement: Flow field toward the goal<br/>(computed once, sampled by every unit -- O(1)/unit)"] --> C
     C["3. Local steering: follow the field + seek waypoint"] --> D
-    D["4. Collision avoidance: RVO/ORCA among neighbors<br/>(spatial grid, Ch.02 §4)"] --> E
+    D["4. Collision avoidance: ORCA among neighbors<br/>(spatial grid, Ch.02 §4)"] --> E
     E["Final fixed-point velocity -> movement integration (Ch.02)"]
     classDef sim fill:#3d2c1e,stroke:#d99a4a,color:#fff;
     class A,B,C,D,E sim;
 ```
 
 Each layer handles what it's good at: A* finds the *route*, flow fields make
-*following it* free per unit, steering + RVO keep units apart. This is what makes
+*following it* free per unit, steering + ORCA keep units apart. This is what makes
 1000 units pathing feasible inside the tick budget ([Ch.02 §6](02-simulation.md)).
 
 ## 2. The terrain abstraction: `Topology` (flat **or** spherical)
@@ -108,20 +108,54 @@ graph LR
     flow --> sample["Each unit: 1 lookup -> desired dir"]
 ```
 
-## 5. Layer 4 — Local collision avoidance
+## 5. Layer 4 — Local collision avoidance (ORCA)
 
 Flow fields route the *group*; units still must not pile up or interpenetrate.
-**Reciprocal Velocity Obstacles (RVO/ORCA)**, reimplemented in fixed-point:
+The chosen algorithm is **ORCA** (Optimal Reciprocal Collision Avoidance) —
+the modern, analytic member of the **velocity-obstacle** family (VO → RVO →
+ORCA), reimplemented in fixed-point. We pick ORCA over its predecessor **RVO**
+because it solves avoidance with a cheap **linear program** instead of velocity
+*sampling*, giving smoother motion, lower per-agent cost, and — crucially for
+RTS crowds — a graceful fallback when a unit is too boxed-in to be fully safe.
 
-- Each unit considers neighbors from the **spatial grid** ([Ch.02 §4](02-simulation.md))
-  — neighbors gathered and **sorted by `EntityId`** for determinism.
-- Compute a velocity that makes progress along the flow direction while avoiding
-  collisions, each unit assuming others share responsibility (reciprocal) → no
-  oscillation, smooth crowds.
-- For very dense blobs, fall back to simpler **boids-style steering** (separation
-  + flow-follow) which is cheaper; RVO for important/expensive units.
-- **Unit-vs-static** (buildings, cliffs): the flow field already encodes
-  impassability; a short look-ahead prevents corner-cutting.
+**How it works**, per unit, per tick:
+
+1. Gather neighbors from the **spatial grid** ([Ch.02 §4](02-simulation.md)),
+   **sorted by `EntityId`** for determinism.
+2. For each neighbor, derive one **half-plane** of permitted velocities (the set
+   that stays collision-free for a time horizon τ, with each unit taking its
+   share of the avoidance — reciprocity, so no oscillation).
+3. The allowed velocities are the **intersection of those half-planes** clipped
+   to the unit's max-speed disc; pick the one closest to the flow-field's desired
+   velocity via a **2D linear program**. If the region is empty (too dense to be
+   safe), a **3D-LP fallback** returns the least-bad (minimum-penetration)
+   velocity — so a unit never deadlocks for lack of any solution.
+
+**Determinism notes** (these matter more than the algorithm choice —
+[Ch.01](01-determinism.md)):
+
+- All geometry — distances, normals, `sqrt`, the LP — runs through the
+  fixed-point + CORDIC math in `math` ([Ch.01 §2](01-determinism.md)). No floats.
+- The textbook LP randomizes constraint order for expected-time performance.
+  **That randomization is a desync.** Process constraints in a **fixed order**
+  (neighbors sorted by `EntityId`); accept the slightly worse worst case for full
+  determinism ([Ch.01 §4](01-determinism.md)).
+
+**Responsibility weighting.** ORCA's default 50/50 split generalizes to `α·u`:
+
+- **unit-vs-unit** → 50/50 (each dodges half).
+- **unit-vs-static** (buildings, cliffs) → the unit takes 100% (`α=1`); the
+  obstacle never moves. In practice most statics are already baked into the flow
+  field's impassability, so a short look-ahead to prevent corner-cutting usually
+  suffices and ORCA mainly handles unit-vs-unit.
+
+**Density hybrid.** ORCA assumes holonomic discs that change velocity instantly;
+real units have turn rates and can get "shy" and stall in very dense packs. So:
+**ORCA for sparse-to-moderate density and important/expensive units, a cheaper
+boids-style separation/push for dense blobs**, with the **flow field always
+supplying the goal direction** so a stalled agent still gets nudged along instead
+of deadlocking. (Units with turn limits get a kinematic clamp on top of the ORCA
+result.)
 
 > All avoidance math is fixed-point and order-stable — a desync here would be as
 > fatal as one in combat ([Ch.01](01-determinism.md)).
@@ -160,7 +194,7 @@ sequenceDiagram
     H->>F: ensure flow field per sector toward dest
     loop every tick
         U->>F: sample direction at my cell (O(1))
-        U->>U: steer + RVO avoidance (grid neighbors)
+        U->>U: steer + ORCA avoidance (grid neighbors)
         U->>U: integrate fixed-point velocity (Ch.02)
     end
 ```
