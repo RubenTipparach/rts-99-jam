@@ -1,0 +1,4 @@
+# Trunk config for the web build. The Pages base path (`--public-url /rts-99-jam/`)
+# is passed by the deploy workflow so local `trunk serve` stays at the root.
+[build]
+target = "index.html"

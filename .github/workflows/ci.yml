@@ -46,5 +46,5 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup target add wasm32-unknown-unknown
-      - name: Build deterministic core for wasm32
-        run: cargo build -p math -p protocol -p sim -p replay --target wasm32-unknown-unknown
+      - name: Build core + client for wasm32
+        run: cargo build -p math -p protocol -p sim -p replay -p client --target wasm32-unknown-unknown

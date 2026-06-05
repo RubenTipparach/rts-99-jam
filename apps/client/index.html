@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>rts-99-jam — Sol Dominion (M1)</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #05080f; overflow: hidden; }
+      body { display: flex; align-items: center; justify-content: center; }
+      canvas { display: block; box-shadow: 0 0 48px #0a1530; }
+      #overlay {
+        position: fixed; top: 10px; left: 12px; z-index: 10; pointer-events: none;
+        color: #9bbce6; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        text-shadow: 0 1px 2px #000;
+      }
+      #overlay b { color: #ffb454; }
+    </style>
+    <link data-trunk rel="rust" />
+  </head>
+  <body>
+    <div id="overlay"><b>rts-99-jam</b> · M1 — 600-unit deterministic sim · wgpu + WASM</div>
+  </body>
+</html>

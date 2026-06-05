@@ -5,3 +5,6 @@
 # Editor / OS cruft
 .DS_Store
 *.swp
+
+# Web build output
+dist/

@@ -9,6 +9,7 @@ members = [
     "crates/sim",
     "crates/replay",
     "crates/testkit",
+    "apps/client",
 ]
 
 [workspace.package]
