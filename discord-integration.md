@@ -82,10 +82,9 @@ http://localhost:8080/auth/discord/callback
 
 ## 3. Give the server the secrets
 
-The server is configured entirely through environment variables — this is the
-contract, regardless of where it's hosted. Set the secret ones with
-`fly secrets set`; non-secret config (like `DATABASE_PATH`) can live in
-`fly.toml`.
+The server is configured through the environment variables below — set them with
+`fly secrets set`. There's nothing else to configure: the SQLite file lives at a
+built-in default path on the mounted Fly Volume (see below).
 
 | Variable | Required for | Why it's needed / where it comes from |
 |---|---|---|
@@ -95,7 +94,6 @@ contract, regardless of where it's hosted. Set the secret ones with
 | `DISCORD_GUILD_ID` | Guild-gated features | ID of your bot's server (§2a). Optional. |
 | `ADMIN_DISCORD_ID` | Admin portal | Your Discord **user** ID — unlocks the admin dashboard for that account. Developer Mode → right-click your name → Copy User ID. |
 | `FLY_API_TOKEN` | CI auto-deploy | Deploy token for the GitHub Actions workflow that pushes to Fly. Lives in **GitHub repo secrets**, not `fly secrets`. Create with `fly tokens create deploy`. |
-| `DATABASE_PATH` | Persisting users / matches / stats | Path to the SQLite file on a Fly **Volume**, e.g. `/data/sol.db`. Plain env var in `fly.toml`, **not a secret**. |
 | `DISCORD_REDIRECT_URI` | Sign-in (only if needed) | Usually **not set** — the server derives the callback URL. Add it only if OAuth fails behind the proxy (then use the exact §2c URL). |
 
 ### Why a database at all if we're on Fly?
@@ -109,8 +107,9 @@ high-frontier-fan-game:
 fly volumes create data --size 1
 ```
 
-Mount it at `/data` in `fly.toml` and set `DATABASE_PATH=/data/sol.db`. That's the
-whole story — no `DATABASE_URL`, no separate database service.
+Mount it at `/data` in `fly.toml`; the server opens its SQLite file there by
+default. That's the whole story — nothing to configure: no `DATABASE_URL`, no
+`DATABASE_PATH`, no separate database service.
 
 ### Sign-in needs no signing secret
 
@@ -132,9 +131,9 @@ fly secrets set \
   ADMIN_DISCORD_ID=YOUR_DISCORD_USER_ID
 ```
 
-`DATABASE_PATH` goes in `fly.toml` (it isn't a secret). `FLY_API_TOKEN` is a
-**GitHub** repo secret for the deploy workflow (`fly tokens create deploy`), not
-something you set with `fly secrets`.
+The database needs no config — the server opens SQLite on the mounted volume by
+default. `FLY_API_TOKEN` is a **GitHub** repo secret for the deploy workflow
+(`fly tokens create deploy`), not something you set with `fly secrets`.
 
 > ⚠️ Never paste real tokens/secrets into the repo, a commit, or chat. They live
 > only in `fly secrets` (production) and your local `.env` (git-ignored). The repo
@@ -147,16 +146,15 @@ something you set with `fly secrets`.
 DISCORD_CLIENT_ID=...
 DISCORD_CLIENT_SECRET=...
 ADMIN_DISCORD_ID=YOUR_DISCORD_USER_ID
-DATABASE_PATH=./sol-dev.db
 # DISCORD_REDIRECT_URI=http://localhost:8080/auth/discord/callback  # only if auto-detect fails
 
 cargo run -p server      # apps/server (axum); reads the vars above
 ```
 
-Features light up progressively as variables become available: with just
-`DATABASE_PATH` the server runs and serves the lobby; add the `DISCORD_CLIENT_*`
-pair to enable sign-in; add `ADMIN_DISCORD_ID` to unlock the admin portal; add
-`DISCORD_BOT_TOKEN` for DMs/presence.
+Features light up progressively as variables become available: with **no** env
+vars the server runs and serves the lobby on its default SQLite file; add the
+`DISCORD_CLIENT_*` pair to enable sign-in; add `ADMIN_DISCORD_ID` to unlock the
+admin portal; add `DISCORD_BOT_TOKEN` for DMs/presence.
 
 ---
 
@@ -236,7 +234,7 @@ webhook URL as a secret.
 | `invalid_client` | Wrong/rotated `DISCORD_CLIENT_SECRET`; reset it in the portal and re-set the Fly secret. |
 | Sign-in works locally but not on Fly | Set `DISCORD_REDIRECT_URI` explicitly — Fly's proxy host differs from the public URL. |
 | Admin menu missing | Your `discord_id` doesn't match `ADMIN_DISCORD_ID` (check for stray spaces), or you're not signed in. |
-| Stats reset after deploy | You're writing SQLite to the container, not the Volume — point `DATABASE_PATH` at the mounted `/data`. |
+| Stats reset after deploy | SQLite is writing to the container, not the Volume — make sure the Fly Volume is mounted at the path the server uses (`/data`) in `fly.toml`. |
 | Bot can't DM a player | The player hasn't linked Discord / opted in, or shares no mutual context — fall back to the channel webhook. |
 | Nothing happens on login | `DISCORD_CLIENT_ID`/`SECRET` not set; check server logs at startup for which features are enabled. |
 
