@@ -6,7 +6,7 @@
 > (no Bevy).
 
 This is the top-level map. Each requirement from the brief has a dedicated chapter
-under [`docs/architecture/`](docs/architecture/). Read the overview first; it
+under [`docs/architecture/`](architecture/). Read the overview first; it
 establishes the two invariants that every other chapter depends on.
 
 ---
@@ -47,10 +47,10 @@ next_state = step(current_state, commands_for_this_tick)
   `commands` and a seeded PRNG that lives *inside* the state.
 - The network therefore transports **only commands** (a few bytes each), never
   unit positions. This is what makes 1000s of units affordable online and what
-  makes replays a 1 KB file. See [Networking](docs/architecture/03-networking-lockstep.md).
+  makes replays a 1 KB file. See [Networking](architecture/03-networking-lockstep.md).
 
 These two invariants are the reason a lockstep RTS can exist at all. Chapter
-[01 — Determinism](docs/architecture/01-determinism.md) is the rulebook that keeps
+[01 — Determinism](architecture/01-determinism.md) is the rulebook that keeps
 them true.
 
 ---
@@ -203,7 +203,7 @@ Why this shape:
   interpolated frames per tick — smooth motion without simulating more often.
 - **Latency hiding**: commands issued now execute `INPUT_DELAY` ticks later, so
   remote commands arrive "just in time." See
-  [Networking](docs/architecture/03-networking-lockstep.md).
+  [Networking](architecture/03-networking-lockstep.md).
 
 ---
 
@@ -229,7 +229,7 @@ sequenceDiagram
 ```
 
 Note that AI and human input enter at the **same point** (`CommandBuffer`) — the
-core of "AI is a player." See [AI Bots](docs/architecture/09-ai-bots.md).
+core of "AI is a player." See [AI Bots](architecture/09-ai-bots.md).
 
 ---
 
@@ -237,17 +237,17 @@ core of "AI is a player." See [AI Bots](docs/architecture/09-ai-bots.md).
 
 | # | Chapter | Covers (from the brief) |
 |---|---------|--------------------------|
-| 00 | [Overview](docs/architecture/00-overview.md) | Vision, glossary, references, reading order |
-| 01 | [Determinism](docs/architecture/01-determinism.md) | The foundation: fixed-point, RNG, ordering, checksums, pitfalls |
-| 02 | [Simulation & data model](docs/architecture/02-simulation.md) | "Lots of units 100s–1000s", ECS/SoA, scheduling |
-| 03 | [Networking & lockstep](docs/architecture/03-networking-lockstep.md) | "Multiplayer (WebRTC/WS, P2P + server assist)", replays |
-| 04 | [Rendering (wgpu)](docs/architecture/04-rendering-wgpu.md) | "3D model, shaders", "vertex lighting", high frame rate, scale |
-| 05 | [Animation](docs/architecture/05-animation.md) | "Animations" at crowd scale |
-| 06 | [Particles](docs/architecture/06-particles.md) | "Particles" (GPU-driven, cosmetic) |
-| 07 | [Pathfinding & navigation](docs/architecture/07-pathfinding-navigation.md) | "Spherical A*, navmesh, terrain nav, collision avoidance" |
-| 08 | [Procedural generation](docs/architecture/08-procedural-generation.md) | "Large maps", "procedural map generation" |
-| 09 | [AI bots](docs/architecture/09-ai-bots.md) | "AI bot support (build alongside everything)" |
-| 10 | [Roadmap, testing & tooling](docs/architecture/10-roadmap-testing.md) | Milestones, determinism CI, profiling |
+| 00 | [Overview](architecture/00-overview.md) | Vision, glossary, references, reading order |
+| 01 | [Determinism](architecture/01-determinism.md) | The foundation: fixed-point, RNG, ordering, checksums, pitfalls |
+| 02 | [Simulation & data model](architecture/02-simulation.md) | "Lots of units 100s–1000s", ECS/SoA, scheduling |
+| 03 | [Networking & lockstep](architecture/03-networking-lockstep.md) | "Multiplayer (WebRTC/WS, P2P + server assist)", replays |
+| 04 | [Rendering (wgpu)](architecture/04-rendering-wgpu.md) | "3D model, shaders", "vertex lighting", high frame rate, scale |
+| 05 | [Animation](architecture/05-animation.md) | "Animations" at crowd scale |
+| 06 | [Particles](architecture/06-particles.md) | "Particles" (GPU-driven, cosmetic) |
+| 07 | [Pathfinding & navigation](architecture/07-pathfinding-navigation.md) | "Spherical A*, navmesh, terrain nav, collision avoidance" |
+| 08 | [Procedural generation](architecture/08-procedural-generation.md) | "Large maps", "procedural map generation" |
+| 09 | [AI bots](architecture/09-ai-bots.md) | "AI bot support (build alongside everything)" |
+| 10 | [Roadmap, testing & tooling](architecture/10-roadmap-testing.md) | Milestones, determinism CI, profiling |
 
 ---
 
@@ -283,7 +283,7 @@ branches; pick to prune.
    (Planetary Annihilation) is supported via a `Topology` abstraction in
    `pathfind`/`worldgen`. Confirm whether spherical is *the* mode or an option.
    ("Spherical A*" in the brief suggests at least an option — see
-   [Ch.07](docs/architecture/07-pathfinding-navigation.md).)
+   [Ch.07](architecture/07-pathfinding-navigation.md).)
 2. **Web/WASM as a first-class target?** If yes, WebRTC is mandatory and a few
    render features tighten to the WebGPU subset. If native-only, QUIC simplifies
    networking. Default assumption: **both**.
@@ -294,14 +294,14 @@ branches; pick to prune.
    which is also the cheapest path to 1000s of units at 144 FPS. Confirm if you
    instead want full PBR per-pixel (more cost, fewer units).
 
-None of these block starting at [Milestone 0](docs/architecture/10-roadmap-testing.md):
+None of these block starting at [Milestone 0](architecture/10-roadmap-testing.md):
 the deterministic core, math, and test harness are identical under every branch.
 
 ---
 
 ## 9. Where to start building
 
-Follow the [roadmap](docs/architecture/10-roadmap-testing.md). Milestone 0 is the
+Follow the [roadmap](architecture/10-roadmap-testing.md). Milestone 0 is the
 keystone: **prove determinism before writing a single shader.** A headless `sim`
 that runs a recorded command log to an identical state hash on two operating
 systems is the foundation the entire engine stands on.

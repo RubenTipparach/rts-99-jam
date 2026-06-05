@@ -1,6 +1,6 @@
 # 08 — Procedural Map Generation (large maps)
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: Pathfinding](07-pathfinding-navigation.md) · [Next: AI Bots](09-ai-bots.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Pathfinding](07-pathfinding-navigation.md) · [Next: AI Bots](09-ai-bots.md)
 
 > Brief: *large maps, procedural map generation.* The map is part of the initial
 > simulation state, so generation must be **deterministic**: every peer generates

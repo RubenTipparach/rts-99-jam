@@ -18,7 +18,7 @@ first-class AI bots.
 
 The design is documented in full:
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** — start here: the two invariants, the
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — start here: the two invariants, the
   dual-clock game loop, the crate workspace, and the chapter index.
 - **[docs/architecture/](docs/architecture/)** — one chapter per concern:
 
@@ -45,7 +45,7 @@ renderer **interpolates** between sim states at 120–160 FPS. Scale comes from 
 instancing + indirect culling (rendering) and flow-field pathing + spatial hashing
 (simulation). **AI bots emit the same commands a human does**, run deterministically
 in-sim at no network cost, and double as the automated test harness. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for how these fit together.
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) for how these fit together.
 
 ## Status
 

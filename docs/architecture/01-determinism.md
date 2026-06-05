@@ -1,6 +1,6 @@
 # 01 — Determinism: The Foundation
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: Overview](00-overview.md) · [Next: Simulation](02-simulation.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Overview](00-overview.md) · [Next: Simulation](02-simulation.md)
 
 > If the simulation is not bit-for-bit identical on every machine, lockstep
 > multiplayer cannot work, replays cannot work, and desyncs become unfixable.
@@ -238,7 +238,7 @@ single-player for months. Guardrails:
    (At minimum, a CI grep that fails on `f32`/`f64`/`HashMap`/`thread_rng`/
    `Instant::now` in those crates.)
 2. **Architecture test** (`testkit`): assert the forbidden dependency edges from
-   [ARCHITECTURE.md §3](../../ARCHITECTURE.md) (`sim` must not depend on
+   [ARCHITECTURE.md §3](../ARCHITECTURE.md) (`sim` must not depend on
    `render`/`wgpu`/`winit`/`net`).
 3. **Cross-platform replay test in CI**: run a fixed command log through the
    headless sim on Linux, Windows, macOS, and `wasm32` → assert identical final

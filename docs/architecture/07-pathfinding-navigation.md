@@ -1,6 +1,6 @@
 # 07 — Pathfinding, Navigation & Collision Avoidance
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: Particles](06-particles.md) · [Next: Worldgen](08-procedural-generation.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Particles](06-particles.md) · [Next: Worldgen](08-procedural-generation.md)
 
 > Brief: *advanced spherical A*, navmesh navigation, or some way to navigate
 > terrain; collision avoidance — for 100s–1000s of units.* This is pure
@@ -67,7 +67,7 @@ graph LR
     end
 ```
 
-> This is **Open Decision #1** ([ARCHITECTURE.md §8](../../ARCHITECTURE.md)). Flat
+> This is **Open Decision #1** ([ARCHITECTURE.md §8](../ARCHITECTURE.md)). Flat
 > is the default; spherical is a drop-in `Topology`. Because everything above the
 > trait is shape-agnostic, choosing later is cheap.
 

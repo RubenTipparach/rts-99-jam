@@ -243,7 +243,7 @@ webhook URL as a secret.
 ## Code map (for maintainers)
 
 This maps onto the planned services layer (see
-[`docs/architecture/`](docs/architecture/) and `ARCHITECTURE.md`):
+[`docs/architecture/`](architecture/) and `ARCHITECTURE.md`):
 
 | Location | Responsibility |
 |---|---|
