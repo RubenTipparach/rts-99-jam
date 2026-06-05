@@ -1,23 +1,26 @@
 name: deploy
 
-# Build the web client and publish it to GitHub Pages on every merge to main.
+# Build the web client and publish it to GitHub Pages on a push to ANY branch
+# (matches the working setup in RubenTipparach/sea-of-lost-souls). The most recent
+# push wins the site root. Uses peaceiris to push the built bundle to the
+# `gh-pages` branch — this works from any branch, unlike actions/deploy-pages,
+# which is pinned to the `github-pages` environment / default branch.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   workflow_dispatch:
 
+# peaceiris needs to push the built site to the gh-pages branch.
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
-# Let an in-progress deploy finish rather than cancelling it.
+# Serialize deploys so concurrent pushes don't race on the gh-pages branch.
 concurrency:
-  group: pages
+  group: gh-pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,19 +35,10 @@ jobs:
             | tar -xzf - -C "$HOME/.cargo/bin" trunk
           trunk --version
       - name: Build web bundle
-        # public-url must match the project Pages sub-path: <user>.github.io/rts-99-jam/
         run: cd apps/client && trunk build --release --public-url /rts-99-jam/
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: apps/client/dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: apps/client/dist
+          force_orphan: true
