@@ -141,6 +141,38 @@ Ships are **patched conics** ([Wikipedia](https://en.wikipedia.org/wiki/Patched_
 
 High thrust is what makes all the simplifications valid: burns are short relative to orbit periods, so impulsive/continuous-thrust approximations hold.
 
+### 5.1 The trajectory is real, not an animation
+
+The curved path a ship follows is **actual simulated motion in the deterministic core**, not a cosmetic spline. Each ship carries `(position, velocity)` advanced every sim tick by one of two real-motion modes:
+
+- **Coasting** → **analytic Kepler propagation** around the SOI body (§4). An exact conic — a genuine curved orbit, zero integration cost, zero drift.
+- **Thrusting** (transfer/combat) → **fixed-point numerical integration** of `thrust + dominant-body gravity` per tick (semi-implicit Euler). The path curves because gravity is *in the loop*; the §6.2 guidance law steers thrust toward the planned arrival and self-corrects for it.
+
+This is affordable for exactly the reason ground units aren't integrated this way: **ships are few** (a dozen, not thousands). Because the motion is real and deterministic, the trajectory *is* gameplay:
+
+- you can **intercept** a ship mid-transfer — its future position is real and predictable;
+- **fuel actually depletes** along the flown path (rocket equation on the real burn), so an under-fuelled ship falls short or ends on the wrong orbit — a real consequence, not a scripted outcome;
+- **weapon range envelopes** read from the true relative geometry;
+- every client computes the identical path (fixed-point lockstep), so it's authoritative, not client-side eye-candy.
+
+> **What "animation" actually refers to:** only the *cosmetic dressing* on top of the
+> real path — the visible 180° **flip** at the brachistochrone midpoint, the engine
+> plume (bevy_hanabi) firing on accel/decel and dark during coast, radiator glow on
+> hot burns. Orientation = the sim's thrust vector; these visuals are interpolated at
+> 120–160 fps and drive nothing. The *drift* you want lives in the trajectory, not here.
+
+### 5.2 Where the drift reads
+
+Trajectory **shape becomes readable information**, because the physics — not an artist — draws it:
+
+- **Efficient (Lambert) transfers** trace long, obvious **Kepler ellipses** (mostly coast) → "this ship is saving fuel / arriving late."
+- **Brachistochrone torch runs** are comparatively **direct** (high thrust overpowers gravity over a short transit) → "this ship is burning hard / arriving fast." That contrast is honest *and* a gameplay tell.
+- **Departure and arrival always curve** — spiralling out of the origin well, capturing into the destination orbit.
+- **Combat always drifts** (Clohessy–Wiltshire, §7).
+- In the **system view**, even a torch run curves in inertial space because both endpoint planets are moving; in the **local view** you see the departure/capture spirals and the combat drift.
+
+A **KSP-style predicted-path overlay** (projected arc + flip point + the orbit it will capture into) is then just a *visualization of the real planned trajectory* — it shows where the ship will actually be, which is what sells "we're making actual transfers."
+
 ---
 
 ## 6. The trajectory spectrum: Lambert ↔ brachistochrone
@@ -157,9 +189,9 @@ High thrust is what makes all the simplifications valid: burns are short relativ
 
 That the brachistochrone is genuinely the *minimum-time* trajectory is not a hand-wave: under constant available thrust, Pontryagin's principle gives a **bang-bang** optimal control — max thrust throughout with a single direction switch (the flip) ([trajectory optimization](https://en.wikipedia.org/wiki/Trajectory_optimization)). Between the two endpoints lies a continuum of **burn–coast–burn** profiles; spending more Δv shortens the trip, smoothly interpolating from Lambert toward brachistochrone.
 
-### 6.1 Closed-form brachistochrone (the fast, deterministic path)
+### 6.1 Closed-form brachistochrone (the planner's *estimate*)
 
-Because thrust ≫ gravity, ignore gravity *during cruise* (charge gravity-well escape/capture as Δv overheads at the endpoints). For a rest-to-rest hop over distance `d` at acceleration `a = F/m`:
+These closed forms are the **planner's estimate** — used for the UI, the AI, and to set the guidance target — *not* the flown path (that is the real integrated trajectory of §5.1). Because thrust ≫ gravity, the estimate ignores gravity and charges gravity-well escape/capture as Δv overheads at the endpoints; the flown path keeps gravity and its guidance closes the gap. For a rest-to-rest hop over distance `d` at acceleration `a = F/m`:
 
 ```
 t_flip = √(d / a)          T = 2·√(d / a)
