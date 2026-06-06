@@ -1,9 +1,9 @@
 # 10 — Roadmap, Testing & Tooling
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: AI Bots](09-ai-bots.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: AI Bots](09-ai-bots.md)
 
 > How to build it in an order that keeps the two invariants
-> ([ARCHITECTURE.md §1](../../ARCHITECTURE.md)) verifiable at every step, and the
+> ([ARCHITECTURE.md §1](../ARCHITECTURE.md)) verifiable at every step, and the
 > tooling that keeps determinism from rotting.
 
 ## 1. Guiding principle: prove determinism before pixels
@@ -37,7 +37,7 @@ graph LR
 |---|---|---|---|
 | **M0** | Deterministic core | Cargo workspace; `math` (fixed-point + CORDIC, [Ch.01 §2](01-determinism.md)); `DetRng`; SoA `World` skeleton ([Ch.02](02-simulation.md)); state hashing; headless runner + replay-log format ([Ch.03 §6](03-networking-lockstep.md)) | Same command log → **identical state hash on Linux/Windows/macOS/WASM** in CI |
 | **M1** | See something | `render` + `winit` window; terrain mesh; RTS camera; instanced cubes for units ([Ch.04](04-rendering-wgpu.md)) | Camera flies over a terrain with placeholder unit instances at 144 FPS |
-| **M2** | It's a game (local) | `Command`/`Commander` ([Ch.09 §1](09-ai-bots.md)); select + move; flow-field pathing ([Ch.07 §4](07-pathfinding-navigation.md)); **interpolated** rendering ([ARCHITECTURE.md §4](../../ARCHITECTURE.md)) | Select units, right-click, they path there smoothly; sim at 25 Hz, render at 144 |
+| **M2** | It's a game (local) | `Command`/`Commander` ([Ch.09 §1](09-ai-bots.md)); select + move; flow-field pathing ([Ch.07 §4](07-pathfinding-navigation.md)); **interpolated** rendering ([ARCHITECTURE.md §4](../ARCHITECTURE.md)) | Select units, right-click, they path there smoothly; sim at 25 Hz, render at 144 |
 | **M3** | Multiplayer | `net` + `relay`: loopback lockstep → 2 peers over WebRTC; input delay; desync detection ([Ch.03](03-networking-lockstep.md)) | Two clients play in sync; injecting a float trips the desync detector |
 | **M4** | AI + test harness | `BotCommander` v0; **headless bot-vs-bot** as the perf/determinism harness ([Ch.09 §6](09-ai-bots.md)) | Bots play a full match headlessly; runs feed determinism + perf CI |
 | **M5** | Scale | GPU cull + indirect draws; LOD; baked-animation atlas ([Ch.05](05-animation.md)); clustered+vertex lighting ([Ch.04 §4](04-rendering-wgpu.md)) | **1000+ animated, lit units at 120–160 FPS** |

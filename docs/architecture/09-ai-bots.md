@@ -1,6 +1,6 @@
 # 09 — AI Bots (built alongside everything)
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: Worldgen](08-procedural-generation.md) · [Next: Roadmap](10-roadmap-testing.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Worldgen](08-procedural-generation.md) · [Next: Roadmap](10-roadmap-testing.md)
 
 > Brief: *AI bot support — build this alongside all other features.* The
 > architecture makes that natural: **an AI bot is a player.** It produces the same
@@ -12,7 +12,7 @@
 
 Human input and AI are two implementations of one interface. Nothing downstream
 can tell them apart — both just emit commands into the buffer the game loop drains
-([ARCHITECTURE.md §4–5](../../ARCHITECTURE.md)).
+([ARCHITECTURE.md §4–5](../ARCHITECTURE.md)).
 
 ```rust
 // crates/ai — the same seam human input uses (Ch.03 §7).

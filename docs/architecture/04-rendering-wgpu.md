@@ -1,9 +1,9 @@
 # 04 — Rendering with wgpu (3D models, shaders, lighting, scale)
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: Networking](03-networking-lockstep.md) · [Next: Animation](05-animation.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Networking](03-networking-lockstep.md) · [Next: Animation](05-animation.md)
 
 > Brief: *3D models, shaders, lots of vertex lighting, 100s–1000s of units,
-> 120–160 FPS.* The renderer is pure **presentation** ([ARCHITECTURE.md §1](../../ARCHITECTURE.md)):
+> 120–160 FPS.* The renderer is pure **presentation** ([ARCHITECTURE.md §1](../ARCHITECTURE.md)):
 > it reads interpolated snapshots from the sim, uses `f32`/`glam` freely, and
 > never writes back. wgpu gives us Vulkan/Metal/DX12/WebGPU from one WGSL codebase.
 
@@ -174,7 +174,7 @@ fn vs_main(v: VertexIn, @builtin(instance_index) i: u32) -> VsOut {
 ## 7. The wall, restated (it matters here)
 
 The renderer **only reads** the two latest sim snapshots and interpolates with
-`alpha` ([ARCHITECTURE.md §4](../../ARCHITECTURE.md)):
+`alpha` ([ARCHITECTURE.md §4](../ARCHITECTURE.md)):
 
 - Positions/facings: lerp / `slerp` between `prev` and `curr` (`f32`, fine).
 - Anything the renderer computes — interpolation, culling, particle motion,

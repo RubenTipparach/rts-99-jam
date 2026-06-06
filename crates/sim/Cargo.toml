@@ -1,0 +1,14 @@
+[package]
+name = "sim"
+description = "Deterministic simulation core: world state, systems, step(). No I/O, rendering, or networking."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+math = { path = "../math" }
+protocol = { path = "../protocol" }
+
+[lints.rust]
+unsafe_code = "forbid"

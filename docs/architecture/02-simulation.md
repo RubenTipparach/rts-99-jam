@@ -1,6 +1,6 @@
 # 02 — Simulation & Data Model (100s–1000s of units)
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: Determinism](01-determinism.md) · [Next: Networking](03-networking-lockstep.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Determinism](01-determinism.md) · [Next: Networking](03-networking-lockstep.md)
 
 > The `sim` crate is the deterministic heart from [Ch.01](01-determinism.md). It
 > holds all game truth, advances one tick at a time, and must comfortably push
@@ -178,7 +178,7 @@ graph LR
 The renderer needs to draw smoothly at 144 FPS between 25 Hz ticks. The sim
 exposes a **read-only snapshot** of the columns the renderer needs (position,
 facing, anim state, team, type). Two snapshots — `prev` and `curr` — are kept;
-the renderer interpolates ([ARCHITECTURE.md §4](../../ARCHITECTURE.md)).
+the renderer interpolates ([ARCHITECTURE.md §4](../ARCHITECTURE.md)).
 
 - The snapshot is a **copy or a frozen view**; rendering must not mutate it.
 - Convert fixed-point → `f32` *here*, at the wall, exactly once per visible unit

@@ -1,6 +1,6 @@
 # 00 — Overview, Glossary & References
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md)
 
 ## Vision
 
@@ -49,7 +49,7 @@ in tests.
 
 - **Building the engine?** 01 → 02 → 03 → 07 → 04 → the rest, following the
   [roadmap](10-roadmap-testing.md).
-- **Reviewing the design?** Read this, then [ARCHITECTURE.md §1–4](../../ARCHITECTURE.md),
+- **Reviewing the design?** Read this, then [ARCHITECTURE.md §1–4](../ARCHITECTURE.md),
   then the chapter for your area of concern.
 - **Just want the netcode?** [03](03-networking-lockstep.md), but read
   [01](01-determinism.md) first or none of it will make sense.
@@ -82,7 +82,7 @@ in tests.
 - **GGPO / rollback netcode** — the alternative to lockstep; great for fighting
   games, the wrong tool for crowd-scale RTS (see [03](03-networking-lockstep.md)).
 - **"Fix Your Timestep!" (Gaffer on Games)** — the fixed-update + interpolation
-  loop in [ARCHITECTURE.md §4](../../ARCHITECTURE.md).
+  loop in [ARCHITECTURE.md §4](../ARCHITECTURE.md).
 - **Recast/Detour** — navmesh generation; we port the *ideas*, not the C++.
 - **ORCA / RVO2** — reciprocal collision avoidance; **our chosen local-avoidance
   algorithm**, reimplemented in fixed-point ([Ch.07 §5](07-pathfinding-navigation.md)).

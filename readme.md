@@ -18,7 +18,7 @@ first-class AI bots.
 
 The design is documented in full:
 
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** — start here: the two invariants, the
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — start here: the two invariants, the
   dual-clock game loop, the crate workspace, and the chapter index.
 - **[docs/architecture/](docs/architecture/)** — one chapter per concern:
 
@@ -45,10 +45,25 @@ renderer **interpolates** between sim states at 120–160 FPS. Scale comes from 
 instancing + indirect culling (rendering) and flow-field pathing + spatial hashing
 (simulation). **AI bots emit the same commands a human does**, run deterministically
 in-sim at no network cost, and double as the automated test harness. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for how these fit together.
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) for how these fit together.
 
 ## Status
 
-Design phase. Implementation follows the
-[roadmap](docs/architecture/10-roadmap-testing.md), starting with **Milestone 0:
-prove determinism before writing a single shader.**
+**Milestone 0 — deterministic core (in progress).** The foundation is built and
+tested: a Cargo workspace with dependency-free, integer-only crates —
+`math` (fixed-point scalar/vector), `protocol` (commands), `sim` (generational-arena
+SoA world + pinned RNG + FNV state hash + `step()`), `replay`, and a `testkit`
+headless harness. The keystone determinism test pins a cross-platform state hash,
+and CI enforces fmt, clippy (`-D warnings`), the no-floats guard, and a `wasm32`
+build. Next milestones follow the
+[roadmap](docs/architecture/10-roadmap-testing.md).
+
+## Building
+
+```bash
+cargo test --workspace                      # unit + determinism tests
+cargo run -p testkit --bin demo_hash        # prints the pinned state hash
+```
+
+The simulation crates (`math`, `sim`, `protocol`, `replay`) are `#![forbid(unsafe_code)]`,
+float-free, and build for native and `wasm32-unknown-unknown`.

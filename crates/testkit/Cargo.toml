@@ -1,0 +1,16 @@
+[package]
+name = "testkit"
+description = "Headless runner and determinism harness: runs command logs through the sim and checks state hashes."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+math = { path = "../math" }
+protocol = { path = "../protocol" }
+sim = { path = "../sim" }
+replay = { path = "../replay" }
+
+[lints.rust]
+unsafe_code = "forbid"

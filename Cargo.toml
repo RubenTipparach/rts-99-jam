@@ -1,0 +1,25 @@
+# Deterministic-lockstep RTS — Cargo workspace.
+# Milestone 0: the deterministic core. NO rendering, networking, or external deps
+# here — see docs/architecture/01-determinism.md and docs/architecture/10-roadmap-testing.md.
+[workspace]
+resolver = "2"
+members = [
+    "crates/math",
+    "crates/protocol",
+    "crates/sim",
+    "crates/replay",
+    "crates/testkit",
+    "apps/client",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/RubenTipparach/rts-99-jam"
+
+# Release profile tuned for the simulation: overflow checks ON even in release,
+# because a silent wrap in fixed-point math would be a (deterministic but wrong)
+# gameplay bug we want to catch. Determinism is unaffected either way.
+[profile.release]
+overflow-checks = true

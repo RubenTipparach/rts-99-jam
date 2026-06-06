@@ -1,6 +1,6 @@
 # 05 — Animation (at crowd scale)
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: Rendering](04-rendering-wgpu.md) · [Next: Particles](06-particles.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Rendering](04-rendering-wgpu.md) · [Next: Particles](06-particles.md)
 
 > Brief: *animations.* The challenge is animating **1000s of units** at 144 FPS.
 > Animation is **presentation-only** ([Ch.01](01-determinism.md)): the sim says

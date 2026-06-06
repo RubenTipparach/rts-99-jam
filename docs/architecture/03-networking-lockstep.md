@@ -1,6 +1,6 @@
 # 03 — Networking & Lockstep Multiplayer
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: Simulation](02-simulation.md) · [Next: Rendering](04-rendering-wgpu.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Simulation](02-simulation.md) · [Next: Rendering](04-rendering-wgpu.md)
 
 > Brief: *"multiplayer (WebRTC/ws? peer to peer with server assist)."* This chapter
 > answers it: **deterministic lockstep**, commands-only over **WebRTC data
@@ -33,7 +33,7 @@ expensive at RTS scale, and our state is huge to snapshot per frame. Lockstep's
 only downside — input latency — is hidden by input delay and is acceptable for
 RTS (you're commanding armies, not frame-counting parries).
 
-> This is **Open Decision #3** in [ARCHITECTURE.md §8](../../ARCHITECTURE.md). The
+> This is **Open Decision #3** in [ARCHITECTURE.md §8](../ARCHITECTURE.md). The
 > design below assumes lockstep.
 
 ## 2. The lockstep turn model
@@ -83,7 +83,7 @@ pub trait Lockstep {
 - **Stall**: if a peer's commands for the next tick haven't arrived, the sim
   **cannot advance** — that's the lockstep contract. The loop renders the last
   good state and shows the classic *"Waiting for players…"* overlay (rendering
-  keeps running because it's on a separate clock — [ARCHITECTURE.md §4](../../ARCHITECTURE.md)).
+  keeps running because it's on a separate clock — [ARCHITECTURE.md §4](../ARCHITECTURE.md)).
 - **Lag spikes**: input delay absorbs small ones; adaptive delay handles
   sustained latency without permanent input lag.
 - **Drop**: after a timeout, the relay declares a peer dropped, the remaining
@@ -113,7 +113,7 @@ The brief asks "WebRTC/ws?". Here's the call and the reasoning.
   "WebRTC/ws?".
 - **Signaling → WebSocket** to the relay (SDP/ICE exchange to establish WebRTC).
 - **QUIC** is offered as a native-only fast path if web support is dropped
-  (Open Decision #2, [ARCHITECTURE.md §8](../../ARCHITECTURE.md)).
+  (Open Decision #2, [ARCHITECTURE.md §8](../ARCHITECTURE.md)).
 - Commands are tiny, so head-of-line blocking on the reliable channel is a
   non-issue at our message rate.
 

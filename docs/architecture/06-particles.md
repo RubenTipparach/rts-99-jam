@@ -1,6 +1,6 @@
 # 06 — Particles (GPU-driven, cosmetic)
 
-[← Back to ARCHITECTURE.md](../../ARCHITECTURE.md) · [Prev: Animation](05-animation.md) · [Next: Pathfinding](07-pathfinding-navigation.md)
+[← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Animation](05-animation.md) · [Next: Pathfinding](07-pathfinding-navigation.md)
 
 > Brief: *particles.* Explosions, muzzle flashes, smoke, dust, ability VFX, weather.
 > **Particles are 100% presentation** ([Ch.01](01-determinism.md)) — they run on
@@ -88,7 +88,7 @@ This keeps VFX in the hands of artists/designers, not code.
 
 - **No readback into sim.** The particle buffers are GPU-only; nothing is read
   back to the CPU for gameplay. (Enforced by the wall — `render` can't touch sim
-  state, [ARCHITECTURE.md §3](../../ARCHITECTURE.md).)
+  state, [ARCHITECTURE.md §3](../ARCHITECTURE.md).)
 - **Cosmetic RNG only**: jitter uses the presentation RNG, never `DetRng`
   ([Ch.01 §3](01-determinism.md)).
 - **Budgeted pools**: a hard cap on live particles with graceful degradation

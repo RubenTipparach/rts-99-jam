@@ -1,0 +1,50 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt · clippy · test · determinism guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable + rustfmt + clippy)
+        run: |
+          rustup toolchain install 1.94.1 --profile minimal
+          rustup default 1.94.1
+          rustup component add rustfmt clippy
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy (warnings denied)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+      - name: Determinism guard
+        # The deterministic crates must contain no floating point or
+        # non-deterministic constructs (docs/architecture/01-determinism.md §8).
+        run: |
+          if grep -rnE '\b(f32|f64)\b|HashMap|HashSet|Instant|SystemTime|thread_rng' \
+               crates/math/src crates/sim/src crates/protocol/src crates/replay/src; then
+            echo "::error::forbidden non-deterministic construct found in a deterministic crate"
+            exit 1
+          fi
+          echo "determinism guard: clean"
+
+  wasm:
+    name: build core for web (wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable + wasm32 target)
+        run: |
+          rustup toolchain install 1.94.1 --profile minimal
+          rustup default 1.94.1
+          rustup target add wasm32-unknown-unknown
+      - name: Build core + client for wasm32
+        run: cargo build -p math -p protocol -p sim -p replay -p client --target wasm32-unknown-unknown
