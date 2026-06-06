@@ -149,11 +149,9 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                     }
-                    MouseButton::Right => {
-                        if state == ElementState::Pressed {
-                            if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                                self.game.order(wx, wz);
-                            }
+                    MouseButton::Right if state == ElementState::Pressed => {
+                        if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
+                            self.game.order(wx, wz);
                         }
                     }
                     _ => {}
