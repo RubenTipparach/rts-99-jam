@@ -211,9 +211,9 @@ impl Game {
             .map(|s| {
                 let (wx, wz) = self.lerped(s);
                 let r = if s.kind == Kind::Barracks {
-                    125.0
+                    62.5
                 } else {
-                    90.0
+                    45.0
                 };
                 (wx, wz, r)
             })
