@@ -6,8 +6,29 @@
     <title>Sol Dominion — rts-99-jam</title>
     <style>
       html, body { margin: 0; height: 100%; width: 100%; overflow: hidden; background: #070b14; }
-      canvas { display: block; }
+      canvas { display: block; touch-action: none; }
       #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+      /* Mobile test controls — DOM is allowed ONLY here, so a developer can drive
+         desktop interactions (pan / zoom / right-click) from a touch device.
+         All real game UI lives in WASM. Hidden unless the pointer is coarse. */
+      #mobile { display: none; position: fixed; inset: 0; z-index: 15; pointer-events: none; }
+      @media (pointer: coarse) { #mobile { display: block; } }
+      #mobile button {
+        position: absolute; pointer-events: auto; touch-action: none; user-select: none;
+        width: 56px; height: 56px; border-radius: 12px;
+        border: 1px solid rgba(150, 180, 220, 0.4); background: rgba(12, 20, 38, 0.55);
+        color: #cfe0ff; font: 600 20px/1 ui-monospace, Menlo, Consolas, monospace;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #mobile button:active { background: rgba(40, 70, 120, 0.85); }
+      #mobile #rc-toggle.on { background: #c8553a; color: #fff; border-color: #ffd9a0; }
+      #pan-up    { left: 76px;  bottom: 152px; }
+      #pan-down  { left: 76px;  bottom: 24px;  }
+      #pan-left  { left: 14px;  bottom: 88px;  }
+      #pan-right { left: 138px; bottom: 88px;  }
+      #zoom-in   { right: 18px; bottom: 152px; }
+      #zoom-out  { right: 18px; bottom: 88px;  }
+      #rc-toggle { right: 86px; bottom: 88px; width: 64px; font-size: 15px; }
       /* Loading screen shown until the first frame renders. */
       #loading {
         position: fixed; inset: 0; z-index: 20;
@@ -26,6 +47,15 @@
   </head>
   <body>
     <canvas id="hud"></canvas>
+    <div id="mobile">
+      <button id="pan-up" aria-label="pan up">▲</button>
+      <button id="pan-left" aria-label="pan left">◀</button>
+      <button id="pan-right" aria-label="pan right">▶</button>
+      <button id="pan-down" aria-label="pan down">▼</button>
+      <button id="zoom-in" aria-label="zoom in">＋</button>
+      <button id="zoom-out" aria-label="zoom out">－</button>
+      <button id="rc-toggle" aria-label="right-click mode">RMB</button>
+    </div>
     <div id="loading">
       <div class="title">SOL DOMINION</div>
       <div class="sub">DEPLOYING FORCES…</div>

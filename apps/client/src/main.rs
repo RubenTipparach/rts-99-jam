@@ -24,6 +24,118 @@ enum UserEvent {
     GfxReady(Gfx),
 }
 
+/// Mobile **test** controls (web only).
+///
+/// DOM is allowed only for these — they let a developer drive desktop
+/// interactions (pan / zoom / right-click) from a touch device. The buttons are
+/// bare elements in `index.html`; all behavior is wired here. State lives in a
+/// thread-local the app reads each frame; everything else stays in WASM.
+#[cfg(target_arch = "wasm32")]
+mod mobile {
+    use std::cell::Cell;
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+
+    #[derive(Clone, Copy)]
+    pub struct Controls {
+        pub up: bool,
+        pub down: bool,
+        pub left: bool,
+        pub right: bool,
+        pub zoom: i32,     // +1 = zoom in, -1 = out, 0 = idle
+        pub rc_mode: bool, // when set, a tap issues a move/attack order
+    }
+
+    thread_local! {
+        static STATE: Cell<Controls> = const {
+            Cell::new(Controls {
+                up: false, down: false, left: false, right: false, zoom: 0, rc_mode: false,
+            })
+        };
+    }
+
+    pub fn snapshot() -> Controls {
+        STATE.with(|s| s.get())
+    }
+    fn update(f: impl FnOnce(&mut Controls)) {
+        STATE.with(|s| {
+            let mut c = s.get();
+            f(&mut c);
+            s.set(c);
+        });
+    }
+
+    fn element(id: &str) -> Option<web_sys::Element> {
+        web_sys::window()?.document()?.get_element_by_id(id)
+    }
+
+    /// A button that holds a flag while pressed.
+    fn hold(id: &str, set: fn(&mut Controls, bool)) {
+        let Some(el) = element(id) else { return };
+        let down = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+            e.prevent_default();
+            update(|c| set(c, true));
+        });
+        let up = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+            e.prevent_default();
+            update(|c| set(c, false));
+        });
+        let _ = el.add_event_listener_with_callback("pointerdown", down.as_ref().unchecked_ref());
+        for ev in ["pointerup", "pointerleave", "pointercancel"] {
+            let _ = el.add_event_listener_with_callback(ev, up.as_ref().unchecked_ref());
+        }
+        down.forget();
+        up.forget();
+    }
+
+    /// A button that drives the zoom direction while pressed.
+    fn hold_zoom(id: &str, dir: i32) {
+        let Some(el) = element(id) else { return };
+        let down = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+            e.prevent_default();
+            update(|c| c.zoom = dir);
+        });
+        let up = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+            e.prevent_default();
+            update(|c| c.zoom = 0);
+        });
+        let _ = el.add_event_listener_with_callback("pointerdown", down.as_ref().unchecked_ref());
+        for ev in ["pointerup", "pointerleave", "pointercancel"] {
+            let _ = el.add_event_listener_with_callback(ev, up.as_ref().unchecked_ref());
+        }
+        down.forget();
+        up.forget();
+    }
+
+    /// The right-click mode toggle (taps become orders); reflects state via a class.
+    fn toggle_rc(id: &str) {
+        let Some(el) = element(id) else { return };
+        let btn = el.clone();
+        let cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+            e.prevent_default();
+            let mut on = false;
+            update(|c| {
+                c.rc_mode = !c.rc_mode;
+                on = c.rc_mode;
+            });
+            let _ = btn.class_list().toggle_with_force("on", on);
+        });
+        let _ = el.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
+        cb.forget();
+    }
+
+    /// Wire up the (already-present) DOM test buttons. Safe to call once.
+    pub fn install() {
+        hold("pan-up", |c, v| c.up = v);
+        hold("pan-down", |c, v| c.down = v);
+        hold("pan-left", |c, v| c.left = v);
+        hold("pan-right", |c, v| c.right = v);
+        hold_zoom("zoom-in", 1);
+        hold_zoom("zoom-out", -1);
+        toggle_rc("rc-toggle");
+    }
+}
+
 /// Browser window inner size in CSS pixels (web only).
 #[cfg(target_arch = "wasm32")]
 fn browser_size() -> Option<(u32, u32)> {
@@ -118,6 +230,8 @@ impl ApplicationHandler<UserEvent> for App {
             let _ = window.request_inner_size(winit::dpi::LogicalSize::new(bw as f64, bh as f64));
             self.last_css = (bw, bh);
         }
+        #[cfg(target_arch = "wasm32")]
+        mobile::install();
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -205,6 +319,42 @@ impl ApplicationHandler<UserEvent> for App {
                 };
                 self.camera.zoom(units);
             }
+            // Touch drives the same select/order path as the mouse, so a phone
+            // (with the DOM test buttons) can exercise desktop interactions.
+            WindowEvent::Touch(touch) => {
+                use winit::event::TouchPhase;
+                let (cx, cy) = (touch.location.x as f32, touch.location.y as f32);
+                self.input.cursor = (cx, cy);
+                self.input.cursor_in = true;
+                match touch.phase {
+                    TouchPhase::Started => self.input.left_press = Some((cx, cy)),
+                    TouchPhase::Moved => {}
+                    TouchPhase::Cancelled => self.input.left_press = None,
+                    TouchPhase::Ended => {
+                        if let Some((px, py)) = self.input.left_press.take() {
+                            let (w, h) = self.dims();
+                            #[cfg(target_arch = "wasm32")]
+                            let rc = mobile::snapshot().rc_mode;
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let rc = false;
+                            if rc {
+                                if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
+                                    self.game.order(wx, wz);
+                                }
+                            } else if (px - cx).hypot(py - cy) < 8.0 {
+                                if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
+                                    self.game.select_single(wx, wz);
+                                }
+                            } else if let (Some(a), Some(b)) = (
+                                self.camera.ground_pick(px, py, w, h),
+                                self.camera.ground_pick(cx, cy, w, h),
+                            ) {
+                                self.game.select_box(a.0, a.1, b.0, b.1);
+                            }
+                        }
+                    }
+                }
+            }
             WindowEvent::RedrawRequested => {
                 // Keep the canvas matched to the browser window (web).
                 #[cfg(target_arch = "wasm32")]
@@ -241,6 +391,16 @@ impl ApplicationHandler<UserEvent> for App {
                         } else if cy >= sh - EDGE {
                             fwd -= 1.0;
                         }
+                    }
+                }
+                // Mobile test controls: d-pad pan + held zoom.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let m = mobile::snapshot();
+                    fwd += (m.up as i32 - m.down as i32) as f32;
+                    right += (m.right as i32 - m.left as i32) as f32;
+                    if m.zoom != 0 {
+                        self.camera.zoom(m.zoom as f32 * 0.15);
                     }
                 }
                 if fwd != 0.0 || right != 0.0 {
