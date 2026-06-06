@@ -223,6 +223,22 @@ impl App {
             false
         }
     }
+
+    /// If the point is on the minimap, recenter the camera there and report the
+    /// click consumed (web HUD only).
+    #[cfg(target_arch = "wasm32")]
+    fn minimap_jump(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
+        let (x0, y0, x1, y1) = hud::minimap_rect(w, h);
+        if x1 <= x0 || y1 <= y0 || cx < x0 || cx > x1 || cy < y0 || cy > y1 {
+            return false;
+        }
+        let nx = ((cx - x0) / (x1 - x0)).clamp(0.0, 1.0);
+        let nz = ((cy - y0) / (y1 - y0)).clamp(0.0, 1.0);
+        let wx = nx * 2.0 * terrain::HALF - terrain::HALF;
+        let wz = nz * 2.0 * terrain::HALF - terrain::HALF;
+        self.camera.look_at(wx, wz);
+        true
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -303,6 +319,8 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
                         KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
                         KeyCode::KeyT if down => self.game.train_selected(),
+                        KeyCode::Digit1 if down => self.game.toggle_fog_unexplored(),
+                        KeyCode::Digit2 if down => self.game.toggle_fog_explored(),
                         _ => {}
                     }
                 }
@@ -314,7 +332,8 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
                             #[cfg(target_arch = "wasm32")]
-                            let consumed = self.train_button_hit(cx, cy, w, h);
+                            let consumed = self.train_button_hit(cx, cy, w, h)
+                                || self.minimap_jump(cx, cy, w, h);
                             #[cfg(not(target_arch = "wasm32"))]
                             let consumed = false;
                             if !consumed {
@@ -365,7 +384,7 @@ impl ApplicationHandler<UserEvent> for App {
                         let pressed = self.input.left_press.take();
                         let (w, h) = self.dims();
                         #[cfg(target_arch = "wasm32")]
-                        if self.train_button_hit(cx, cy, w, h) {
+                        if self.train_button_hit(cx, cy, w, h) || self.minimap_jump(cx, cy, w, h) {
                             return;
                         }
                         if let Some((px, py)) = pressed {

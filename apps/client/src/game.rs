@@ -59,6 +59,9 @@ pub struct Game {
     pending: Vec<Command>,
     visible: Vec<bool>,
     explored: Vec<bool>,
+    /// Debug toggles: darken unexplored / explored areas (both on by default).
+    fog_unexplored: bool,
+    fog_explored: bool,
 }
 
 impl Default for Game {
@@ -116,6 +119,8 @@ impl Game {
             pending: setup,
             visible: vec![false; FOW_RES * FOW_RES],
             explored: vec![false; FOW_RES * FOW_RES],
+            fog_unexplored: true,
+            fog_explored: true,
         };
         g.step_now();
         g.prev = g.curr.clone();
@@ -202,6 +207,18 @@ impl Game {
         }
     }
 
+    pub fn toggle_fog_unexplored(&mut self) {
+        self.fog_unexplored = !self.fog_unexplored;
+    }
+    pub fn toggle_fog_explored(&mut self) {
+        self.fog_explored = !self.fog_explored;
+    }
+    /// (unexplored fog on, explored fog on) — for the debug readout.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn fog_flags(&self) -> (bool, bool) {
+        (self.fog_unexplored, self.fog_explored)
+    }
+
     pub fn recompute_fow(&mut self) {
         for v in self.visible.iter_mut() {
             *v = false;
@@ -227,14 +244,16 @@ impl Game {
     /// (Units don't read this — they're shown/hidden outright via `revealed`.)
     pub fn fow_bytes(&self) -> Vec<u8> {
         let n = FOW_RES;
+        let explored_v = if self.fog_explored { 0.45 } else { 1.0 };
+        let unexplored_v = if self.fog_unexplored { 0.0 } else { 1.0 };
         let mut field = vec![0f32; n * n];
         for (i, v) in field.iter_mut().enumerate() {
             *v = if self.visible[i] {
                 1.0
             } else if self.explored[i] {
-                0.45
+                explored_v
             } else {
-                0.0
+                unexplored_v
             };
         }
         let r = 2i32;
@@ -257,6 +276,32 @@ impl Game {
         };
         let blurred = blur(&blur(&field, true), false);
         blurred.iter().map(|v| (v * 255.0) as u8).collect()
+    }
+
+    /// Fog brightness at normalized map coords (0..1) for the minimap: visible
+    /// bright, explored dim, unexplored dark (respecting the debug toggles).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn fog_brightness(&self, nx: f32, nz: f32) -> f32 {
+        let res = FOW_RES as i32;
+        let xc = (nx * res as f32) as i32;
+        let zc = (nz * res as f32) as i32;
+        if xc < 0 || zc < 0 || xc >= res || zc >= res {
+            return if self.fog_unexplored { 0.12 } else { 1.0 };
+        }
+        let i = (zc * res + xc) as usize;
+        if self.visible[i] {
+            1.0
+        } else if self.explored[i] {
+            if self.fog_explored {
+                0.5
+            } else {
+                1.0
+            }
+        } else if self.fog_unexplored {
+            0.12
+        } else {
+            1.0
+        }
     }
 
     fn cell_visible(&self, wx: f32, wz: f32) -> bool {

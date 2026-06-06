@@ -35,6 +35,97 @@ pub fn train_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
     )
 }
 
+/// Minimap rect in physical pixels `(x0, y0, x1, y1)`, for click-to-jump.
+#[cfg(target_arch = "wasm32")]
+pub fn minimap_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
+    let d = dpr();
+    let (w, h) = (w_phys / d, h_phys / d);
+    let bar = 96.0_f32;
+    let mm = bar - 16.0;
+    let mx = w - mm - 12.0;
+    let my = h - bar + 8.0;
+    (mx * d, my * d, (mx + mm) * d, (my + mm) * d)
+}
+
+// Cached terrain thumbnail for the minimap (built once; terrain is static).
+#[cfg(target_arch = "wasm32")]
+const MINI_N: usize = 96;
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static MINI_TERRAIN: std::cell::OnceCell<Vec<[u8; 3]>> = const { std::cell::OnceCell::new() };
+}
+#[cfg(target_arch = "wasm32")]
+fn mini_color(h: f32) -> [u8; 3] {
+    let sea = crate::terrain::SEA_LEVEL;
+    if h < sea {
+        let d = ((sea - h) / 10.0).clamp(0.0, 1.0);
+        let s = 1.0 - d * 0.45;
+        [(30.0 * s) as u8, (74.0 * s) as u8, (116.0 * s) as u8]
+    } else if h < 2.5 {
+        [176, 166, 120]
+    } else if h < 18.0 {
+        let g = (h / 18.0).clamp(0.0, 1.0);
+        [
+            (74.0 - 22.0 * g) as u8,
+            (112.0 - 34.0 * g) as u8,
+            (58.0 - 16.0 * g) as u8,
+        ]
+    } else {
+        [120, 116, 110]
+    }
+}
+#[cfg(target_arch = "wasm32")]
+fn build_mini_terrain() -> Vec<[u8; 3]> {
+    let half = crate::terrain::HALF;
+    let mut out = vec![[0u8; 3]; MINI_N * MINI_N];
+    for iz in 0..MINI_N {
+        for ix in 0..MINI_N {
+            let x = -half + (ix as f32 + 0.5) / MINI_N as f32 * 2.0 * half;
+            let z = -half + (iz as f32 + 0.5) / MINI_N as f32 * 2.0 * half;
+            out[iz * MINI_N + ix] = mini_color(crate::terrain::height(x, z));
+        }
+    }
+    out
+}
+/// Composite the terrain thumbnail with fog into the minimap rect (device px).
+#[cfg(target_arch = "wasm32")]
+fn draw_minimap(
+    ctx: &web_sys::CanvasRenderingContext2d,
+    game: &Game,
+    dpr: f32,
+    mx: f64,
+    my: f64,
+    mm: f64,
+) {
+    let dev = (mm * dpr as f64).round().max(1.0) as usize;
+    let mut img = vec![0u8; dev * dev * 4];
+    MINI_TERRAIN.with(|c| {
+        let terr = c.get_or_init(build_mini_terrain);
+        for py in 0..dev {
+            for px in 0..dev {
+                let nx = (px as f32 + 0.5) / dev as f32;
+                let nz = (py as f32 + 0.5) / dev as f32;
+                let ix = ((nx * MINI_N as f32) as usize).min(MINI_N - 1);
+                let iz = ((nz * MINI_N as f32) as usize).min(MINI_N - 1);
+                let [r, g, b] = terr[iz * MINI_N + ix];
+                let bri = game.fog_brightness(nx, nz);
+                let o = (py * dev + px) * 4;
+                img[o] = (r as f32 * bri) as u8;
+                img[o + 1] = (g as f32 * bri) as u8;
+                img[o + 2] = (b as f32 * bri) as u8;
+                img[o + 3] = 255;
+            }
+        }
+    });
+    if let Ok(data) = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+        wasm_bindgen::Clamped(&img),
+        dev as u32,
+        dev as u32,
+    ) {
+        let _ = ctx.put_image_data(&data, (mx * dpr as f64).round(), (my * dpr as f64).round());
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn draw(_c: &Camera, _g: &Game, _w: f32, _h: f32, _drag: Option<(f32, f32, f32, f32)>) {}
 
@@ -139,6 +230,21 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
         hf - bar + 22.0,
     );
 
+    // Debug readout (toggled with number keys).
+    let (fog_u, fog_e) = game.fog_flags();
+    let on = |b: bool| if b { "on" } else { "OFF" };
+    ctx.set_fill_style_str("#7fd0a0");
+    ctx.set_font("12px monospace");
+    let _ = ctx.fill_text(
+        &format!(
+            "DEBUG   [1] unexplored fog: {}    [2] explored fog: {}    (click minimap to jump)",
+            on(fog_u),
+            on(fog_e)
+        ),
+        14.0,
+        44.0,
+    );
+
     // Production command card when one of your buildings is selected.
     if let Some((queued, frac)) = game.selected_production() {
         let (bx, by, bw, bh) = train_btn_css(h);
@@ -169,13 +275,13 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
         }
     }
 
-    // Minimap, bottom-right of the command bar.
+    // Minimap (terrain + fog), bottom-right of the command bar.
     let mm = bar - 16.0;
     let mx = wf - mm - 12.0;
     let my = hf - bar + 8.0;
-    ctx.set_fill_style_str("rgba(6,12,10,0.95)");
-    ctx.fill_rect(mx, my, mm, mm);
-    ctx.set_stroke_style_str("rgba(120,160,210,0.85)");
+    draw_minimap(&ctx, game, dpr, mx, my, mm);
+    ctx.set_stroke_style_str("rgba(120,160,210,0.95)");
+    ctx.set_line_width(1.5);
     ctx.stroke_rect(mx, my, mm, mm);
     let half = terrain::HALF as f64;
     for u in game.unit_infos() {

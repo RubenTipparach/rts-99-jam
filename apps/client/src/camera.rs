@@ -77,6 +77,14 @@ impl Camera {
         Some(((ndc.x * 0.5 + 0.5) * w, (1.0 - (ndc.y * 0.5 + 0.5)) * h))
     }
 
+    /// Recenter the camera on a world point (used by minimap clicks).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn look_at(&mut self, wx: f32, wz: f32) {
+        let lim = 560.0;
+        self.target.x = wx.clamp(-lim, lim);
+        self.target.y = wz.clamp(-lim, lim);
+    }
+
     pub fn zoom(&mut self, units: f32) {
         self.distance = (self.distance * (1.0 - units * 0.12)).clamp(40.0, 520.0);
     }
