@@ -302,11 +302,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
                                     self.game.select_single(wx, wz);
                                 }
-                            } else if let (Some(a), Some(b)) = (
-                                self.camera.ground_pick(px, py, w, h),
-                                self.camera.ground_pick(cx, cy, w, h),
-                            ) {
-                                self.game.select_box(a.0, a.1, b.0, b.1);
+                            } else {
+                                let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
+                                self.game.select_box_screen(&self.camera, w, h, rect);
                             }
                         }
                     }
@@ -357,11 +355,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
                                     self.game.select_single(wx, wz);
                                 }
-                            } else if let (Some(a), Some(b)) = (
-                                self.camera.ground_pick(px, py, w, h),
-                                self.camera.ground_pick(cx, cy, w, h),
-                            ) {
-                                self.game.select_box(a.0, a.1, b.0, b.1);
+                            } else {
+                                let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
+                                self.game.select_box_screen(&self.camera, w, h, rect);
                             }
                         }
                     }

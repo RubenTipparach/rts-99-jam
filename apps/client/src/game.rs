@@ -1,6 +1,7 @@
 //! Game glue: drives the deterministic sim, holds selection, turns input into
 //! commands, computes fog-of-war, and produces render + HUD data. Floats here.
 
+use crate::camera::Camera;
 use crate::gfx::{InstanceRaw, RingRaw, FOW_RES};
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
@@ -442,17 +443,24 @@ impl Game {
         }
     }
 
-    pub fn select_box(&mut self, ax: f32, az: f32, bx: f32, bz: f32) {
-        let (x0, x1) = (ax.min(bx), ax.max(bx));
-        let (z0, z1) = (az.min(bz), az.max(bz));
+    /// Box-select using the on-screen rectangle (pixel coordinates), matching
+    /// the drag preview exactly: each unit is projected to the screen and tested
+    /// against the rect. A world-space box would disagree with the preview under
+    /// the tilted camera (a screen rect maps to a ground trapezoid, not a box).
+    pub fn select_box_screen(&mut self, cam: &Camera, w: f32, h: f32, rect: (f32, f32, f32, f32)) {
+        let (x0, y0, x1, y1) = rect;
         self.selected.clear();
         for s in &self.curr {
             if s.owner != 0 || s.kind != Kind::Infantry {
                 continue;
             }
-            let (x, z) = (f(s.pos.x), f(s.pos.y));
-            if x >= x0 && x <= x1 && z >= z0 && z <= z1 {
-                self.selected.push(s.index);
+            let (wx, wz) = self.lerped(s);
+            // Same body point the preview projects (info().wy - 2.0).
+            let wy = terrain::height(wx, wz) + 1.4;
+            if let Some((sx, sy)) = cam.project(glam::Vec3::new(wx, wy, wz), w, h) {
+                if sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1 {
+                    self.selected.push(s.index);
+                }
             }
         }
     }

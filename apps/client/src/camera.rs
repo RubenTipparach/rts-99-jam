@@ -68,7 +68,6 @@ impl Camera {
         Some((hit.x, hit.z))
     }
 
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn project(&self, world: Vec3, w: f32, h: f32) -> Option<(f32, f32)> {
         let clip = self.mat(w / h) * world.extend(1.0);
         if clip.w <= 0.0001 {
