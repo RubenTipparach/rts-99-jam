@@ -22,6 +22,15 @@ pub struct RingRaw {
     pub color: [f32; 4],
 }
 
+/// One vertex of a selection-ring ground decal (tessellated each frame so it
+/// follows the terrain height).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct RingVertex {
+    pos: [f32; 3],
+    color: [f32; 4],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex3 {
@@ -49,7 +58,10 @@ struct CameraUniform {
 }
 
 pub const MAX_INSTANCES: usize = 8192;
-pub const MAX_RINGS: usize = 1024;
+pub const MAX_RINGS: usize = 256;
+/// Segments per selection-ring decal, and the resulting vertex-buffer capacity.
+const RING_SEGMENTS: usize = 40;
+const MAX_RING_VERTS: usize = MAX_RINGS * RING_SEGMENTS * 6;
 pub const FOW_RES: usize = 256;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -362,15 +374,33 @@ fn water_quad() -> [[f32; 3]; 6] {
     ]
 }
 
-fn ring_quad() -> [[f32; 2]; 6] {
-    [
-        [-1.0, -1.0],
-        [1.0, -1.0],
-        [1.0, 1.0],
-        [-1.0, -1.0],
-        [1.0, 1.0],
-        [-1.0, 1.0],
-    ]
+/// Tessellate selection rings into ground-decal triangles whose vertices sit a
+/// hair above the terrain, so the ring follows hills instead of clipping.
+fn ring_decals(rings: &[RingRaw]) -> Vec<RingVertex> {
+    let mut out = Vec::new();
+    for r in rings.iter().take(MAX_RINGS) {
+        let (cx, cz) = (r.center[0], r.center[2]);
+        let (r_in, r_out) = (r.radius * 0.82, r.radius);
+        let color = r.color;
+        let pt = |radius: f32, c: f32, s: f32| {
+            let (x, z) = (cx + c * radius, cz + s * radius);
+            [x, terrain::height(x, z) + 0.25, z]
+        };
+        let mut prev: Option<([f32; 3], [f32; 3])> = None;
+        for k in 0..=RING_SEGMENTS {
+            let a = k as f32 / RING_SEGMENTS as f32 * std::f32::consts::TAU;
+            let (s, c) = a.sin_cos();
+            let inner = pt(r_in, c, s);
+            let outer = pt(r_out, c, s);
+            if let Some((pi, po)) = prev {
+                for v in [pi, po, outer, pi, outer, inner] {
+                    out.push(RingVertex { pos: v, color });
+                }
+            }
+            prev = Some((inner, outer));
+        }
+    }
+    out
 }
 
 fn make_depth(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
@@ -456,7 +486,6 @@ pub struct Gfx {
     infantry_len: u32,
     barracks_buf: wgpu::Buffer,
     barracks_len: u32,
-    ring_quad_buf: wgpu::Buffer,
     instance_buf: wgpu::Buffer,
     ring_buf: wgpu::Buffer,
     camera_buf: wgpu::Buffer,
@@ -734,15 +763,10 @@ impl Gfx {
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4],
         };
-        let pos2 = wgpu::VertexBufferLayout {
-            array_stride: 8,
+        let ring_v = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<RingVertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x2],
-        };
-        let ring_inst = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<RingRaw>() as u64,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![1 => Float32x3, 2 => Float32, 3 => Float32x4],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
         };
 
         let mk = |label: &str,
@@ -807,7 +831,7 @@ impl Gfx {
             &pl_plain,
             "vs_ring",
             "fs_ring",
-            &[pos2, ring_inst],
+            std::slice::from_ref(&ring_v),
             &blend_t,
             &depth_blend,
         );
@@ -852,13 +876,6 @@ impl Gfx {
             bytemuck::cast_slice(&barracks),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let rq = ring_quad();
-        let ring_quad_buf = mkbuf(
-            "rq",
-            bytemuck::cast_slice(&rq),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
-
         let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instances"),
             size: (MAX_INSTANCES * std::mem::size_of::<InstanceRaw>()) as u64,
@@ -867,7 +884,7 @@ impl Gfx {
         });
         let ring_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rings"),
-            size: (MAX_RINGS * std::mem::size_of::<RingRaw>()) as u64,
+            size: (MAX_RING_VERTS * std::mem::size_of::<RingVertex>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -890,7 +907,6 @@ impl Gfx {
             infantry_len: infantry.len() as u32,
             barracks_buf,
             barracks_len: barracks.len() as u32,
-            ring_quad_buf,
             instance_buf,
             ring_buf,
             camera_buf,
@@ -933,7 +949,8 @@ impl Gfx {
         // barracks in [ni..ni+nb). Each mesh is drawn over its own range.
         let ni = infantry.len().min(MAX_INSTANCES);
         let nb = barracks.len().min(MAX_INSTANCES - ni);
-        let nr = rings.len().min(MAX_RINGS);
+        let ring_verts = ring_decals(rings);
+        let nrv = ring_verts.len().min(MAX_RING_VERTS);
         self.queue.write_buffer(
             &self.camera_buf,
             0,
@@ -977,9 +994,9 @@ impl Gfx {
                 bytemuck::cast_slice(&barracks[..nb]),
             );
         }
-        if nr > 0 {
+        if nrv > 0 {
             self.queue
-                .write_buffer(&self.ring_buf, 0, bytemuck::cast_slice(&rings[..nr]));
+                .write_buffer(&self.ring_buf, 0, bytemuck::cast_slice(&ring_verts[..nrv]));
         }
 
         let frame = match self.surface.get_current_texture() {
@@ -1052,11 +1069,10 @@ impl Gfx {
             pass.set_vertex_buffer(0, self.water_buf.slice(..));
             pass.draw(0..6, 0..1);
 
-            if nr > 0 {
+            if nrv > 0 {
                 pass.set_pipeline(&self.ring_pipeline);
-                pass.set_vertex_buffer(0, self.ring_quad_buf.slice(..));
-                pass.set_vertex_buffer(1, self.ring_buf.slice(..));
-                pass.draw(0..6, 0..nr as u32);
+                pass.set_vertex_buffer(0, self.ring_buf.slice(..));
+                pass.draw(0..nrv as u32, 0..1);
             }
         }
         self.queue.submit(std::iter::once(encoder.finish()));

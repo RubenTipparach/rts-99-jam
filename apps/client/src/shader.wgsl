@@ -129,32 +129,21 @@ fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
     return vec4<f32>(in.albedo * (0.45 + 0.7 * ndl), 1.0);
 }
 
-// ---------------- selection rings ----------------
+// ---------------- selection rings (ground decals) ----------------
+// Built CPU-side as an annulus whose vertices follow the terrain height, so the
+// ring hugs uneven ground instead of clipping through hills.
 struct RingOut {
     @builtin(position) clip: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) color: vec4<f32>,
+    @location(0) color: vec4<f32>,
 };
 @vertex
-fn vs_ring(
-    @location(0) quad: vec2<f32>,
-    @location(1) center: vec3<f32>,
-    @location(2) radius: f32,
-    @location(3) color: vec4<f32>,
-) -> RingOut {
+fn vs_ring(@location(0) pos: vec3<f32>, @location(1) color: vec4<f32>) -> RingOut {
     var o: RingOut;
-    let world = center + vec3<f32>(quad.x * radius, 0.1, quad.y * radius);
-    o.uv = quad;
     o.color = color;
-    o.clip = cam.view_proj * vec4<f32>(world, 1.0);
+    o.clip = cam.view_proj * vec4<f32>(pos, 1.0);
     return o;
 }
 @fragment
 fn fs_ring(in: RingOut) -> @location(0) vec4<f32> {
-    let r = length(in.uv);
-    let a = smoothstep(1.0, 0.92, r) * smoothstep(0.74, 0.85, r);
-    if (a < 0.02) {
-        discard;
-    }
-    return vec4<f32>(in.color.rgb, a * in.color.a);
+    return in.color;
 }
