@@ -1,36 +1,142 @@
-//! wgpu rendering state. Pure presentation: floats and GPU resources live here.
+//! wgpu rendering: a ground grid + instanced, vertex-lit unit cubes with depth.
+//! Pure presentation: floats and GPU resources live here.
 
 use std::sync::Arc;
 use winit::window::Window;
 
-/// Per-instance data uploaded to the GPU each frame (one unit = one instance).
+/// Per-instance data uploaded each frame (one unit = one cube).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceRaw {
-    pub offset: [f32; 2],
+    pub offset: [f32; 3],
     pub color: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CubeVertex {
+    pos: [f32; 3],
+    normal: [f32; 3],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    light_dir: [f32; 4],
 }
 
-// A unit quad, sized in world units, as two triangles.
-const Q: f32 = 0.6;
-const QUAD: [[f32; 2]; 6] = [[-Q, -Q], [Q, -Q], [Q, Q], [-Q, -Q], [Q, Q], [-Q, Q]];
+pub const MAX_INSTANCES: usize = 8192;
+const GROUND_HALF: f32 = 60.0;
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-/// The maximum number of unit instances the buffer can hold.
-pub const MAX_INSTANCES: usize = 4096;
+// A unit cube: footprint [-S,S] in x/z, standing from y=0 to y=2S so it sits on
+// the ground. 6 faces × 2 triangles, each vertex carrying a face normal.
+fn cube_vertices() -> Vec<CubeVertex> {
+    const S: f32 = 0.45;
+    let v = |x: f32, y: f32, z: f32| [x, y, z];
+    let faces: [([f32; 3], [[f32; 3]; 4]); 6] = [
+        (
+            [1.0, 0.0, 0.0],
+            [
+                v(S, 0.0, -S),
+                v(S, 0.0, S),
+                v(S, 2.0 * S, S),
+                v(S, 2.0 * S, -S),
+            ],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            [
+                v(-S, 0.0, S),
+                v(-S, 0.0, -S),
+                v(-S, 2.0 * S, -S),
+                v(-S, 2.0 * S, S),
+            ],
+        ),
+        (
+            [0.0, 1.0, 0.0],
+            [
+                v(-S, 2.0 * S, -S),
+                v(S, 2.0 * S, -S),
+                v(S, 2.0 * S, S),
+                v(-S, 2.0 * S, S),
+            ],
+        ),
+        (
+            [0.0, -1.0, 0.0],
+            [v(-S, 0.0, S), v(S, 0.0, S), v(S, 0.0, -S), v(-S, 0.0, -S)],
+        ),
+        (
+            [0.0, 0.0, 1.0],
+            [
+                v(S, 0.0, S),
+                v(-S, 0.0, S),
+                v(-S, 2.0 * S, S),
+                v(S, 2.0 * S, S),
+            ],
+        ),
+        (
+            [0.0, 0.0, -1.0],
+            [
+                v(-S, 0.0, -S),
+                v(S, 0.0, -S),
+                v(S, 2.0 * S, -S),
+                v(-S, 2.0 * S, -S),
+            ],
+        ),
+    ];
+    let mut out = Vec::with_capacity(36);
+    for (normal, q) in faces {
+        for i in [0usize, 1, 2, 0, 2, 3] {
+            out.push(CubeVertex { pos: q[i], normal });
+        }
+    }
+    out
+}
+
+fn ground_vertices() -> [[f32; 3]; 6] {
+    let g = GROUND_HALF;
+    [
+        [-g, 0.0, -g],
+        [g, 0.0, -g],
+        [g, 0.0, g],
+        [-g, 0.0, -g],
+        [g, 0.0, g],
+        [-g, 0.0, g],
+    ]
+}
+
+fn make_depth(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("depth"),
+            size: wgpu::Extent3d {
+                width: w.max(1),
+                height: h.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
+}
 
 pub struct Gfx {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    pipeline: wgpu::RenderPipeline,
-    quad_buf: wgpu::Buffer,
+    depth: wgpu::TextureView,
+    ground_pipeline: wgpu::RenderPipeline,
+    unit_pipeline: wgpu::RenderPipeline,
+    ground_buf: wgpu::Buffer,
+    cube_buf: wgpu::Buffer,
+    cube_len: u32,
     instance_buf: wgpu::Buffer,
     camera_buf: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
@@ -57,12 +163,9 @@ impl Gfx {
             })
             .await
             .expect("request adapter");
-
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("device"),
-                // WebGL2-compatible limits so the same build runs in browsers
-                // without WebGPU.
                 required_limits: wgpu::Limits::downlevel_webgl2_defaults()
                     .using_resolution(adapter.limits()),
                 ..Default::default()
@@ -88,6 +191,7 @@ impl Gfx {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
+        let depth = make_depth(&device, width, height);
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader"),
@@ -104,7 +208,7 @@ impl Gfx {
             label: Some("camera-layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -121,57 +225,98 @@ impl Gfx {
                 resource: camera_buf.as_entire_binding(),
             }],
         });
-
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pipeline-layout"),
             bind_group_layouts: &[Some(&camera_layout)],
             immediate_size: 0,
         });
 
-        let quad_layout = wgpu::VertexBufferLayout {
-            array_stride: 8,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x2],
-        };
-        let instance_layout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<InstanceRaw>() as u64,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32x4],
+        let depth_stencil = wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
         };
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("pipeline"),
+        // Ground pipeline: position-only vertices.
+        let ground_vb = wgpu::VertexBufferLayout {
+            array_stride: 12,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+        };
+        let ground_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ground"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[quad_layout, instance_layout],
+                entry_point: Some("vs_ground"),
+                buffers: &[ground_vb],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                entry_point: Some("fs_ground"),
+                targets: &[Some(format.into())],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(depth_stencil.clone()),
             multisample: wgpu::MultisampleState::default(),
             multiview_mask: None,
             cache: None,
         });
 
-        let quad_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("quad"),
-            size: std::mem::size_of_val(&QUAD) as u64,
+        // Unit pipeline: cube vertices (buffer 0) + per-instance data (buffer 1).
+        let cube_vb = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<CubeVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+        };
+        let inst_vb = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<InstanceRaw>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x4],
+        };
+        let unit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("units"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_unit"),
+                buffers: &[cube_vb, inst_vb],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_unit"),
+                targets: &[Some(format.into())],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(depth_stencil),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let ground = ground_vertices();
+        let ground_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ground"),
+            size: std::mem::size_of_val(&ground) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(&quad_buf, 0, bytemuck::cast_slice(&QUAD));
+        queue.write_buffer(&ground_buf, 0, bytemuck::cast_slice(&ground));
+
+        let cube = cube_vertices();
+        let cube_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("cube"),
+            size: std::mem::size_of_val(&cube[..]) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&cube_buf, 0, bytemuck::cast_slice(&cube));
 
         let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instances"),
@@ -185,8 +330,12 @@ impl Gfx {
             device,
             queue,
             config,
-            pipeline,
-            quad_buf,
+            depth,
+            ground_pipeline,
+            unit_pipeline,
+            ground_buf,
+            cube_buf,
+            cube_len: cube.len() as u32,
             instance_buf,
             camera_buf,
             camera_bind,
@@ -204,6 +353,7 @@ impl Gfx {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
+        self.depth = make_depth(&self.device, width, height);
     }
 
     pub fn aspect(&self) -> f32 {
@@ -215,7 +365,11 @@ impl Gfx {
         self.queue.write_buffer(
             &self.camera_buf,
             0,
-            bytemuck::bytes_of(&CameraUniform { view_proj }),
+            bytemuck::bytes_of(&CameraUniform {
+                view_proj,
+                // direction toward a high key light
+                light_dir: [0.4, 1.0, 0.3, 0.0],
+            }),
         );
         self.queue
             .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&instances[..n]));
@@ -243,25 +397,37 @@ impl Gfx {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.02,
-                            g: 0.03,
-                            b: 0.06,
+                            r: 0.015,
+                            g: 0.02,
+                            b: 0.04,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.camera_bind, &[]);
-            pass.set_vertex_buffer(0, self.quad_buf.slice(..));
+            // ground
+            pass.set_pipeline(&self.ground_pipeline);
+            pass.set_vertex_buffer(0, self.ground_buf.slice(..));
+            pass.draw(0..6, 0..1);
+            // units
+            pass.set_pipeline(&self.unit_pipeline);
+            pass.set_vertex_buffer(0, self.cube_buf.slice(..));
             pass.set_vertex_buffer(1, self.instance_buf.slice(..));
-            pass.draw(0..QUAD.len() as u32, 0..n as u32);
+            pass.draw(0..self.cube_len, 0..n as u32);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();

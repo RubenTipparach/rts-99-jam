@@ -150,24 +150,21 @@ impl Game {
         }
     }
 
-    /// Build the interpolated instance list and the camera matrix for this frame.
-    pub fn render_data(&self, aspect: f32) -> (Vec<InstanceRaw>, [[f32; 4]; 4]) {
+    /// Build the interpolated instance list for this frame. Sim (x, y) maps to
+    /// the ground plane (world x, z); cubes stand up in +y.
+    pub fn instances(&self) -> Vec<InstanceRaw> {
         let alpha = (self.acc / self.tick_dt).clamp(0.0, 1.0);
         let mut out = Vec::with_capacity(self.ids.len());
         for k in 0..self.ids.len() {
             let a = self.prev[k];
             let b = self.curr[k];
             let x = fx_to_f32(a.x) + (fx_to_f32(b.x) - fx_to_f32(a.x)) * alpha;
-            let y = fx_to_f32(a.y) + (fx_to_f32(b.y) - fx_to_f32(a.y)) * alpha;
+            let z = fx_to_f32(a.y) + (fx_to_f32(b.y) - fx_to_f32(a.y)) * alpha;
             out.push(InstanceRaw {
-                offset: [x, y],
+                offset: [x, 0.0, z],
                 color: PALETTE[self.owners[k]],
             });
         }
-
-        let view = BOUND as f32 + 3.0;
-        let proj =
-            glam::Mat4::orthographic_rh(-view * aspect, view * aspect, -view, view, -1.0, 1.0);
-        (out, proj.to_cols_array_2d())
+        out
     }
 }

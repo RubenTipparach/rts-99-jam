@@ -1,31 +1,47 @@
-//! Game client entry point. Opens a window (or a web canvas), initializes wgpu,
+//! Game client entry point. Opens a window (or web canvas), initializes wgpu,
 //! and runs the dual-clock loop: step the deterministic sim at a fixed rate,
-//! render interpolated frames as fast as the display allows.
+//! render interpolated frames with an RTS camera as fast as the display allows.
 
+mod camera;
 mod game;
 mod gfx;
 
 use std::sync::Arc;
+use web_time::Instant;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
+use camera::Camera;
 use game::Game;
 use gfx::Gfx;
 
-/// Delivered when async GPU init finishes (needed because wgpu init is async and
-/// `resumed` is synchronous — unavoidable on the web). Only constructed on the
-/// web path; native blocks on init directly.
+/// Delivered when async GPU init finishes (wgpu init is async; `resumed` is not).
+/// Only constructed on the web path.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 enum UserEvent {
     GfxReady(Gfx),
+}
+
+#[derive(Default)]
+struct Input {
+    fwd: bool,
+    back: bool,
+    left: bool,
+    right: bool,
+    dragging: bool,
+    last_cursor: Option<(f32, f32)>,
 }
 
 struct App {
     window: Option<Arc<Window>>,
     gfx: Option<Gfx>,
     game: Game,
+    camera: Camera,
+    input: Input,
+    last_frame: Instant,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     proxy: EventLoopProxy<UserEvent>,
 }
@@ -36,6 +52,9 @@ impl App {
             window: None,
             gfx: None,
             game: Game::new(),
+            camera: Camera::default(),
+            input: Input::default(),
+            last_frame: Instant::now(),
             proxy,
         }
     }
@@ -85,16 +104,65 @@ impl ApplicationHandler<UserEvent> for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let Some(gfx) = self.gfx.as_mut() else {
-            return;
-        };
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => gfx.resize(size.width, size.height),
+            WindowEvent::Resized(size) => {
+                if let Some(gfx) = self.gfx.as_mut() {
+                    gfx.resize(size.width, size.height);
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                let pressed = event.state == ElementState::Pressed;
+                if let PhysicalKey::Code(code) = event.physical_key {
+                    match code {
+                        KeyCode::KeyW | KeyCode::ArrowUp => self.input.fwd = pressed,
+                        KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = pressed,
+                        KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = pressed,
+                        KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = pressed,
+                        _ => {}
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Left {
+                    self.input.dragging = state == ElementState::Pressed;
+                    if !self.input.dragging {
+                        self.input.last_cursor = None;
+                    }
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let p = (position.x as f32, position.y as f32);
+                if self.input.dragging {
+                    if let Some((lx, ly)) = self.input.last_cursor {
+                        self.camera.rotate(p.0 - lx, p.1 - ly);
+                    }
+                }
+                self.input.last_cursor = Some(p);
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let units = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y,
+                    MouseScrollDelta::PixelDelta(p) => p.y as f32 / 50.0,
+                };
+                self.camera.zoom(units);
+            }
             WindowEvent::RedrawRequested => {
+                let now = Instant::now();
+                let dt = (now - self.last_frame).as_secs_f32().min(0.1);
+                self.last_frame = now;
+
+                let fwd = (self.input.fwd as i32 - self.input.back as i32) as f32;
+                let right = (self.input.right as i32 - self.input.left as i32) as f32;
+                if fwd != 0.0 || right != 0.0 {
+                    self.camera.pan(fwd, right, dt);
+                }
+
                 self.game.update();
-                let (instances, view_proj) = self.game.render_data(gfx.aspect());
-                gfx.render(&instances, view_proj);
+                if let Some(gfx) = self.gfx.as_mut() {
+                    let vp = self.camera.view_proj(gfx.aspect());
+                    gfx.render(&self.game.instances(), vp);
+                }
             }
             _ => {}
         }
