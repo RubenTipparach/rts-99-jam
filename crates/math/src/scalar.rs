@@ -81,6 +81,24 @@ impl Fx {
         Fx(self.0.saturating_abs())
     }
 
+    /// Deterministic fixed-point square root (returns 0 for negative input).
+    /// Uses integer Newton's method on a widened value, so it is bit-identical
+    /// on every platform.
+    pub fn sqrt(self) -> Fx {
+        if self.0 <= 0 {
+            return Fx::ZERO;
+        }
+        // result = isqrt(raw << FRAC_BITS), computed in u128 to avoid overflow.
+        let n: u128 = (self.0 as u128) << FRAC_BITS;
+        let mut x = n;
+        let mut y = (x + 1) >> 1;
+        while y < x {
+            x = y;
+            y = (x + n / x) >> 1;
+        }
+        Fx(x as i64)
+    }
+
     #[inline]
     pub fn min(self, other: Fx) -> Fx {
         if self.0 <= other.0 {

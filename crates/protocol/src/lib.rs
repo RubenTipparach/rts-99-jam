@@ -1,36 +1,55 @@
 //! Wire types shared across the engine.
 //!
-//! In a deterministic-lockstep RTS, the network transports **only commands**
-//! (player/AI intents), never world state — see
-//! `docs/architecture/03-networking-lockstep.md`. Keeping these types in their
-//! own crate lets `sim`, `net`, `replay`, and `ai` agree on the format without
-//! depending on each other.
-//!
-//! Everything here is fixed-point (no floats), so a command means the same
-//! thing on every machine.
+//! The network transports **only commands** (player/AI intents), never world
+//! state — see `docs/architecture/03-networking-lockstep.md`. Everything here is
+//! fixed-point (no floats), so a command means the same thing on every machine.
 
 #![forbid(unsafe_code)]
 
-use math::Vec3;
+use math::Fx;
 
-/// Identifies a player (human or AI) in a match.
+/// Identifies a player (0 = local player, 1 = enemy, …).
 pub type PlayerId = u16;
 
-/// A single player/AI intent for one simulation tick.
-///
-/// Milestone 0 has just enough to exercise the deterministic core (spawn, set
-/// velocity, despawn). Real RTS commands (move, attack, build, …) layer on later
-/// — see the roadmap, `docs/architecture/10-roadmap-testing.md`.
+/// Kinds of mobile unit.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum UnitKind {
+    Infantry,
+}
+
+/// Kinds of structure.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum BuildingKind {
+    Barracks,
+}
+
+/// A single player/AI intent for one simulation tick. Units/buildings are
+/// referenced by their slot index (from the world snapshot). One command per
+/// entity keeps this `Copy` and trivial to serialize.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Command {
-    /// Create a unit owned by `owner` at `pos` with a per-tick `vel`.
-    Spawn {
+    /// Scenario setup: place a unit.
+    SpawnUnit {
         owner: PlayerId,
-        pos: Vec3,
-        vel: Vec3,
+        kind: UnitKind,
+        x: Fx,
+        y: Fx,
     },
-    /// Replace the velocity of the live unit in slot `entity_index`.
-    SetVelocity { entity_index: u32, vel: Vec3 },
-    /// Remove the live unit in slot `entity_index`.
-    Despawn { entity_index: u32 },
+    /// Scenario setup: place a building.
+    SpawnBuilding {
+        owner: PlayerId,
+        kind: BuildingKind,
+        x: Fx,
+        y: Fx,
+    },
+    /// Move to a point (no auto-engage on the way).
+    Move { unit: u32, x: Fx, y: Fx },
+    /// Move to a point, attacking any enemy encountered.
+    AttackMove { unit: u32, x: Fx, y: Fx },
+    /// Attack a specific entity (chase it).
+    Attack { unit: u32, target: u32 },
+    /// Hold position.
+    Stop { unit: u32 },
+    /// Set where a building's new units gather.
+    SetRally { building: u32, x: Fx, y: Fx },
 }

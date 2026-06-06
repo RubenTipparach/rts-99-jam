@@ -1,14 +1,13 @@
 //! Headless simulation harness.
 //!
 //! No window, no renderer — just drive [`sim::World`] from a [`Replay`] and read
-//! the resulting state hash. This is what the determinism CI, performance
-//! benchmarks, and (later) bot-vs-bot matches run on. See
-//! `docs/architecture/10-roadmap-testing.md`.
+//! the resulting state hash. Powers the determinism CI and (later) bot-vs-bot.
+//! See `docs/architecture/10-roadmap-testing.md`.
 
 #![forbid(unsafe_code)]
 
-use math::{Fx, Vec3};
-use protocol::Command;
+use math::Fx;
+use protocol::{BuildingKind, Command, UnitKind};
 use replay::Replay;
 use sim::World;
 
@@ -21,88 +20,85 @@ pub fn run_replay(replay: &Replay) -> World {
     world
 }
 
-/// Run a replay and return the final state hash. The whole point of the engine:
-/// this value must be identical on every platform.
+/// Run a replay and return the final state hash — identical on every platform.
 pub fn final_hash(replay: &Replay) -> u64 {
     run_replay(replay).state_hash()
 }
 
 #[inline]
-fn v(x: i32, y: i32, z: i32) -> Vec3 {
-    Vec3::new(Fx::from_int(x), Fx::from_int(y), Fx::from_int(z))
+fn fx(i: i32) -> Fx {
+    Fx::from_int(i)
 }
 
-#[inline]
-fn vr(xn: i64, xd: i64, yn: i64, yd: i64, zn: i64, zd: i64) -> Vec3 {
-    Vec3::new(
-        Fx::from_ratio(xn, xd),
-        Fx::from_ratio(yn, yd),
-        Fx::from_ratio(zn, zd),
-    )
-}
-
-/// A fixed reference scenario that exercises spawning, fractional velocities,
-/// mid-match velocity changes, and slot reuse via despawn/respawn. Its final
-/// state hash is pinned in the determinism test, so any accidental change to the
-/// sim, math, or hashing surfaces immediately.
+/// A fixed reference battle: two barracks per side that produce infantry, plus a
+/// few starting units that march and fight. Exercises spawning, production,
+/// movement, and combat. Its final state hash is pinned in the determinism test.
 pub fn demo_replay() -> Replay {
     let mut r = Replay::new(0x00C0_FFEE_D00D_5EED);
 
-    // Tick 0: spawn four units with whole and fractional per-tick velocities.
+    let mut setup = vec![
+        Command::SpawnBuilding {
+            owner: 0,
+            kind: BuildingKind::Barracks,
+            x: fx(0),
+            y: fx(-22),
+        },
+        Command::SpawnBuilding {
+            owner: 1,
+            kind: BuildingKind::Barracks,
+            x: fx(-10),
+            y: fx(22),
+        },
+        Command::SpawnBuilding {
+            owner: 1,
+            kind: BuildingKind::Barracks,
+            x: fx(10),
+            y: fx(22),
+        },
+    ];
+    for k in 0..4 {
+        setup.push(Command::SpawnUnit {
+            owner: 0,
+            kind: UnitKind::Infantry,
+            x: fx(-3 + 2 * k),
+            y: fx(-18),
+        });
+        setup.push(Command::SpawnUnit {
+            owner: 1,
+            kind: UnitKind::Infantry,
+            x: fx(-3 + 2 * k),
+            y: fx(18),
+        });
+    }
+    r.record(setup);
+
+    // Send the player's starting infantry north to attack.
     r.record(vec![
-        Command::Spawn {
-            owner: 0,
-            pos: v(0, 0, 0),
-            vel: vr(1, 4, 0, 1, 0, 1),
+        Command::AttackMove {
+            unit: 3,
+            x: fx(0),
+            y: fx(22),
         },
-        Command::Spawn {
-            owner: 0,
-            pos: v(10, 0, 0),
-            vel: vr(-1, 3, 1, 8, 0, 1),
+        Command::AttackMove {
+            unit: 4,
+            x: fx(0),
+            y: fx(22),
         },
-        Command::Spawn {
-            owner: 1,
-            pos: v(0, 10, 0),
-            vel: vr(0, 1, -1, 5, 2, 7),
+        Command::AttackMove {
+            unit: 5,
+            x: fx(0),
+            y: fx(22),
         },
-        Command::Spawn {
-            owner: 1,
-            pos: v(-5, -5, 2),
-            vel: vr(1, 2, 1, 2, -1, 2),
+        Command::AttackMove {
+            unit: 6,
+            x: fx(0),
+            y: fx(22),
         },
     ]);
 
-    // Ticks 1..8: free integration.
-    for _ in 0..8 {
+    for _ in 0..300 {
         r.record(vec![]);
     }
-
-    // Tick 9: redirect unit 2.
-    r.record(vec![Command::SetVelocity {
-        entity_index: 2,
-        vel: vr(-3, 7, 0, 1, 0, 1),
-    }]);
-
-    // Ticks 10..15: integrate.
-    for _ in 0..6 {
-        r.record(vec![]);
-    }
-
-    // Tick 16: despawn unit 1 (slot 1 goes on the free list).
-    r.record(vec![Command::Despawn { entity_index: 1 }]);
-
-    // Tick 17: spawn a new unit — reuses slot 1 with a bumped generation.
-    r.record(vec![Command::Spawn {
-        owner: 0,
-        pos: v(3, 3, 3),
-        vel: vr(0, 1, 0, 1, 1, 10),
-    }]);
-
-    // Ticks 18..40: integrate to the end.
-    for _ in 0..23 {
-        r.record(vec![]);
-    }
-
     r
 }
 
@@ -111,11 +107,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn demo_runs_to_expected_length() {
-        let r = demo_replay();
-        let w = run_replay(&r);
-        assert_eq!(w.tick(), r.len() as u64);
-        // Four spawned, one despawned, one respawned => five live? No: 4 - 1 + 1.
-        assert_eq!(w.alive_count(), 4);
+    fn demo_runs_and_does_something() {
+        let w = run_replay(&demo_replay());
+        assert_eq!(w.tick(), demo_replay().len() as u64);
+        assert!(w.alive_count() > 0);
     }
 }

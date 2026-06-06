@@ -1,20 +1,31 @@
-//! wgpu rendering: a ground grid + instanced, vertex-lit unit cubes with depth.
-//! Pure presentation: floats and GPU resources live here.
+//! wgpu rendering: heightmap terrain, animated water, instanced lit unit boxes,
+//! and ground selection rings, with depth + distance fog. Presentation-only.
 
+use crate::terrain;
 use std::sync::Arc;
 use winit::window::Window;
 
-/// Per-instance data uploaded each frame (one unit = one cube).
+/// Per-instance unit/building data.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceRaw {
     pub offset: [f32; 3],
+    pub scale: [f32; 3],
+    pub color: [f32; 4],
+}
+
+/// Per-instance selection ring.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct RingRaw {
+    pub center: [f32; 3],
+    pub radius: f32,
     pub color: [f32; 4],
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct CubeVertex {
+struct Vertex3 {
     pos: [f32; 3],
     normal: [f32; 3],
 }
@@ -23,87 +34,135 @@ struct CubeVertex {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    eye: [f32; 4],
     light_dir: [f32; 4],
+    params: [f32; 4], // time, fog density, sea level, _
 }
 
-pub const MAX_INSTANCES: usize = 8192;
-const GROUND_HALF: f32 = 60.0;
+pub const MAX_INSTANCES: usize = 4096;
+pub const MAX_RINGS: usize = 512;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-// A unit cube: footprint [-S,S] in x/z, standing from y=0 to y=2S so it sits on
-// the ground. 6 faces × 2 triangles, each vertex carrying a face normal.
-fn cube_vertices() -> Vec<CubeVertex> {
-    const S: f32 = 0.45;
-    let v = |x: f32, y: f32, z: f32| [x, y, z];
+// Unit cube: footprint [-0.5,0.5] in x/z, standing from y=0..1 (scaled by the
+// instance), so `offset` places its base on the ground.
+fn cube_vertices() -> Vec<Vertex3> {
+    let lo = -0.5f32;
+    let hi = 0.5f32;
+    let p = |x: f32, y: f32, z: f32| [x, y, z];
     let faces: [([f32; 3], [[f32; 3]; 4]); 6] = [
         (
             [1.0, 0.0, 0.0],
             [
-                v(S, 0.0, -S),
-                v(S, 0.0, S),
-                v(S, 2.0 * S, S),
-                v(S, 2.0 * S, -S),
+                p(hi, 0.0, lo),
+                p(hi, 0.0, hi),
+                p(hi, 1.0, hi),
+                p(hi, 1.0, lo),
             ],
         ),
         (
             [-1.0, 0.0, 0.0],
             [
-                v(-S, 0.0, S),
-                v(-S, 0.0, -S),
-                v(-S, 2.0 * S, -S),
-                v(-S, 2.0 * S, S),
+                p(lo, 0.0, hi),
+                p(lo, 0.0, lo),
+                p(lo, 1.0, lo),
+                p(lo, 1.0, hi),
             ],
         ),
         (
             [0.0, 1.0, 0.0],
             [
-                v(-S, 2.0 * S, -S),
-                v(S, 2.0 * S, -S),
-                v(S, 2.0 * S, S),
-                v(-S, 2.0 * S, S),
+                p(lo, 1.0, lo),
+                p(hi, 1.0, lo),
+                p(hi, 1.0, hi),
+                p(lo, 1.0, hi),
             ],
         ),
         (
             [0.0, -1.0, 0.0],
-            [v(-S, 0.0, S), v(S, 0.0, S), v(S, 0.0, -S), v(-S, 0.0, -S)],
+            [
+                p(lo, 0.0, hi),
+                p(hi, 0.0, hi),
+                p(hi, 0.0, lo),
+                p(lo, 0.0, lo),
+            ],
         ),
         (
             [0.0, 0.0, 1.0],
             [
-                v(S, 0.0, S),
-                v(-S, 0.0, S),
-                v(-S, 2.0 * S, S),
-                v(S, 2.0 * S, S),
+                p(hi, 0.0, hi),
+                p(lo, 0.0, hi),
+                p(lo, 1.0, hi),
+                p(hi, 1.0, hi),
             ],
         ),
         (
             [0.0, 0.0, -1.0],
             [
-                v(-S, 0.0, -S),
-                v(S, 0.0, -S),
-                v(S, 2.0 * S, -S),
-                v(-S, 2.0 * S, -S),
+                p(lo, 0.0, lo),
+                p(hi, 0.0, lo),
+                p(hi, 1.0, lo),
+                p(lo, 1.0, lo),
             ],
         ),
     ];
     let mut out = Vec::with_capacity(36);
     for (normal, q) in faces {
         for i in [0usize, 1, 2, 0, 2, 3] {
-            out.push(CubeVertex { pos: q[i], normal });
+            out.push(Vertex3 { pos: q[i], normal });
         }
     }
     out
 }
 
-fn ground_vertices() -> [[f32; 3]; 6] {
-    let g = GROUND_HALF;
+fn terrain_mesh() -> (Vec<Vertex3>, Vec<u32>) {
+    let n: usize = 100;
+    let half = terrain::HALF;
+    let step = (2.0 * half) / n as f32;
+    let mut verts = Vec::with_capacity((n + 1) * (n + 1));
+    for j in 0..=n {
+        for i in 0..=n {
+            let x = -half + i as f32 * step;
+            let z = -half + j as f32 * step;
+            verts.push(Vertex3 {
+                pos: [x, terrain::height(x, z), z],
+                normal: terrain::normal(x, z),
+            });
+        }
+    }
+    let mut idx = Vec::with_capacity(n * n * 6);
+    let w = (n + 1) as u32;
+    for j in 0..n as u32 {
+        for i in 0..n as u32 {
+            let a = j * w + i;
+            let b = a + 1;
+            let c = a + w;
+            let d = c + 1;
+            idx.extend_from_slice(&[a, b, c, b, d, c]);
+        }
+    }
+    (verts, idx)
+}
+
+fn water_quad() -> [[f32; 3]; 6] {
+    let h = terrain::HALF;
     [
-        [-g, 0.0, -g],
-        [g, 0.0, -g],
-        [g, 0.0, g],
-        [-g, 0.0, -g],
-        [g, 0.0, g],
-        [-g, 0.0, g],
+        [-h, 0.0, -h],
+        [h, 0.0, -h],
+        [h, 0.0, h],
+        [-h, 0.0, -h],
+        [h, 0.0, h],
+        [-h, 0.0, h],
+    ]
+}
+
+fn ring_quad() -> [[f32; 2]; 6] {
+    [
+        [-1.0, -1.0],
+        [1.0, -1.0],
+        [1.0, 1.0],
+        [-1.0, -1.0],
+        [1.0, 1.0],
+        [-1.0, 1.0],
     ]
 }
 
@@ -132,12 +191,19 @@ pub struct Gfx {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     depth: wgpu::TextureView,
-    ground_pipeline: wgpu::RenderPipeline,
+    terrain_pipeline: wgpu::RenderPipeline,
+    water_pipeline: wgpu::RenderPipeline,
     unit_pipeline: wgpu::RenderPipeline,
-    ground_buf: wgpu::Buffer,
+    ring_pipeline: wgpu::RenderPipeline,
+    terrain_vbuf: wgpu::Buffer,
+    terrain_ibuf: wgpu::Buffer,
+    terrain_indices: u32,
+    water_buf: wgpu::Buffer,
     cube_buf: wgpu::Buffer,
     cube_len: u32,
+    ring_quad_buf: wgpu::Buffer,
     instance_buf: wgpu::Buffer,
+    ring_buf: wgpu::Buffer,
     camera_buf: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
     pub width: u32,
@@ -226,101 +292,174 @@ impl Gfx {
             }],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("pipeline-layout"),
+            label: Some("pl"),
             bind_group_layouts: &[Some(&camera_layout)],
             immediate_size: 0,
         });
 
-        let depth_stencil = wgpu::DepthStencilState {
+        let depth_opaque = wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: Some(true),
             depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
+        let depth_blend = wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
+        let opaque_target = wgpu::ColorTargetState {
+            format,
+            blend: None,
+            write_mask: wgpu::ColorWrites::ALL,
+        };
+        let blend_target = wgpu::ColorTargetState {
+            format,
+            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+            write_mask: wgpu::ColorWrites::ALL,
+        };
 
-        // Ground pipeline: position-only vertices.
-        let ground_vb = wgpu::VertexBufferLayout {
+        let v3 = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex3>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+        };
+        let pos3 = wgpu::VertexBufferLayout {
             array_stride: 12,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3],
         };
-        let ground_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("ground"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_ground"),
-                buffers: &[ground_vb],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_ground"),
-                targets: &[Some(format.into())],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(depth_stencil.clone()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-
-        // Unit pipeline: cube vertices (buffer 0) + per-instance data (buffer 1).
-        let cube_vb = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<CubeVertex>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
-        };
-        let inst_vb = wgpu::VertexBufferLayout {
+        let inst = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<InstanceRaw>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x4],
+            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4],
         };
-        let unit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("units"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_unit"),
-                buffers: &[cube_vb, inst_vb],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_unit"),
-                targets: &[Some(format.into())],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(depth_stencil),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let pos2 = wgpu::VertexBufferLayout {
+            array_stride: 8,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+        };
+        let ring_inst = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<RingRaw>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &wgpu::vertex_attr_array![1 => Float32x3, 2 => Float32, 3 => Float32x4],
+        };
 
-        let ground = ground_vertices();
-        let ground_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ground"),
-            size: std::mem::size_of_val(&ground) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        queue.write_buffer(&ground_buf, 0, bytemuck::cast_slice(&ground));
+        let mk = |label: &str,
+                  vs: &str,
+                  fs: &str,
+                  buffers: &[wgpu::VertexBufferLayout],
+                  target: &wgpu::ColorTargetState,
+                  depth: &wgpu::DepthStencilState| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some(vs),
+                    buffers,
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(fs),
+                    targets: &[Some(target.clone())],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(depth.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
 
+        let terrain_pipeline = mk(
+            "terrain",
+            "vs_terrain",
+            "fs_terrain",
+            std::slice::from_ref(&v3),
+            &opaque_target,
+            &depth_opaque,
+        );
+        let unit_pipeline = mk(
+            "unit",
+            "vs_unit",
+            "fs_unit",
+            &[v3, inst],
+            &opaque_target,
+            &depth_opaque,
+        );
+        let water_pipeline = mk(
+            "water",
+            "vs_water",
+            "fs_water",
+            &[pos3],
+            &blend_target,
+            &depth_blend,
+        );
+        let ring_pipeline = mk(
+            "ring",
+            "vs_ring",
+            "fs_ring",
+            &[pos2, ring_inst],
+            &blend_target,
+            &depth_blend,
+        );
+
+        let buf = |label: &str, data: &[u8], usage: wgpu::BufferUsages| {
+            let b = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: data.len() as u64,
+                usage,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&b, 0, data);
+            b
+        };
+
+        let (tverts, tidx) = terrain_mesh();
+        let terrain_vbuf = buf(
+            "terrain-v",
+            bytemuck::cast_slice(&tverts),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let terrain_ibuf = buf(
+            "terrain-i",
+            bytemuck::cast_slice(&tidx),
+            wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let water = water_quad();
+        let water_buf = buf(
+            "water",
+            bytemuck::cast_slice(&water),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let cube = cube_vertices();
-        let cube_buf = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("cube"),
-            size: std::mem::size_of_val(&cube[..]) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        queue.write_buffer(&cube_buf, 0, bytemuck::cast_slice(&cube));
+        let cube_buf = buf(
+            "cube",
+            bytemuck::cast_slice(&cube),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let rq = ring_quad();
+        let ring_quad_buf = buf(
+            "ringquad",
+            bytemuck::cast_slice(&rq),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
 
         let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instances"),
             size: (MAX_INSTANCES * std::mem::size_of::<InstanceRaw>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let ring_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rings"),
+            size: (MAX_RINGS * std::mem::size_of::<RingRaw>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -331,12 +470,19 @@ impl Gfx {
             queue,
             config,
             depth,
-            ground_pipeline,
+            terrain_pipeline,
+            water_pipeline,
             unit_pipeline,
-            ground_buf,
+            ring_pipeline,
+            terrain_vbuf,
+            terrain_ibuf,
+            terrain_indices: tidx.len() as u32,
+            water_buf,
             cube_buf,
             cube_len: cube.len() as u32,
+            ring_quad_buf,
             instance_buf,
+            ring_buf,
             camera_buf,
             camera_bind,
             width,
@@ -360,19 +506,34 @@ impl Gfx {
         self.width as f32 / self.height as f32
     }
 
-    pub fn render(&mut self, instances: &[InstanceRaw], view_proj: [[f32; 4]; 4]) {
-        let n = instances.len().min(MAX_INSTANCES);
+    pub fn render(
+        &mut self,
+        units: &[InstanceRaw],
+        rings: &[RingRaw],
+        view_proj: [[f32; 4]; 4],
+        eye: [f32; 3],
+        time: f32,
+    ) {
+        let nu = units.len().min(MAX_INSTANCES);
+        let nr = rings.len().min(MAX_RINGS);
         self.queue.write_buffer(
             &self.camera_buf,
             0,
             bytemuck::bytes_of(&CameraUniform {
                 view_proj,
-                // direction toward a high key light
-                light_dir: [0.4, 1.0, 0.3, 0.0],
+                eye: [eye[0], eye[1], eye[2], 1.0],
+                light_dir: [0.5, 1.0, 0.35, 0.0],
+                params: [time, 0.012, terrain::SEA_LEVEL, 0.0],
             }),
         );
-        self.queue
-            .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&instances[..n]));
+        if nu > 0 {
+            self.queue
+                .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&units[..nu]));
+        }
+        if nr > 0 {
+            self.queue
+                .write_buffer(&self.ring_buf, 0, bytemuck::cast_slice(&rings[..nr]));
+        }
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f)
@@ -397,9 +558,9 @@ impl Gfx {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.015,
-                            g: 0.02,
-                            b: 0.04,
+                            r: 0.45,
+                            g: 0.55,
+                            b: 0.67,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -419,15 +580,33 @@ impl Gfx {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, &self.camera_bind, &[]);
-            // ground
-            pass.set_pipeline(&self.ground_pipeline);
-            pass.set_vertex_buffer(0, self.ground_buf.slice(..));
+
+            // terrain
+            pass.set_pipeline(&self.terrain_pipeline);
+            pass.set_vertex_buffer(0, self.terrain_vbuf.slice(..));
+            pass.set_index_buffer(self.terrain_ibuf.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..self.terrain_indices, 0, 0..1);
+
+            // units / buildings
+            if nu > 0 {
+                pass.set_pipeline(&self.unit_pipeline);
+                pass.set_vertex_buffer(0, self.cube_buf.slice(..));
+                pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                pass.draw(0..self.cube_len, 0..nu as u32);
+            }
+
+            // water (transparent)
+            pass.set_pipeline(&self.water_pipeline);
+            pass.set_vertex_buffer(0, self.water_buf.slice(..));
             pass.draw(0..6, 0..1);
-            // units
-            pass.set_pipeline(&self.unit_pipeline);
-            pass.set_vertex_buffer(0, self.cube_buf.slice(..));
-            pass.set_vertex_buffer(1, self.instance_buf.slice(..));
-            pass.draw(0..self.cube_len, 0..n as u32);
+
+            // selection rings (transparent)
+            if nr > 0 {
+                pass.set_pipeline(&self.ring_pipeline);
+                pass.set_vertex_buffer(0, self.ring_quad_buf.slice(..));
+                pass.set_vertex_buffer(1, self.ring_buf.slice(..));
+                pass.draw(0..6, 0..nr as u32);
+            }
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();

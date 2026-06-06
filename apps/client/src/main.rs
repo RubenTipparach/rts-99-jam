@@ -1,10 +1,14 @@
-//! Game client entry point. Opens a window (or web canvas), initializes wgpu,
-//! and runs the dual-clock loop: step the deterministic sim at a fixed rate,
-//! render interpolated frames with an RTS camera as fast as the display allows.
+//! Game client: opens a window/canvas, runs the deterministic sim under an RTS
+//! camera, and handles selection + orders.
+//!
+//! Controls: left-click/drag = select, right-click = move/attack,
+//! middle-drag = rotate, wheel = zoom, WASD/arrows = pan.
 
 mod camera;
 mod game;
 mod gfx;
+mod hud;
+mod terrain;
 
 use std::sync::Arc;
 use web_time::Instant;
@@ -18,8 +22,6 @@ use camera::Camera;
 use game::Game;
 use gfx::Gfx;
 
-/// Delivered when async GPU init finishes (wgpu init is async; `resumed` is not).
-/// Only constructed on the web path.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 enum UserEvent {
     GfxReady(Gfx),
@@ -31,7 +33,9 @@ struct Input {
     back: bool,
     left: bool,
     right: bool,
-    dragging: bool,
+    cursor: (f32, f32),
+    left_press: Option<(f32, f32)>,
+    middle_down: bool,
     last_cursor: Option<(f32, f32)>,
 }
 
@@ -58,6 +62,13 @@ impl App {
             proxy,
         }
     }
+
+    fn dims(&self) -> (f32, f32) {
+        self.gfx
+            .as_ref()
+            .map(|g| (g.width as f32, g.height as f32))
+            .unwrap_or((1.0, 1.0))
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -73,7 +84,7 @@ impl ApplicationHandler<UserEvent> for App {
             use winit::platform::web::WindowAttributesExtWebSys;
             attrs = attrs.with_append(true);
         }
-        attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(960.0, 600.0));
+        attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1024.0, 640.0));
 
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         self.window = Some(window.clone());
@@ -112,32 +123,57 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                let pressed = event.state == ElementState::Pressed;
+                let down = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
                     match code {
-                        KeyCode::KeyW | KeyCode::ArrowUp => self.input.fwd = pressed,
-                        KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = pressed,
-                        KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = pressed,
-                        KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = pressed,
+                        KeyCode::KeyW | KeyCode::ArrowUp => self.input.fwd = down,
+                        KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
+                        KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
+                        KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
                         _ => {}
                     }
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if button == MouseButton::Left {
-                    self.input.dragging = state == ElementState::Pressed;
-                    if !self.input.dragging {
-                        self.input.last_cursor = None;
+                let (w, h) = self.dims();
+                let (cx, cy) = self.input.cursor;
+                match button {
+                    MouseButton::Left => {
+                        if state == ElementState::Pressed {
+                            self.input.left_press = Some((cx, cy));
+                        } else if let Some((px, py)) = self.input.left_press.take() {
+                            let drag = (px - cx).hypot(py - cy);
+                            if drag < 8.0 {
+                                if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
+                                    self.game.select_single(wx, wz);
+                                }
+                            } else if let (Some(a), Some(b)) = (
+                                self.camera.ground_pick(px, py, w, h),
+                                self.camera.ground_pick(cx, cy, w, h),
+                            ) {
+                                self.game.select_box(a.0, a.1, b.0, b.1);
+                            }
+                        }
                     }
+                    MouseButton::Right => {
+                        if state == ElementState::Pressed {
+                            if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
+                                self.game.order(wx, wz);
+                            }
+                        }
+                    }
+                    MouseButton::Middle => self.input.middle_down = state == ElementState::Pressed,
+                    _ => {}
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let p = (position.x as f32, position.y as f32);
-                if self.input.dragging {
+                if self.input.middle_down {
                     if let Some((lx, ly)) = self.input.last_cursor {
                         self.camera.rotate(p.0 - lx, p.1 - ly);
                     }
                 }
+                self.input.cursor = p;
                 self.input.last_cursor = Some(p);
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -160,9 +196,13 @@ impl ApplicationHandler<UserEvent> for App {
 
                 self.game.update();
                 if let Some(gfx) = self.gfx.as_mut() {
-                    let vp = self.camera.view_proj(gfx.aspect());
-                    gfx.render(&self.game.instances(), vp);
+                    let aspect = gfx.aspect();
+                    let (units, rings) = self.game.render_data();
+                    let vp = self.camera.view_proj(aspect);
+                    gfx.render(&units, &rings, vp, self.camera.eye(), self.game.time());
                 }
+                let (w, h) = self.dims();
+                hud::draw(&self.camera, &self.game, w, h);
             }
             _ => {}
         }
