@@ -174,6 +174,9 @@ struct App {
     camera: Camera,
     input: Input,
     last_frame: Instant,
+    /// Set once a touch is seen, so edge-panning (a mouse affordance) is
+    /// disabled on touch devices — the d-pad pans there instead.
+    pointer_is_touch: bool,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     last_css: (u32, u32),
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -191,6 +194,7 @@ impl App {
             camera: Camera::default(),
             input: Input::default(),
             last_frame: Instant::now(),
+            pointer_is_touch: false,
             last_css: (0, 0),
             first_frame_done: false,
             proxy,
@@ -249,10 +253,18 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::GfxReady(gfx) => {
-                self.gfx = Some(gfx);
+            UserEvent::GfxReady(mut gfx) => {
+                // A Resized event can fire while the GPU is still initializing
+                // (gfx is None then, so it's dropped). Sync the surface to the
+                // window's real size now, or the first frames render at the
+                // stale tiny size — a single pixel stretched to full screen.
                 if let Some(w) = &self.window {
+                    let s = w.inner_size();
+                    gfx.resize(s.width, s.height);
+                    self.gfx = Some(gfx);
                     w.request_redraw();
+                } else {
+                    self.gfx = Some(gfx);
                 }
             }
         }
@@ -325,7 +337,7 @@ impl ApplicationHandler<UserEvent> for App {
                 use winit::event::TouchPhase;
                 let (cx, cy) = (touch.location.x as f32, touch.location.y as f32);
                 self.input.cursor = (cx, cy);
-                self.input.cursor_in = true;
+                self.pointer_is_touch = true;
                 match touch.phase {
                     TouchPhase::Started => self.input.left_press = Some((cx, cy)),
                     TouchPhase::Moved => {}
@@ -368,15 +380,29 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                 }
+                // Self-heal: keep the GPU surface == winit's canvas size, in case
+                // a Resized event was missed (e.g. during async GPU startup).
+                #[cfg(target_arch = "wasm32")]
+                if let Some(win) = self.window.as_ref() {
+                    let s = win.inner_size();
+                    if s.width > 1 && s.height > 1 {
+                        if let Some(g) = self.gfx.as_mut() {
+                            if g.width != s.width || g.height != s.height {
+                                g.resize(s.width, s.height);
+                            }
+                        }
+                    }
+                }
                 let now = Instant::now();
                 let dt = (now - self.last_frame).as_secs_f32().min(0.1);
                 self.last_frame = now;
 
                 let mut fwd = (self.input.fwd as i32 - self.input.back as i32) as f32;
                 let mut right = (self.input.right as i32 - self.input.left as i32) as f32;
-                // Edge panning: scroll the camera when the cursor rests near a
-                // screen edge (only while the pointer is inside the window).
-                if self.input.cursor_in {
+                // Edge panning: scroll the camera when the mouse rests near a
+                // screen edge. Disabled on touch (the d-pad pans there) so a
+                // resting finger position can't make the camera drift forever.
+                if self.input.cursor_in && !self.pointer_is_touch {
                     let (sw, sh) = self.dims();
                     let (cx, cy) = self.input.cursor;
                     const EDGE: f32 = 28.0;

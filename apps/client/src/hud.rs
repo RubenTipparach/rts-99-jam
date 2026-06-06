@@ -34,6 +34,15 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
     let Ok(ctx) = obj.dyn_into::<web_sys::CanvasRenderingContext2d>() else {
         return;
     };
+    // The buffer is physical pixels but is shown CSS-downscaled by the device
+    // pixel ratio. Draw in CSS pixels (absolute transform, so it doesn't
+    // compound across frames) so the HUD stays readable on high-DPI phones.
+    let dpr = web_sys::window()
+        .map(|win| win.device_pixel_ratio() as f32)
+        .filter(|d| *d > 0.5)
+        .unwrap_or(1.0);
+    let _ = ctx.set_transform(dpr as f64, 0.0, 0.0, dpr as f64, 0.0, 0.0);
+    let (w, h) = (w / dpr, h / dpr);
     let (wf, hf) = (w as f64, h as f64);
     ctx.clear_rect(0.0, 0.0, wf, hf);
 
@@ -52,8 +61,10 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
         ctx.fill_rect(x, y, bw * u.hp_frac.clamp(0.0, 1.0) as f64, bh);
     }
 
-    // Drag-selection box + live highlight of units inside it.
+    // Drag-selection box + live highlight of units inside it. The drag rect
+    // arrives in physical pixels; bring it into the CSS space we draw in.
     if let Some((x0, y0, x1, y1)) = drag {
+        let (x0, y0, x1, y1) = (x0 / dpr, y0 / dpr, x1 / dpr, y1 / dpr);
         for u in game.player_units() {
             if let Some((sx, sy)) = camera.project(glam::Vec3::new(u.wx, u.wy - 2.0, u.wz), w, h) {
                 if sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1 {
