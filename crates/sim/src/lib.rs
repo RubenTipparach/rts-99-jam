@@ -73,6 +73,15 @@ fn stats(kind: Kind) -> Stats {
 const PROD_TICKS: i32 = 55;
 const TEAM_UNIT_CAP: usize = 30;
 
+// Collision avoidance: infantry never share a spot. Each tick a unit is pushed
+// away from any other infantry whose center is closer than `SEP_DIST`, so a
+// crowd drifts apart and a group-move settles into distinct cells rather than
+// stacking on one point. `SEP_FACTOR` (each pair resolves half the overlap) and
+// the `SEP_MAX` step clamp keep it a smooth drift instead of a teleport.
+const SEP_DIST: Fx = Fx::from_ratio(5, 2); // desired min spacing between centers
+const SEP_FACTOR: Fx = Fx::from_ratio(1, 2);
+const SEP_MAX: Fx = Fx::from_ratio(30, 100); // max push per tick (= infantry speed)
+
 /// One entity as seen by the renderer/HUD (read-only; client converts to floats).
 #[derive(Clone, Copy)]
 pub struct Snap {
@@ -421,6 +430,74 @@ impl World {
             if self.arena.alive[i] && self.hp[i] <= Fx::ZERO {
                 self.arena.free_index(i as u32);
             }
+        }
+
+        self.separate();
+    }
+
+    /// Push overlapping infantry apart so no two units share a spot.
+    ///
+    /// Pushes are computed from a single consistent snapshot of positions
+    /// (read all, then apply), so the result is independent of iteration order
+    /// and stays deterministic. Magnitude is proportional to the overlap and
+    /// clamped to `SEP_MAX`, so units glide apart and settle exactly at
+    /// `SEP_DIST` with no oscillation.
+    fn separate(&mut self) {
+        let cap = self.arena.capacity();
+        let sep2 = SEP_DIST * SEP_DIST;
+        let coincident = Fx::from_ratio(1, 64);
+        let mut push = vec![(Fx::ZERO, Fx::ZERO); cap];
+
+        for (i, slot) in push.iter_mut().enumerate() {
+            if !self.arena.alive[i] || self.kind[i] != Kind::Infantry {
+                continue;
+            }
+            let me = self.pos[i];
+            let (mut px, mut py) = (Fx::ZERO, Fx::ZERO);
+            for j in 0..cap {
+                if i == j || !self.arena.alive[j] || self.kind[j] != Kind::Infantry {
+                    continue;
+                }
+                let dx = me.x - self.pos[j].x;
+                let dy = me.y - self.pos[j].y;
+                let d2 = dx * dx + dy * dy;
+                if d2 >= sep2 {
+                    continue;
+                }
+                if d2 <= coincident {
+                    // (Near-)coincident: nudge apart by index so a pair always
+                    // splits along x; the parity term keeps clusters from
+                    // collapsing onto a single line.
+                    px += if i < j { SEP_DIST } else { -SEP_DIST };
+                    py += if (i ^ j) & 1 == 0 {
+                        SEP_DIST
+                    } else {
+                        -SEP_DIST
+                    };
+                    continue;
+                }
+                let d = d2.sqrt();
+                let inv = (SEP_DIST - d) / d; // overlap spread over the offset's length
+                px += dx * inv;
+                py += dy * inv;
+            }
+            *slot = (px, py);
+        }
+
+        for (i, &(rawx, rawy)) in push.iter().enumerate() {
+            if !self.arena.alive[i] || self.kind[i] != Kind::Infantry {
+                continue;
+            }
+            let mut sx = rawx * SEP_FACTOR;
+            let mut sy = rawy * SEP_FACTOR;
+            let len2 = sx * sx + sy * sy;
+            if len2 > SEP_MAX * SEP_MAX {
+                let k = SEP_MAX / len2.sqrt();
+                sx = sx * k;
+                sy = sy * k;
+            }
+            self.pos[i].x += sx;
+            self.pos[i].y += sy;
         }
     }
 

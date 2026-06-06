@@ -448,9 +448,23 @@ impl Game {
                 self.pending.push(Command::Attack { unit: u, target });
             }
         } else {
-            let (x, y) = (fx(wx), fx(wz));
-            for &u in &self.selected {
-                self.pending.push(Command::AttackMove { unit: u, x, y });
+            // Spread the group across a centered grid so they march to distinct
+            // cells instead of one shared point; the sim's separation then keeps
+            // them from stacking as they arrive.
+            let sel: Vec<u32> = self.selected.clone();
+            let cols = (sel.len() as f32).sqrt().ceil().max(1.0);
+            let rows = (sel.len() as f32 / cols).ceil();
+            let spacing = 2.6_f32;
+            for (k, &u) in sel.iter().enumerate() {
+                let c = (k % cols as usize) as f32;
+                let r = (k / cols as usize) as f32;
+                let ox = (c - (cols - 1.0) * 0.5) * spacing;
+                let oz = (r - (rows - 1.0) * 0.5) * spacing;
+                self.pending.push(Command::AttackMove {
+                    unit: u,
+                    x: fx(wx + ox),
+                    y: fx(wz + oz),
+                });
             }
         }
     }
