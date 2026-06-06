@@ -16,6 +16,7 @@ wgpu = { version = "29", features = ["webgl"] }
 winit = "0.30"
 glam = "0.33"
 bytemuck = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 web-time = "1"
 

@@ -1,8 +1,5 @@
-//! Game client: opens a window/canvas, runs the deterministic sim under an RTS
-//! camera, and handles selection + orders.
-//!
-//! Controls: left-click/drag = select, right-click = move/attack,
-//! middle-drag = rotate, wheel = zoom, WASD/arrows = pan.
+//! Game client. Fixed-angle RTS camera; left-click/drag to select, right-click
+//! to move/attack, wheel to zoom, WASD/arrows to pan.
 
 mod camera;
 mod game;
@@ -35,8 +32,6 @@ struct Input {
     right: bool,
     cursor: (f32, f32),
     left_press: Option<(f32, f32)>,
-    middle_down: bool,
-    last_cursor: Option<(f32, f32)>,
 }
 
 struct App {
@@ -78,7 +73,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
         event_loop.set_control_flow(ControlFlow::Poll);
 
-        let mut attrs = Window::default_attributes().with_title("rts-99-jam");
+        let mut attrs = Window::default_attributes().with_title("Sol Dominion");
         #[cfg(target_arch = "wasm32")]
         {
             use winit::platform::web::WindowAttributesExtWebSys;
@@ -142,8 +137,7 @@ impl ApplicationHandler<UserEvent> for App {
                         if state == ElementState::Pressed {
                             self.input.left_press = Some((cx, cy));
                         } else if let Some((px, py)) = self.input.left_press.take() {
-                            let drag = (px - cx).hypot(py - cy);
-                            if drag < 8.0 {
+                            if (px - cx).hypot(py - cy) < 8.0 {
                                 if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
                                     self.game.select_single(wx, wz);
                                 }
@@ -162,19 +156,11 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                     }
-                    MouseButton::Middle => self.input.middle_down = state == ElementState::Pressed,
                     _ => {}
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let p = (position.x as f32, position.y as f32);
-                if self.input.middle_down {
-                    if let Some((lx, ly)) = self.input.last_cursor {
-                        self.camera.rotate(p.0 - lx, p.1 - ly);
-                    }
-                }
-                self.input.cursor = p;
-                self.input.last_cursor = Some(p);
+                self.input.cursor = (position.x as f32, position.y as f32);
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let units = match delta {
@@ -195,14 +181,33 @@ impl ApplicationHandler<UserEvent> for App {
                 }
 
                 self.game.update();
+                self.game.recompute_fow();
+
+                let drag_rect = self.input.left_press.and_then(|(px, py)| {
+                    let (cx, cy) = self.input.cursor;
+                    if (px - cx).hypot(py - cy) >= 8.0 {
+                        Some((px.min(cx), py.min(cy), px.max(cx), py.max(cy)))
+                    } else {
+                        None
+                    }
+                });
+
                 if let Some(gfx) = self.gfx.as_mut() {
                     let aspect = gfx.aspect();
                     let (units, rings) = self.game.render_data();
+                    let fow = self.game.fow_bytes();
                     let vp = self.camera.view_proj(aspect);
-                    gfx.render(&units, &rings, vp, self.camera.eye(), self.game.time());
+                    gfx.render(
+                        &units,
+                        &rings,
+                        &fow,
+                        vp,
+                        self.camera.eye(),
+                        self.game.time(),
+                    );
                 }
                 let (w, h) = self.dims();
-                hud::draw(&self.camera, &self.game, w, h);
+                hud::draw(&self.camera, &self.game, w, h, drag_rect);
             }
             _ => {}
         }

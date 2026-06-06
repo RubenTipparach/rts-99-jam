@@ -1,11 +1,10 @@
-//! wgpu rendering: heightmap terrain, animated water, instanced lit unit boxes,
-//! and ground selection rings, with depth + distance fog. Presentation-only.
+//! wgpu rendering: textured heightmap terrain, animated water, instanced lit
+//! unit boxes, selection rings, and a fog-of-war texture. Presentation-only.
 
 use crate::terrain;
 use std::sync::Arc;
 use winit::window::Window;
 
-/// Per-instance unit/building data.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct InstanceRaw {
@@ -14,7 +13,6 @@ pub struct InstanceRaw {
     pub color: [f32; 4],
 }
 
-/// Per-instance selection ring.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct RingRaw {
@@ -36,18 +34,16 @@ struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     eye: [f32; 4],
     light_dir: [f32; 4],
-    params: [f32; 4], // time, fog density, sea level, _
+    params: [f32; 4], // time, map_half, sea_level, _
 }
 
-pub const MAX_INSTANCES: usize = 4096;
-pub const MAX_RINGS: usize = 512;
+pub const MAX_INSTANCES: usize = 8192;
+pub const MAX_RINGS: usize = 1024;
+pub const FOW_RES: usize = 256;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-// Unit cube: footprint [-0.5,0.5] in x/z, standing from y=0..1 (scaled by the
-// instance), so `offset` places its base on the ground.
 fn cube_vertices() -> Vec<Vertex3> {
-    let lo = -0.5f32;
-    let hi = 0.5f32;
+    let (lo, hi) = (-0.5f32, 0.5f32);
     let p = |x: f32, y: f32, z: f32| [x, y, z];
     let faces: [([f32; 3], [[f32; 3]; 4]); 6] = [
         (
@@ -115,7 +111,7 @@ fn cube_vertices() -> Vec<Vertex3> {
 }
 
 fn terrain_mesh() -> (Vec<Vertex3>, Vec<u32>) {
-    let n: usize = 100;
+    let n: usize = 220;
     let half = terrain::HALF;
     let step = (2.0 * half) / n as f32;
     let mut verts = Vec::with_capacity((n + 1) * (n + 1));
@@ -134,10 +130,7 @@ fn terrain_mesh() -> (Vec<Vertex3>, Vec<u32>) {
     for j in 0..n as u32 {
         for i in 0..n as u32 {
             let a = j * w + i;
-            let b = a + 1;
-            let c = a + w;
-            let d = c + 1;
-            idx.extend_from_slice(&[a, b, c, b, d, c]);
+            idx.extend_from_slice(&[a, a + 1, a + w, a + 1, a + w + 1, a + w]);
         }
     }
     (verts, idx)
@@ -185,6 +178,52 @@ fn make_depth(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
 
+fn load_tile(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    bytes: &[u8],
+    label: &str,
+) -> wgpu::TextureView {
+    let img = image::load_from_memory(bytes)
+        .expect("decode png")
+        .to_rgba8();
+    let (w, h) = img.dimensions();
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &tex,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &img,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * w),
+            rows_per_image: Some(h),
+        },
+        wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+    );
+    tex.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
 pub struct Gfx {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -206,6 +245,8 @@ pub struct Gfx {
     ring_buf: wgpu::Buffer,
     camera_buf: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
+    terrain_bind: wgpu::BindGroup,
+    fow_tex: wgpu::Texture,
     pub width: u32,
     pub height: u32,
 }
@@ -264,6 +305,7 @@ impl Gfx {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
+        // --- camera (group 0) ---
         let camera_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera"),
             size: std::mem::size_of::<CameraUniform>() as u64,
@@ -291,8 +333,140 @@ impl Gfx {
                 resource: camera_buf.as_entire_binding(),
             }],
         });
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("pl"),
+
+        // --- terrain textures + fog of war (group 1) ---
+        let grass = load_tile(
+            &device,
+            &queue,
+            include_bytes!("../../../assets/textures/grass.png"),
+            "grass",
+        );
+        let dirt = load_tile(
+            &device,
+            &queue,
+            include_bytes!("../../../assets/textures/dirt.png"),
+            "dirt",
+        );
+        let rock = load_tile(
+            &device,
+            &queue,
+            include_bytes!("../../../assets/textures/rock.png"),
+            "rock",
+        );
+        let sand = load_tile(
+            &device,
+            &queue,
+            include_bytes!("../../../assets/textures/sand.png"),
+            "sand",
+        );
+
+        let fow_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fow"),
+            size: wgpu::Extent3d {
+                width: FOW_RES as u32,
+                height: FOW_RES as u32,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let fow_view = fow_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let tile_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("tile-samp"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+        let fow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("fow-samp"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let tex_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let samp_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        };
+        let terrain_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("terrain-layout"),
+            entries: &[
+                tex_entry(0),
+                tex_entry(1),
+                tex_entry(2),
+                tex_entry(3),
+                tex_entry(4),
+                samp_entry(5),
+                samp_entry(6),
+            ],
+        });
+        let terrain_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("terrain-bind"),
+            layout: &terrain_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&grass),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&dirt),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&rock),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&sand),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&fow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&tile_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&fow_sampler),
+                },
+            ],
+        });
+
+        let pl_tex = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pl-tex"),
+            bind_group_layouts: &[Some(&camera_layout), Some(&terrain_layout)],
+            immediate_size: 0,
+        });
+        let pl_plain = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pl-plain"),
             bind_group_layouts: &[Some(&camera_layout)],
             immediate_size: 0,
         });
@@ -311,12 +485,12 @@ impl Gfx {
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
-        let opaque_target = wgpu::ColorTargetState {
+        let opaque_t = wgpu::ColorTargetState {
             format,
             blend: None,
             write_mask: wgpu::ColorWrites::ALL,
         };
-        let blend_target = wgpu::ColorTargetState {
+        let blend_t = wgpu::ColorTargetState {
             format,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             write_mask: wgpu::ColorWrites::ALL,
@@ -349,6 +523,7 @@ impl Gfx {
         };
 
         let mk = |label: &str,
+                  layout: &wgpu::PipelineLayout,
                   vs: &str,
                   fs: &str,
                   buffers: &[wgpu::VertexBufferLayout],
@@ -356,7 +531,7 @@ impl Gfx {
                   depth: &wgpu::DepthStencilState| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
-                layout: Some(&pipeline_layout),
+                layout: Some(layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some(vs),
@@ -379,38 +554,42 @@ impl Gfx {
 
         let terrain_pipeline = mk(
             "terrain",
+            &pl_tex,
             "vs_terrain",
             "fs_terrain",
             std::slice::from_ref(&v3),
-            &opaque_target,
+            &opaque_t,
             &depth_opaque,
         );
         let unit_pipeline = mk(
             "unit",
+            &pl_plain,
             "vs_unit",
             "fs_unit",
             &[v3, inst],
-            &opaque_target,
+            &opaque_t,
             &depth_opaque,
         );
         let water_pipeline = mk(
             "water",
+            &pl_tex,
             "vs_water",
             "fs_water",
-            &[pos3],
-            &blend_target,
+            std::slice::from_ref(&pos3),
+            &blend_t,
             &depth_blend,
         );
         let ring_pipeline = mk(
             "ring",
+            &pl_plain,
             "vs_ring",
             "fs_ring",
             &[pos2, ring_inst],
-            &blend_target,
+            &blend_t,
             &depth_blend,
         );
 
-        let buf = |label: &str, data: &[u8], usage: wgpu::BufferUsages| {
+        let mkbuf = |label: &str, data: &[u8], usage: wgpu::BufferUsages| {
             let b = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size: data.len() as u64,
@@ -421,32 +600,32 @@ impl Gfx {
             b
         };
 
-        let (tverts, tidx) = terrain_mesh();
-        let terrain_vbuf = buf(
-            "terrain-v",
-            bytemuck::cast_slice(&tverts),
+        let (tv, ti) = terrain_mesh();
+        let terrain_vbuf = mkbuf(
+            "tv",
+            bytemuck::cast_slice(&tv),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let terrain_ibuf = buf(
-            "terrain-i",
-            bytemuck::cast_slice(&tidx),
+        let terrain_ibuf = mkbuf(
+            "ti",
+            bytemuck::cast_slice(&ti),
             wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
         );
         let water = water_quad();
-        let water_buf = buf(
+        let water_buf = mkbuf(
             "water",
             bytemuck::cast_slice(&water),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
         let cube = cube_vertices();
-        let cube_buf = buf(
+        let cube_buf = mkbuf(
             "cube",
             bytemuck::cast_slice(&cube),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
         let rq = ring_quad();
-        let ring_quad_buf = buf(
-            "ringquad",
+        let ring_quad_buf = mkbuf(
+            "rq",
             bytemuck::cast_slice(&rq),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
@@ -476,7 +655,7 @@ impl Gfx {
             ring_pipeline,
             terrain_vbuf,
             terrain_ibuf,
-            terrain_indices: tidx.len() as u32,
+            terrain_indices: ti.len() as u32,
             water_buf,
             cube_buf,
             cube_len: cube.len() as u32,
@@ -485,6 +664,8 @@ impl Gfx {
             ring_buf,
             camera_buf,
             camera_bind,
+            terrain_bind,
+            fow_tex,
             width,
             height,
         }
@@ -506,10 +687,12 @@ impl Gfx {
         self.width as f32 / self.height as f32
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         units: &[InstanceRaw],
         rings: &[RingRaw],
+        fow: &[u8],
         view_proj: [[f32; 4]; 4],
         eye: [f32; 3],
         time: f32,
@@ -523,9 +706,30 @@ impl Gfx {
                 view_proj,
                 eye: [eye[0], eye[1], eye[2], 1.0],
                 light_dir: [0.5, 1.0, 0.35, 0.0],
-                params: [time, 0.012, terrain::SEA_LEVEL, 0.0],
+                params: [time, terrain::HALF, terrain::SEA_LEVEL, 0.0],
             }),
         );
+        if fow.len() == FOW_RES * FOW_RES {
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.fow_tex,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                fow,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(FOW_RES as u32),
+                    rows_per_image: Some(FOW_RES as u32),
+                },
+                wgpu::Extent3d {
+                    width: FOW_RES as u32,
+                    height: FOW_RES as u32,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         if nu > 0 {
             self.queue
                 .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&units[..nu]));
@@ -558,9 +762,9 @@ impl Gfx {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.45,
-                            g: 0.55,
-                            b: 0.67,
+                            r: 0.02,
+                            g: 0.03,
+                            b: 0.05,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -581,13 +785,12 @@ impl Gfx {
             });
             pass.set_bind_group(0, &self.camera_bind, &[]);
 
-            // terrain
             pass.set_pipeline(&self.terrain_pipeline);
+            pass.set_bind_group(1, &self.terrain_bind, &[]);
             pass.set_vertex_buffer(0, self.terrain_vbuf.slice(..));
             pass.set_index_buffer(self.terrain_ibuf.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.terrain_indices, 0, 0..1);
 
-            // units / buildings
             if nu > 0 {
                 pass.set_pipeline(&self.unit_pipeline);
                 pass.set_vertex_buffer(0, self.cube_buf.slice(..));
@@ -595,12 +798,11 @@ impl Gfx {
                 pass.draw(0..self.cube_len, 0..nu as u32);
             }
 
-            // water (transparent)
             pass.set_pipeline(&self.water_pipeline);
+            pass.set_bind_group(1, &self.terrain_bind, &[]);
             pass.set_vertex_buffer(0, self.water_buf.slice(..));
             pass.draw(0..6, 0..1);
 
-            // selection rings (transparent)
             if nr > 0 {
                 pass.set_pipeline(&self.ring_pipeline);
                 pass.set_vertex_buffer(0, self.ring_quad_buf.slice(..));

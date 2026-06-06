@@ -1,12 +1,12 @@
-//! Game glue: drives the deterministic sim, holds selection, turns player input
-//! into commands, and produces render + HUD data. Floats live here (the wall).
+//! Game glue: drives the deterministic sim, holds selection, turns input into
+//! commands, computes fog-of-war, and produces render + HUD data. Floats here.
 
-use crate::gfx::{InstanceRaw, RingRaw};
+use crate::gfx::{InstanceRaw, RingRaw, FOW_RES};
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
 use protocol::{BuildingKind, Command, UnitKind};
 use sim::{Kind, Snap, World};
-use std::collections::HashMap;
+use std::collections::HashSet;
 use web_time::Instant;
 
 const TICK_HZ: u32 = 20;
@@ -20,17 +20,20 @@ fn f(x: Fx) -> f32 {
 fn fxi(i: i32) -> Fx {
     Fx::from_int(i)
 }
+#[inline]
+fn fx(v: f32) -> Fx {
+    Fx::from_raw((v * (1u64 << FRAC_BITS) as f32) as i64)
+}
 
 fn team_color(owner: u16, barracks: bool) -> [f32; 4] {
     match (owner, barracks) {
-        (0, false) => [0.34, 0.58, 0.96, 1.0], // player infantry — blue
-        (0, true) => [0.20, 0.36, 0.66, 1.0],  // player barracks
-        (_, false) => [0.93, 0.34, 0.27, 1.0], // enemy infantry — red
-        (_, true) => [0.62, 0.20, 0.18, 1.0],  // enemy barracks
+        (0, false) => [0.36, 0.60, 0.98, 1.0],
+        (0, true) => [0.22, 0.40, 0.72, 1.0],
+        (_, false) => [0.95, 0.36, 0.28, 1.0],
+        (_, true) => [0.64, 0.22, 0.18, 1.0],
     }
 }
 
-/// Per-entity info for the HUD (health bars, minimap).
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub struct UnitInfo {
@@ -52,6 +55,8 @@ pub struct Game {
     curr: Vec<Snap>,
     selected: Vec<u32>,
     pending: Vec<Command>,
+    visible: Vec<bool>,
+    explored: Vec<bool>,
 }
 
 impl Default for Game {
@@ -62,43 +67,43 @@ impl Default for Game {
 
 impl Game {
     pub fn new() -> Self {
-        let world = World::new(SEED);
         let mut setup = Vec::new();
-        // Player base (south).
+        // Player base (near the camera start).
         setup.push(Command::SpawnBuilding {
             owner: 0,
             kind: BuildingKind::Barracks,
             x: fxi(0),
-            y: fxi(-26),
+            y: fxi(210),
         });
-        for k in 0..4 {
+        for k in 0..5 {
             setup.push(Command::SpawnUnit {
                 owner: 0,
                 kind: UnitKind::Infantry,
-                x: fxi(-4 + 2 * k),
-                y: fxi(-20),
+                x: fxi(-8 + 4 * k),
+                y: fxi(180),
             });
         }
-        // Two enemy barracks (north), each with a guard squad.
-        for &bx in &[-14i32, 14] {
+        // Two enemy barracks far to the north, each with a guard squad — hidden
+        // by fog until you scout up to them.
+        for &bx in &[-150i32, 150] {
             setup.push(Command::SpawnBuilding {
                 owner: 1,
                 kind: BuildingKind::Barracks,
                 x: fxi(bx),
-                y: fxi(24),
+                y: fxi(-190),
             });
-            for k in 0..5 {
+            for k in 0..6 {
                 setup.push(Command::SpawnUnit {
                     owner: 1,
                     kind: UnitKind::Infantry,
-                    x: fxi(bx - 4 + 2 * k),
-                    y: fxi(18),
+                    x: fxi(bx - 10 + 4 * k),
+                    y: fxi(-165),
                 });
             }
         }
 
         let mut g = Game {
-            world,
+            world: World::new(SEED),
             tick_dt: 1.0 / TICK_HZ as f32,
             acc: 0.0,
             last: Instant::now(),
@@ -107,10 +112,12 @@ impl Game {
             curr: Vec::new(),
             selected: Vec::new(),
             pending: setup,
+            visible: vec![false; FOW_RES * FOW_RES],
+            explored: vec![false; FOW_RES * FOW_RES],
         };
-        // Run tick 0 so the scenario exists immediately.
         g.step_now();
         g.prev = g.curr.clone();
+        g.recompute_fow();
         g
     }
 
@@ -119,13 +126,13 @@ impl Game {
         self.prev = self.curr.clone();
         self.world.step(&cmds);
         self.curr = self.world.snapshot();
-        // Drop selections that are no longer live player infantry.
-        let alive: HashMap<u32, &Snap> = self.curr.iter().map(|s| (s.index, s)).collect();
-        self.selected.retain(|i| {
-            alive
-                .get(i)
-                .is_some_and(|s| s.owner == 0 && s.kind == Kind::Infantry)
-        });
+        let live: HashSet<u32> = self
+            .curr
+            .iter()
+            .filter(|s| s.owner == 0 && s.kind == Kind::Infantry)
+            .map(|s| s.index)
+            .collect();
+        self.selected.retain(|i| live.contains(i));
     }
 
     pub fn update(&mut self) {
@@ -148,42 +155,122 @@ impl Game {
         (self.acc / self.tick_dt).clamp(0.0, 1.0)
     }
 
-    /// Interpolated world (x, z) of an entity this frame.
-    fn lerped_xz(&self, prev_map: &HashMap<u32, (f32, f32)>, s: &Snap) -> (f32, f32) {
-        let cx = f(s.pos.x);
-        let cz = f(s.pos.y);
-        if let Some(&(px, pz)) = prev_map.get(&s.index) {
-            let a = self.alpha();
-            (px + (cx - px) * a, pz + (cz - pz) * a)
-        } else {
-            (cx, cz)
+    fn prev_xz(&self, index: u32) -> Option<(f32, f32)> {
+        self.prev
+            .iter()
+            .find(|s| s.index == index)
+            .map(|s| (f(s.pos.x), f(s.pos.y)))
+    }
+
+    fn lerped(&self, s: &Snap) -> (f32, f32) {
+        let (cx, cz) = (f(s.pos.x), f(s.pos.y));
+        match self.prev_xz(s.index) {
+            Some((px, pz)) => {
+                let a = self.alpha();
+                (px + (cx - px) * a, pz + (cz - pz) * a)
+            }
+            None => (cx, cz),
         }
     }
 
-    fn prev_map(&self) -> HashMap<u32, (f32, f32)> {
-        self.prev
-            .iter()
-            .map(|s| (s.index, (f(s.pos.x), f(s.pos.y))))
-            .collect()
+    // ---- fog of war ----
+
+    fn reveal(&mut self, wx: f32, wz: f32, rad: f32) {
+        let res = FOW_RES as i32;
+        let half = terrain::HALF;
+        let to_cell = |w: f32| (w + half) / (2.0 * half) * res as f32;
+        let (cx, cz) = (to_cell(wx), to_cell(wz));
+        let cr = rad / (2.0 * half) * res as f32;
+        let x0 = (cx - cr).floor().max(0.0) as i32;
+        let x1 = (cx + cr).ceil().min(res as f32 - 1.0) as i32;
+        let z0 = (cz - cr).floor().max(0.0) as i32;
+        let z1 = (cz + cr).ceil().min(res as f32 - 1.0) as i32;
+        for zc in z0..=z1 {
+            for xc in x0..=x1 {
+                let dx = xc as f32 + 0.5 - cx;
+                let dz = zc as f32 + 0.5 - cz;
+                if dx * dx + dz * dz <= cr * cr {
+                    let i = (zc * res + xc) as usize;
+                    self.visible[i] = true;
+                    self.explored[i] = true;
+                }
+            }
+        }
     }
 
-    /// Build render instances (units + buildings) and selection rings.
+    pub fn recompute_fow(&mut self) {
+        for v in self.visible.iter_mut() {
+            *v = false;
+        }
+        let entities: Vec<(f32, f32, f32)> = self
+            .curr
+            .iter()
+            .filter(|s| s.owner == 0)
+            .map(|s| {
+                let (wx, wz) = self.lerped(s);
+                let r = if s.kind == Kind::Barracks {
+                    125.0
+                } else {
+                    90.0
+                };
+                (wx, wz, r)
+            })
+            .collect();
+        for (wx, wz, r) in entities {
+            self.reveal(wx, wz, r);
+        }
+    }
+
+    pub fn fow_bytes(&self) -> Vec<u8> {
+        let mut b = vec![0u8; FOW_RES * FOW_RES];
+        for (i, o) in b.iter_mut().enumerate() {
+            *o = if self.visible[i] {
+                255
+            } else if self.explored[i] {
+                115
+            } else {
+                0
+            };
+        }
+        b
+    }
+
+    fn cell_visible(&self, wx: f32, wz: f32) -> bool {
+        let res = FOW_RES as i32;
+        let half = terrain::HALF;
+        let xc = ((wx + half) / (2.0 * half) * res as f32) as i32;
+        let zc = ((wz + half) / (2.0 * half) * res as f32) as i32;
+        if xc < 0 || zc < 0 || xc >= res || zc >= res {
+            return false;
+        }
+        self.visible[(zc * res + xc) as usize]
+    }
+
+    /// Entity is shown if it's ours, or an enemy currently in vision.
+    fn revealed(&self, s: &Snap, wx: f32, wz: f32) -> bool {
+        s.owner == 0 || self.cell_visible(wx, wz)
+    }
+
+    // ---- render + HUD data ----
+
     pub fn render_data(&self) -> (Vec<InstanceRaw>, Vec<RingRaw>) {
-        let pm = self.prev_map();
-        let sel: std::collections::HashSet<u32> = self.selected.iter().copied().collect();
+        let sel: HashSet<u32> = self.selected.iter().copied().collect();
         let mut units = Vec::with_capacity(self.curr.len());
         let mut rings = Vec::new();
         for s in &self.curr {
-            let (wx, wz) = self.lerped_xz(&pm, s);
+            let (wx, wz) = self.lerped(s);
+            if !self.revealed(s, wx, wz) {
+                continue;
+            }
             let ground = terrain::height(wx, wz);
             let barracks = s.kind == Kind::Barracks;
             let (scale, mut y) = if barracks {
-                ([8.5, 5.0, 8.5], ground)
+                ([10.0, 6.0, 10.0], ground)
             } else {
-                ([0.95, 1.7, 0.95], ground)
+                ([1.4, 2.4, 1.4], ground)
             };
             if !barracks && s.moving {
-                y += ((self.time * 9.0) + s.index as f32 * 1.3).sin() * 0.12;
+                y += ((self.time * 9.0) + s.index as f32 * 1.3).sin() * 0.18;
             }
             units.push(InstanceRaw {
                 offset: [wx, y, wz],
@@ -193,42 +280,69 @@ impl Game {
             if sel.contains(&s.index) {
                 rings.push(RingRaw {
                     center: [wx, ground, wz],
-                    radius: if barracks { 6.5 } else { 1.5 },
-                    color: [0.4, 1.0, 0.5, 0.9],
+                    radius: if barracks { 8.0 } else { 2.2 },
+                    color: [0.4, 1.0, 0.5, 0.95],
                 });
             }
         }
         (units, rings)
     }
 
-    /// World positions + hp for the HUD.
+    fn info(&self, s: &Snap) -> UnitInfo {
+        let (wx, wz) = self.lerped(s);
+        let barracks = s.kind == Kind::Barracks;
+        UnitInfo {
+            owner: s.owner,
+            barracks,
+            wx,
+            wy: terrain::height(wx, wz) + if barracks { 7.0 } else { 3.4 },
+            wz,
+            hp_frac: (f(s.hp) / f(s.max_hp)).clamp(0.0, 1.0),
+        }
+    }
+
+    /// All currently-revealed entities (for the minimap).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn unit_infos(&self) -> Vec<UnitInfo> {
-        let pm = self.prev_map();
         self.curr
             .iter()
-            .map(|s| {
-                let (wx, wz) = self.lerped_xz(&pm, s);
-                let barracks = s.kind == Kind::Barracks;
-                let h = terrain::height(wx, wz) + if barracks { 5.4 } else { 2.2 };
-                let hp_frac = (f(s.hp) / f(s.max_hp)).clamp(0.0, 1.0);
-                UnitInfo {
-                    owner: s.owner,
-                    barracks,
-                    wx,
-                    wy: h,
-                    wz,
-                    hp_frac,
-                }
+            .filter(|s| {
+                let (wx, wz) = self.lerped(s);
+                self.revealed(s, wx, wz)
             })
+            .map(|s| self.info(s))
             .collect()
     }
 
-    /// (player units, enemy units, player buildings, enemy buildings)
+    /// Selected entities only (for health bars).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn selected_infos(&self) -> Vec<UnitInfo> {
+        let sel: HashSet<u32> = self.selected.iter().copied().collect();
+        self.curr
+            .iter()
+            .filter(|s| sel.contains(&s.index))
+            .map(|s| self.info(s))
+            .collect()
+    }
+
+    /// Your infantry world positions (for drag-box highlight).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn player_units(&self) -> Vec<UnitInfo> {
+        self.curr
+            .iter()
+            .filter(|s| s.owner == 0 && s.kind == Kind::Infantry)
+            .map(|s| self.info(s))
+            .collect()
+    }
+
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn counts(&self) -> (u32, u32, u32, u32) {
-        let mut c = (0, 0, 0, 0);
+        let mut c = (0u32, 0u32, 0u32, 0u32);
         for s in &self.curr {
+            let (wx, wz) = self.lerped(s);
+            if !self.revealed(s, wx, wz) {
+                continue;
+            }
             match (s.owner, s.kind) {
                 (0, Kind::Infantry) => c.0 += 1,
                 (_, Kind::Infantry) => c.1 += 1,
@@ -246,7 +360,7 @@ impl Game {
 
     // ---- input → selection / orders ----
 
-    fn find_player_unit(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
+    fn nearest_player(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
         let mut best: Option<(u32, f32)> = None;
         for s in &self.curr {
             if s.owner != 0 || s.kind != Kind::Infantry {
@@ -260,14 +374,18 @@ impl Game {
         best.map(|(i, _)| i)
     }
 
-    fn find_enemy(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
+    fn nearest_enemy(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
         let mut best: Option<(u32, f32)> = None;
         for s in &self.curr {
             if s.owner == 0 {
                 continue;
             }
-            let pad = if s.kind == Kind::Barracks { 5.0 } else { 0.0 };
-            let d = (f(s.pos.x) - wx).hypot(f(s.pos.y) - wz) - pad;
+            let (ex, ez) = (f(s.pos.x), f(s.pos.y));
+            if !self.cell_visible(ex, ez) {
+                continue;
+            }
+            let pad = if s.kind == Kind::Barracks { 6.0 } else { 0.0 };
+            let d = (ex - wx).hypot(ez - wz) - pad;
             if d <= r && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((s.index, d));
             }
@@ -277,7 +395,7 @@ impl Game {
 
     pub fn select_single(&mut self, wx: f32, wz: f32) {
         self.selected.clear();
-        if let Some(i) = self.find_player_unit(wx, wz, 2.5) {
+        if let Some(i) = self.nearest_player(wx, wz, 4.0) {
             self.selected.push(i);
         }
     }
@@ -297,20 +415,16 @@ impl Game {
         }
     }
 
-    /// Right-click: attack an enemy near the point, else attack-move there.
     pub fn order(&mut self, wx: f32, wz: f32) {
         if self.selected.is_empty() {
             return;
         }
-        let (x, y) = (
-            Fx::from_raw((wx * (1 << FRAC_BITS) as f32) as i64),
-            Fx::from_raw((wz * (1 << FRAC_BITS) as f32) as i64),
-        );
-        if let Some(target) = self.find_enemy(wx, wz, 3.0) {
+        if let Some(target) = self.nearest_enemy(wx, wz, 4.0) {
             for &u in &self.selected {
                 self.pending.push(Command::Attack { unit: u, target });
             }
         } else {
+            let (x, y) = (fx(wx), fx(wz));
             for &u in &self.selected {
                 self.pending.push(Command::AttackMove { unit: u, x, y });
             }

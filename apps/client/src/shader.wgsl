@@ -1,20 +1,22 @@
-// RTS world: heightmap terrain (grass/dirt/cliff/sand), animated water, lit unit
-// boxes, and ground selection rings — with distance fog. Presentation-only.
+// RTS world: textured heightmap terrain (grass/dirt/rock/sand) with fog-of-war
+// darkening, animated water, lit unit boxes, and selection rings.
 
 struct Camera {
     view_proj: mat4x4<f32>,
-    eye: vec4<f32>,       // camera world position
-    light_dir: vec4<f32>, // direction TO the sun (xyz)
-    params: vec4<f32>,    // x = time, y = fog density, z = sea level
+    eye: vec4<f32>,
+    light_dir: vec4<f32>,
+    params: vec4<f32>, // x = time, y = map half-size, z = sea level
 };
 @group(0) @binding(0) var<uniform> cam: Camera;
 
-fn apply_fog(color: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
-    let d = distance(world, cam.eye.xyz);
-    let f = clamp(1.0 - exp(-d * cam.params.y), 0.0, 1.0);
-    let fog_col = vec3<f32>(0.46, 0.56, 0.68);
-    return mix(color, fog_col, f);
-}
+// group 1: terrain tiles + fog-of-war (also bound to the water pipeline).
+@group(1) @binding(0) var t_grass: texture_2d<f32>;
+@group(1) @binding(1) var t_dirt: texture_2d<f32>;
+@group(1) @binding(2) var t_rock: texture_2d<f32>;
+@group(1) @binding(3) var t_sand: texture_2d<f32>;
+@group(1) @binding(4) var t_fow: texture_2d<f32>;
+@group(1) @binding(5) var samp_tile: sampler;
+@group(1) @binding(6) var samp_fow: sampler;
 
 fn hash2(p: vec2<f32>) -> f32 {
     return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.547);
@@ -28,6 +30,13 @@ fn noise2(p: vec2<f32>) -> f32 {
     let d = hash2(i + vec2<f32>(1.0, 1.0));
     let u = f * f * (3.0 - 2.0 * f);
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// Fog-of-war brightness at a world point: ~0.06 unexplored, ~0.45 explored, 1 visible.
+fn fow(world: vec3<f32>) -> f32 {
+    let uv = (world.xz + vec2<f32>(cam.params.y)) / (2.0 * cam.params.y);
+    let v = textureSample(t_fow, samp_fow, uv).r;
+    return max(0.06, v);
 }
 
 // ---------------- terrain ----------------
@@ -48,19 +57,21 @@ fn vs_terrain(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>) -> Te
 fn fs_terrain(in: TerrainOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let slope = clamp(1.0 - n.y, 0.0, 1.0);
-    let nz = noise2(in.world.xz * 0.25);
+    let uv = in.world.xz * 0.25;
 
-    var base = mix(vec3<f32>(0.17, 0.40, 0.15), vec3<f32>(0.36, 0.30, 0.16), nz * 0.7);
-    // sand near the waterline
-    let near = smoothstep(cam.params.z + 1.6, cam.params.z - 0.4, in.world.y);
-    base = mix(base, vec3<f32>(0.62, 0.57, 0.38), near * 0.85);
-    // rocky cliffs on steep slopes
-    let rock = mix(vec3<f32>(0.30, 0.28, 0.26), vec3<f32>(0.19, 0.18, 0.17), nz);
-    base = mix(base, rock, smoothstep(0.34, 0.6, slope));
+    let grass = textureSample(t_grass, samp_tile, uv).rgb;
+    let dirt = textureSample(t_dirt, samp_tile, uv).rgb;
+    let rock = textureSample(t_rock, samp_tile, uv).rgb;
+    let sand = textureSample(t_sand, samp_tile, uv).rgb;
+
+    var col = grass;
+    col = mix(col, dirt, smoothstep(0.45, 0.75, noise2(in.world.xz * 0.03)));
+    col = mix(col, sand, smoothstep(cam.params.z + 2.5, cam.params.z - 0.5, in.world.y));
+    col = mix(col, rock, smoothstep(0.32, 0.55, slope));
 
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    var col = base * (0.40 + 0.75 * ndl);
-    return vec4<f32>(apply_fog(col, in.world), 1.0);
+    col = col * (0.45 + 0.7 * ndl) * fow(in.world);
+    return vec4<f32>(col, 1.0);
 }
 
 // ---------------- water ----------------
@@ -78,22 +89,21 @@ fn vs_water(@location(0) pos: vec3<f32>) -> WaterOut {
 @fragment
 fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
     let t = cam.params.x;
-    let wx = sin(in.world.x * 0.30 + t * 1.3);
-    let wz = cos(in.world.z * 0.27 - t * 1.1);
-    let n = normalize(vec3<f32>(wx * 0.15, 1.0, wz * 0.15));
-    let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    let tone = 0.5 + 0.5 * (wx + wz) * 0.5;
-    var col = mix(vec3<f32>(0.03, 0.15, 0.29), vec3<f32>(0.10, 0.34, 0.47), tone);
-    col += vec3<f32>(ndl * 0.18);
-    return vec4<f32>(apply_fog(col, in.world), 0.74);
+    let wx = sin(in.world.x * 0.06 + t * 1.2);
+    let wz = cos(in.world.z * 0.055 - t * 1.0);
+    let nrm = normalize(vec3<f32>(wx * 0.18, 1.0, wz * 0.18));
+    let ndl = max(dot(nrm, normalize(cam.light_dir.xyz)), 0.0);
+    let tone = 0.5 + 0.25 * (wx + wz);
+    var col = mix(vec3<f32>(0.05, 0.18, 0.32), vec3<f32>(0.12, 0.40, 0.52), tone);
+    col = (col + vec3<f32>(ndl * 0.15)) * fow(in.world);
+    return vec4<f32>(col, 0.80);
 }
 
 // ---------------- units / buildings ----------------
 struct UnitOut {
     @builtin(position) clip: vec4<f32>,
-    @location(0) world: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) color: vec3<f32>,
+    @location(0) normal: vec3<f32>,
+    @location(1) color: vec3<f32>,
 };
 @vertex
 fn vs_unit(
@@ -104,19 +114,16 @@ fn vs_unit(
     @location(4) color: vec4<f32>,
 ) -> UnitOut {
     var o: UnitOut;
-    let world = pos * scale + offset;
-    o.world = world;
     o.normal = normal;
     o.color = color.rgb;
-    o.clip = cam.view_proj * vec4<f32>(world, 1.0);
+    o.clip = cam.view_proj * vec4<f32>(pos * scale + offset, 1.0);
     return o;
 }
 @fragment
 fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    var col = in.color * (0.36 + 0.72 * ndl);
-    return vec4<f32>(apply_fog(col, in.world), 1.0);
+    return vec4<f32>(in.color * (0.45 + 0.7 * ndl), 1.0);
 }
 
 // ---------------- selection rings ----------------
@@ -133,7 +140,7 @@ fn vs_ring(
     @location(3) color: vec4<f32>,
 ) -> RingOut {
     var o: RingOut;
-    let world = center + vec3<f32>(quad.x * radius, 0.06, quad.y * radius);
+    let world = center + vec3<f32>(quad.x * radius, 0.1, quad.y * radius);
     o.uv = quad;
     o.color = color;
     o.clip = cam.view_proj * vec4<f32>(world, 1.0);
@@ -142,7 +149,7 @@ fn vs_ring(
 @fragment
 fn fs_ring(in: RingOut) -> @location(0) vec4<f32> {
     let r = length(in.uv);
-    let a = smoothstep(1.0, 0.93, r) * smoothstep(0.78, 0.88, r);
+    let a = smoothstep(1.0, 0.92, r) * smoothstep(0.74, 0.85, r);
     if (a < 0.02) {
         discard;
     }

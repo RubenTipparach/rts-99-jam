@@ -1,22 +1,22 @@
-//! Orbiting RTS camera: pan, zoom, rotate, plus screen<->world helpers for
-//! picking (mouse → ground) and projection (unit → screen, for the HUD).
+//! Fixed-angle RTS camera (no rotation): pan + zoom only, with screen<->world
+//! helpers for picking (mouse → ground) and projection (world → screen).
 
 use glam::{Mat4, Vec2, Vec3, Vec4Swizzles};
+
+// Fixed isometric-ish viewing angle (StarCraft/WC3 style).
+const YAW: f32 = 0.9;
+const PITCH: f32 = 0.95;
 
 pub struct Camera {
     target: Vec2, // look-at point on the ground (world x, z)
     distance: f32,
-    yaw: f32,
-    pitch: f32,
 }
 
 impl Default for Camera {
     fn default() -> Self {
         Camera {
-            target: Vec2::ZERO,
-            distance: 70.0,
-            yaw: 0.8,
-            pitch: 0.95,
+            target: Vec2::new(0.0, 220.0), // start near the player's base (south)
+            distance: 150.0,
         }
     }
 }
@@ -25,9 +25,9 @@ impl Camera {
     fn eye_target(&self) -> (Vec3, Vec3) {
         let t = Vec3::new(self.target.x, 0.0, self.target.y);
         let dir = Vec3::new(
-            self.yaw.cos() * self.pitch.cos(),
-            self.pitch.sin(),
-            self.yaw.sin() * self.pitch.cos(),
+            YAW.cos() * PITCH.cos(),
+            PITCH.sin(),
+            YAW.sin() * PITCH.cos(),
         );
         (t + dir * self.distance, t)
     }
@@ -39,7 +39,7 @@ impl Camera {
     fn mat(&self, aspect: f32) -> Mat4 {
         let (eye, target) = self.eye_target();
         let view = Mat4::look_at_rh(eye, target, Vec3::Y);
-        let proj = Mat4::perspective_rh(58f32.to_radians(), aspect.max(0.1), 0.5, 1000.0);
+        let proj = Mat4::perspective_rh(54f32.to_radians(), aspect.max(0.1), 1.0, 3000.0);
         proj * view
     }
 
@@ -47,8 +47,6 @@ impl Camera {
         self.mat(aspect).to_cols_array_2d()
     }
 
-    /// Intersect the ray through screen pixel (sx, sy) with the ground plane
-    /// y = 0; returns world (x, z).
     pub fn ground_pick(&self, sx: f32, sy: f32, w: f32, h: f32) -> Option<(f32, f32)> {
         if w <= 0.0 || h <= 0.0 {
             return None;
@@ -70,7 +68,6 @@ impl Camera {
         Some((hit.x, hit.z))
     }
 
-    /// Project a world point to screen pixels; `None` if behind the camera.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn project(&self, world: Vec3, w: f32, h: f32) -> Option<(f32, f32)> {
         let clip = self.mat(w / h) * world.extend(1.0);
@@ -82,20 +79,15 @@ impl Camera {
     }
 
     pub fn zoom(&mut self, units: f32) {
-        self.distance = (self.distance * (1.0 - units * 0.12)).clamp(16.0, 200.0);
-    }
-
-    pub fn rotate(&mut self, dx: f32, dy: f32) {
-        self.yaw += dx * 0.006;
-        self.pitch = (self.pitch + dy * 0.006).clamp(0.25, 1.45);
+        self.distance = (self.distance * (1.0 - units * 0.12)).clamp(40.0, 520.0);
     }
 
     pub fn pan(&mut self, fwd: f32, right: f32, dt: f32) {
-        let speed = self.distance * 0.9 * dt;
-        let (s, c) = (self.yaw.sin(), self.yaw.cos());
+        let speed = self.distance * 1.1 * dt;
+        let (s, c) = (YAW.sin(), YAW.cos());
         self.target.x += (c * fwd + s * right) * speed;
         self.target.y += (s * fwd - c * right) * speed;
-        let lim = 70.0;
+        let lim = 560.0;
         self.target.x = self.target.x.clamp(-lim, lim);
         self.target.y = self.target.y.clamp(-lim, lim);
     }
