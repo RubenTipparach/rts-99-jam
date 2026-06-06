@@ -73,7 +73,7 @@ fn stats(kind: Kind) -> Stats {
 const PROD_TICKS: i32 = 55;
 const TEAM_UNIT_CAP: usize = 30;
 
-/// One entity as seen by the renderer/HUD (read-only; client converts to f32).
+/// One entity as seen by the renderer/HUD (read-only; client converts to floats).
 #[derive(Clone, Copy)]
 pub struct Snap {
     pub index: u32,
