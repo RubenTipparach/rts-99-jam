@@ -386,43 +386,45 @@ impl Gfx {
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
+        // Linear filtering on the fog field gives soft, feathered borders
+        // instead of blocky per-cell steps.
         let fow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("fow-samp"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
 
-        let tex_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+        let tex_entry = |binding: u32, filterable: bool| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                sample_type: wgpu::TextureSampleType::Float { filterable },
                 view_dimension: wgpu::TextureViewDimension::D2,
                 multisampled: false,
             },
             count: None,
         };
-        let samp_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+        let samp_entry = |binding: u32, ty: wgpu::SamplerBindingType| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            ty: wgpu::BindingType::Sampler(ty),
             count: None,
         };
         let terrain_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain-layout"),
             entries: &[
-                tex_entry(0),
-                tex_entry(1),
-                tex_entry(2),
-                tex_entry(3),
-                tex_entry(4),
-                samp_entry(5),
-                samp_entry(6),
+                tex_entry(0, false), // grass — nearest (PS1 look)
+                tex_entry(1, false), // dirt
+                tex_entry(2, false), // rock
+                tex_entry(3, false), // sand
+                tex_entry(4, true),  // fog of war — linear-filtered soft borders
+                samp_entry(5, wgpu::SamplerBindingType::NonFiltering), // tiles
+                samp_entry(6, wgpu::SamplerBindingType::Filtering), // fow
             ],
         });
         let terrain_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {

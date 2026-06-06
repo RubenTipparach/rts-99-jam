@@ -85,8 +85,10 @@ impl Camera {
     pub fn pan(&mut self, fwd: f32, right: f32, dt: f32) {
         let speed = self.distance * 1.1 * dt;
         let (s, c) = (YAW.sin(), YAW.cos());
-        self.target.x += (c * fwd + s * right) * speed;
-        self.target.y += (s * fwd - c * right) * speed;
+        // Screen-forward (W) points "into" the view — toward -dir on the
+        // ground; screen-right (D) follows the camera's right axis.
+        self.target.x += (-c * fwd + s * right) * speed;
+        self.target.y += (-s * fwd - c * right) * speed;
         let lim = 560.0;
         self.target.x = self.target.x.clamp(-lim, lim);
         self.target.y = self.target.y.clamp(-lim, lim);

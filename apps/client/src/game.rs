@@ -221,18 +221,42 @@ impl Game {
         }
     }
 
+    /// Fog-of-war as an R8 field for the terrain shader: visible = bright,
+    /// explored = dim, unexplored = dark. A light separable blur feathers the
+    /// borders so the fog fades in smoothly rather than stepping per cell.
+    /// (Units don't read this — they're shown/hidden outright via `revealed`.)
     pub fn fow_bytes(&self) -> Vec<u8> {
-        let mut b = vec![0u8; FOW_RES * FOW_RES];
-        for (i, o) in b.iter_mut().enumerate() {
-            *o = if self.visible[i] {
-                255
+        let n = FOW_RES;
+        let mut field = vec![0f32; n * n];
+        for (i, v) in field.iter_mut().enumerate() {
+            *v = if self.visible[i] {
+                1.0
             } else if self.explored[i] {
-                115
+                0.45
             } else {
-                0
+                0.0
             };
         }
-        b
+        let r = 2i32;
+        let blur = |src: &[f32], horizontal: bool| {
+            let mut out = vec![0f32; n * n];
+            for y in 0..n as i32 {
+                for x in 0..n as i32 {
+                    let (mut sum, mut cnt) = (0.0f32, 0.0f32);
+                    for k in -r..=r {
+                        let (sx, sy) = if horizontal { (x + k, y) } else { (x, y + k) };
+                        if sx >= 0 && sy >= 0 && sx < n as i32 && sy < n as i32 {
+                            sum += src[(sy * n as i32 + sx) as usize];
+                            cnt += 1.0;
+                        }
+                    }
+                    out[(y * n as i32 + x) as usize] = sum / cnt;
+                }
+            }
+            out
+        };
+        let blurred = blur(&blur(&field, true), false);
+        blurred.iter().map(|v| (v * 255.0) as u8).collect()
     }
 
     fn cell_visible(&self, wx: f32, wz: f32) -> bool {

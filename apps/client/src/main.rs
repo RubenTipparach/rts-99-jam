@@ -51,6 +51,7 @@ struct Input {
     left: bool,
     right: bool,
     cursor: (f32, f32),
+    cursor_in: bool,
     left_press: Option<(f32, f32)>,
 }
 
@@ -193,7 +194,10 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.input.cursor = (position.x as f32, position.y as f32);
+                self.input.cursor_in = true;
             }
+            WindowEvent::CursorEntered { .. } => self.input.cursor_in = true,
+            WindowEvent::CursorLeft { .. } => self.input.cursor_in = false,
             WindowEvent::MouseWheel { delta, .. } => {
                 let units = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
@@ -218,8 +222,27 @@ impl ApplicationHandler<UserEvent> for App {
                 let dt = (now - self.last_frame).as_secs_f32().min(0.1);
                 self.last_frame = now;
 
-                let fwd = (self.input.fwd as i32 - self.input.back as i32) as f32;
-                let right = (self.input.right as i32 - self.input.left as i32) as f32;
+                let mut fwd = (self.input.fwd as i32 - self.input.back as i32) as f32;
+                let mut right = (self.input.right as i32 - self.input.left as i32) as f32;
+                // Edge panning: scroll the camera when the cursor rests near a
+                // screen edge (only while the pointer is inside the window).
+                if self.input.cursor_in {
+                    let (sw, sh) = self.dims();
+                    let (cx, cy) = self.input.cursor;
+                    const EDGE: f32 = 28.0;
+                    if sw > 1.0 && sh > 1.0 {
+                        if cx <= EDGE {
+                            right -= 1.0;
+                        } else if cx >= sw - EDGE {
+                            right += 1.0;
+                        }
+                        if cy <= EDGE {
+                            fwd += 1.0;
+                        } else if cy >= sh - EDGE {
+                            fwd -= 1.0;
+                        }
+                    }
+                }
                 if fwd != 0.0 || right != 0.0 {
                     self.camera.pan(fwd, right, dt);
                 }
