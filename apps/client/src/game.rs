@@ -25,12 +25,13 @@ fn fx(v: f32) -> Fx {
     Fx::from_raw((v * (1u64 << FRAC_BITS) as f32) as i64)
 }
 
-fn team_color(owner: u16, barracks: bool) -> [f32; 4] {
-    match (owner, barracks) {
-        (0, false) => [0.36, 0.60, 0.98, 1.0],
-        (0, true) => [0.22, 0.40, 0.72, 1.0],
-        (_, false) => [0.95, 0.36, 0.28, 1.0],
-        (_, true) => [0.64, 0.22, 0.18, 1.0],
+/// Faction tint applied to the team-colored parts of a mesh (tabards, pauldrons,
+/// helmet plumes, banners, flags). Neutral materials ignore it.
+fn team_color(owner: u16) -> [f32; 4] {
+    if owner == 0 {
+        [0.25, 0.55, 1.0, 1.0]
+    } else {
+        [0.95, 0.30, 0.24, 1.0]
     }
 }
 
@@ -277,9 +278,12 @@ impl Game {
 
     // ---- render + HUD data ----
 
-    pub fn render_data(&self) -> (Vec<InstanceRaw>, Vec<RingRaw>) {
+    /// Instances for the infantry mesh, the barracks mesh, and selection rings.
+    /// Meshes are authored at world scale, so instance scale is ~1.
+    pub fn render_data(&self) -> (Vec<InstanceRaw>, Vec<InstanceRaw>, Vec<RingRaw>) {
         let sel: HashSet<u32> = self.selected.iter().copied().collect();
-        let mut units = Vec::with_capacity(self.curr.len());
+        let mut infantry = Vec::new();
+        let mut barracks = Vec::new();
         let mut rings = Vec::new();
         for s in &self.curr {
             let (wx, wz) = self.lerped(s);
@@ -287,29 +291,43 @@ impl Game {
                 continue;
             }
             let ground = terrain::height(wx, wz);
-            let barracks = s.kind == Kind::Barracks;
-            let (scale, mut y) = if barracks {
-                ([10.0, 6.0, 10.0], ground)
-            } else {
-                ([1.4, 2.4, 1.4], ground)
-            };
-            if !barracks && s.moving {
-                y += ((self.time * 9.0) + s.index as f32 * 1.3).sin() * 0.18;
-            }
-            units.push(InstanceRaw {
-                offset: [wx, y, wz],
-                scale,
-                color: team_color(s.owner, barracks),
-            });
-            if sel.contains(&s.index) {
-                rings.push(RingRaw {
-                    center: [wx, ground, wz],
-                    radius: if barracks { 8.0 } else { 2.2 },
-                    color: [0.4, 1.0, 0.5, 0.95],
+            let tint = team_color(s.owner);
+            if s.kind == Kind::Barracks {
+                barracks.push(InstanceRaw {
+                    offset: [wx, ground, wz],
+                    scale: [1.0, 1.0, 1.0],
+                    color: tint,
                 });
+                if sel.contains(&s.index) {
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: 8.0,
+                        color: [0.4, 1.0, 0.5, 0.95],
+                    });
+                }
+            } else {
+                // A little deterministic size variety plus a march bob.
+                let v = (s.index.wrapping_mul(2_654_435_761) % 1000) as f32 / 1000.0;
+                let scl = 0.92 + v * 0.16;
+                let mut y = ground;
+                if s.moving {
+                    y += ((self.time * 9.0) + s.index as f32 * 1.3).sin() * 0.12;
+                }
+                infantry.push(InstanceRaw {
+                    offset: [wx, y, wz],
+                    scale: [scl, scl, scl],
+                    color: tint,
+                });
+                if sel.contains(&s.index) {
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: 2.2,
+                        color: [0.4, 1.0, 0.5, 0.95],
+                    });
+                }
             }
         }
-        (units, rings)
+        (infantry, barracks, rings)
     }
 
     fn info(&self, s: &Snap) -> UnitInfo {

@@ -1,5 +1,6 @@
-//! wgpu rendering: textured heightmap terrain, animated water, instanced lit
-//! unit boxes, selection rings, and a fog-of-war texture. Presentation-only.
+//! wgpu rendering: textured heightmap terrain, animated water, instanced
+//! low-poly units & buildings (vertex-colored with team tint), selection rings,
+//! and a fog-of-war texture. Presentation-only.
 
 use crate::terrain;
 use std::sync::Arc;
@@ -28,6 +29,16 @@ struct Vertex3 {
     normal: [f32; 3],
 }
 
+/// A unit/building mesh vertex. `color.rgb` is the material color; `color.a` is
+/// the team-tint weight (0 = keep material, 1 = full faction color).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct UnitVertex {
+    pos: [f32; 3],
+    normal: [f32; 3],
+    color: [f32; 4],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
@@ -42,72 +53,275 @@ pub const MAX_RINGS: usize = 1024;
 pub const FOW_RES: usize = 256;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-fn cube_vertices() -> Vec<Vertex3> {
-    let (lo, hi) = (-0.5f32, 0.5f32);
-    let p = |x: f32, y: f32, z: f32| [x, y, z];
-    let faces: [([f32; 3], [[f32; 3]; 4]); 6] = [
-        (
-            [1.0, 0.0, 0.0],
-            [
-                p(hi, 0.0, lo),
-                p(hi, 0.0, hi),
-                p(hi, 1.0, hi),
-                p(hi, 1.0, lo),
-            ],
-        ),
-        (
-            [-1.0, 0.0, 0.0],
-            [
-                p(lo, 0.0, hi),
-                p(lo, 0.0, lo),
-                p(lo, 1.0, lo),
-                p(lo, 1.0, hi),
-            ],
-        ),
-        (
-            [0.0, 1.0, 0.0],
-            [
-                p(lo, 1.0, lo),
-                p(hi, 1.0, lo),
-                p(hi, 1.0, hi),
-                p(lo, 1.0, hi),
-            ],
-        ),
-        (
-            [0.0, -1.0, 0.0],
-            [
-                p(lo, 0.0, hi),
-                p(hi, 0.0, hi),
-                p(hi, 0.0, lo),
-                p(lo, 0.0, lo),
-            ],
-        ),
-        (
-            [0.0, 0.0, 1.0],
-            [
-                p(hi, 0.0, hi),
-                p(lo, 0.0, hi),
-                p(lo, 1.0, hi),
-                p(hi, 1.0, hi),
-            ],
-        ),
-        (
-            [0.0, 0.0, -1.0],
-            [
-                p(lo, 0.0, lo),
-                p(hi, 0.0, lo),
-                p(hi, 1.0, lo),
-                p(lo, 1.0, lo),
-            ],
-        ),
-    ];
-    let mut out = Vec::with_capacity(36);
-    for (normal, q) in faces {
-        for i in [0usize, 1, 2, 0, 2, 3] {
-            out.push(Vertex3 { pos: q[i], normal });
-        }
+// --- low-poly mesh building (vertex-colored, flat-shaded) ---------------------
+//
+// Meshes are composed from boxes and a gable roof. Face normals are computed and
+// oriented outward from the primitive's center, so winding never matters (the
+// unit pipeline doesn't cull) and lighting is always correct.
+
+fn v_sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn v_cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+fn v_normalize(a: [f32; 3]) -> [f32; 3] {
+    let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    if l > 1e-6 {
+        [a[0] / l, a[1] / l, a[2] / l]
+    } else {
+        [0.0, 1.0, 0.0]
     }
-    out
+}
+
+/// One triangle, with an outward normal (flipped to point away from `center`).
+fn push_tri(
+    out: &mut Vec<UnitVertex>,
+    a: [f32; 3],
+    b: [f32; 3],
+    c: [f32; 3],
+    center: [f32; 3],
+    color: [f32; 4],
+) {
+    let mut n = v_normalize(v_cross(v_sub(b, a), v_sub(c, a)));
+    let mid = [
+        (a[0] + b[0] + c[0]) / 3.0,
+        (a[1] + b[1] + c[1]) / 3.0,
+        (a[2] + b[2] + c[2]) / 3.0,
+    ];
+    let outward = v_sub(mid, center);
+    if n[0] * outward[0] + n[1] * outward[1] + n[2] * outward[2] < 0.0 {
+        n = [-n[0], -n[1], -n[2]];
+    }
+    for p in [a, b, c] {
+        out.push(UnitVertex {
+            pos: p,
+            normal: n,
+            color,
+        });
+    }
+}
+
+fn push_quad(
+    out: &mut Vec<UnitVertex>,
+    a: [f32; 3],
+    b: [f32; 3],
+    c: [f32; 3],
+    d: [f32; 3],
+    center: [f32; 3],
+    color: [f32; 4],
+) {
+    push_tri(out, a, b, c, center, color);
+    push_tri(out, a, c, d, center, color);
+}
+
+/// An axis-aligned box from `min` to `max`, with `team` as the tint weight.
+fn push_box(out: &mut Vec<UnitVertex>, min: [f32; 3], max: [f32; 3], rgb: [f32; 3], team: f32) {
+    let c = [
+        (min[0] + max[0]) * 0.5,
+        (min[1] + max[1]) * 0.5,
+        (min[2] + max[2]) * 0.5,
+    ];
+    let col = [rgb[0], rgb[1], rgb[2], team];
+    let (x0, y0, z0) = (min[0], min[1], min[2]);
+    let (x1, y1, z1) = (max[0], max[1], max[2]);
+    let p = |x: f32, y: f32, z: f32| [x, y, z];
+    push_quad(
+        out,
+        p(x0, y0, z1),
+        p(x1, y0, z1),
+        p(x1, y1, z1),
+        p(x0, y1, z1),
+        c,
+        col,
+    ); // +z
+    push_quad(
+        out,
+        p(x1, y0, z0),
+        p(x0, y0, z0),
+        p(x0, y1, z0),
+        p(x1, y1, z0),
+        c,
+        col,
+    ); // -z
+    push_quad(
+        out,
+        p(x1, y0, z1),
+        p(x1, y0, z0),
+        p(x1, y1, z0),
+        p(x1, y1, z1),
+        c,
+        col,
+    ); // +x
+    push_quad(
+        out,
+        p(x0, y0, z0),
+        p(x0, y0, z1),
+        p(x0, y1, z1),
+        p(x0, y1, z0),
+        c,
+        col,
+    ); // -x
+    push_quad(
+        out,
+        p(x0, y1, z1),
+        p(x1, y1, z1),
+        p(x1, y1, z0),
+        p(x0, y1, z0),
+        c,
+        col,
+    ); // +y
+    push_quad(
+        out,
+        p(x0, y0, z0),
+        p(x1, y0, z0),
+        p(x1, y0, z1),
+        p(x0, y0, z1),
+        c,
+        col,
+    ); // -y
+}
+
+/// A gable roof: ridge along x, eaves at `base_y`, peak at `base_y + peak_h`.
+#[allow(clippy::too_many_arguments)]
+fn push_roof(
+    out: &mut Vec<UnitVertex>,
+    cx: f32,
+    cz: f32,
+    hx: f32,
+    hz: f32,
+    base_y: f32,
+    peak_h: f32,
+    rgb: [f32; 3],
+) {
+    let peak = base_y + peak_h;
+    let c = [cx, base_y + peak_h * 0.5, cz];
+    let col = [rgb[0], rgb[1], rgb[2], 0.0];
+    let ra = [cx - hx, peak, cz];
+    let rb = [cx + hx, peak, cz];
+    let fl = [cx - hx, base_y, cz + hz];
+    let fr = [cx + hx, base_y, cz + hz];
+    let bl = [cx - hx, base_y, cz - hz];
+    let br = [cx + hx, base_y, cz - hz];
+    push_quad(out, ra, rb, fr, fl, c, col); // front slope
+    push_quad(out, ra, rb, br, bl, c, col); // back slope
+    push_tri(out, ra, fl, bl, c, col); // gable -x
+    push_tri(out, rb, fr, br, c, col); // gable +x
+}
+
+/// A low-poly infantry soldier, ~2.4 units tall, facing -z.
+fn infantry_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let trousers = [0.20, 0.22, 0.27];
+    let leather = [0.45, 0.35, 0.27];
+    let skin = [0.80, 0.62, 0.48];
+    let metal = [0.54, 0.57, 0.64];
+    let wood = [0.40, 0.27, 0.16];
+    // Legs.
+    push_box(
+        &mut m,
+        [-0.34, 0.0, -0.25],
+        [-0.04, 0.95, 0.25],
+        trousers,
+        0.0,
+    );
+    push_box(
+        &mut m,
+        [0.04, 0.0, -0.25],
+        [0.34, 0.95, 0.25],
+        trousers,
+        0.0,
+    );
+    // Arms (under the pauldrons).
+    push_box(
+        &mut m,
+        [-0.5, 1.0, -0.18],
+        [-0.34, 1.52, 0.18],
+        leather,
+        0.0,
+    );
+    push_box(&mut m, [0.34, 1.0, -0.18], [0.5, 1.52, 0.18], leather, 0.0);
+    // Torso + shoulder pauldrons (team-colored tabard/armor).
+    push_box(
+        &mut m,
+        [-0.42, 0.92, -0.3],
+        [0.42, 1.72, 0.3],
+        [0.5, 0.5, 0.5],
+        1.0,
+    );
+    push_box(
+        &mut m,
+        [-0.52, 1.5, -0.28],
+        [-0.32, 1.72, 0.28],
+        [0.5, 0.5, 0.5],
+        1.0,
+    );
+    push_box(
+        &mut m,
+        [0.32, 1.5, -0.28],
+        [0.52, 1.72, 0.28],
+        [0.5, 0.5, 0.5],
+        1.0,
+    );
+    // Head + helmet + team plume.
+    push_box(&mut m, [-0.22, 1.72, -0.2], [0.22, 2.12, 0.2], skin, 0.0);
+    push_box(&mut m, [-0.26, 2.0, -0.24], [0.26, 2.26, 0.24], metal, 0.0);
+    push_box(
+        &mut m,
+        [-0.05, 2.26, -0.16],
+        [0.05, 2.58, 0.1],
+        [0.5, 0.5, 0.5],
+        1.0,
+    );
+    // Spear on the right side, tip above the head.
+    push_box(&mut m, [0.5, 0.2, 0.0], [0.6, 2.5, 0.12], wood, 0.0);
+    push_box(&mut m, [0.48, 2.46, -0.02], [0.62, 2.72, 0.14], metal, 0.0);
+    m
+}
+
+/// A low-poly barracks, ~11 wide, facing -z; door + banners on the +z face.
+fn barracks_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let stone = [0.52, 0.50, 0.46];
+    let base = [0.38, 0.37, 0.34];
+    let roof = [0.42, 0.22, 0.18];
+    let door = [0.20, 0.14, 0.09];
+    let pole = [0.26, 0.22, 0.2];
+    // Foundation trim + walls.
+    push_box(&mut m, [-5.8, 0.0, -4.8], [5.8, 0.6, 4.8], base, 0.0);
+    push_box(&mut m, [-5.5, 0.5, -4.5], [5.5, 4.0, 4.5], stone, 0.0);
+    // Overhanging gable roof.
+    push_roof(&mut m, 0.0, 0.0, 6.0, 5.0, 4.0, 3.0, roof);
+    // Door + flanking team banners on the +z face.
+    push_box(&mut m, [-1.2, 0.0, 4.45], [1.2, 2.7, 4.65], door, 0.0);
+    push_box(
+        &mut m,
+        [-3.0, 1.0, 4.52],
+        [-2.3, 3.6, 4.66],
+        [0.5, 0.5, 0.5],
+        1.0,
+    );
+    push_box(
+        &mut m,
+        [2.3, 1.0, 4.52],
+        [3.0, 3.6, 4.66],
+        [0.5, 0.5, 0.5],
+        1.0,
+    );
+    // Rooftop flagpole + team flag.
+    push_box(&mut m, [-0.07, 7.0, -0.07], [0.07, 8.7, 0.07], pole, 0.0);
+    push_box(
+        &mut m,
+        [0.07, 7.85, -0.05],
+        [1.2, 8.55, 0.05],
+        [0.5, 0.5, 0.5],
+        1.0,
+    );
+    m
 }
 
 fn terrain_mesh() -> (Vec<Vertex3>, Vec<u32>) {
@@ -238,8 +452,10 @@ pub struct Gfx {
     terrain_ibuf: wgpu::Buffer,
     terrain_indices: u32,
     water_buf: wgpu::Buffer,
-    cube_buf: wgpu::Buffer,
-    cube_len: u32,
+    infantry_buf: wgpu::Buffer,
+    infantry_len: u32,
+    barracks_buf: wgpu::Buffer,
+    barracks_len: u32,
     ring_quad_buf: wgpu::Buffer,
     instance_buf: wgpu::Buffer,
     ring_buf: wgpu::Buffer,
@@ -503,6 +719,11 @@ impl Gfx {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
         };
+        let v3u = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<UnitVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 5 => Float32x4],
+        };
         let pos3 = wgpu::VertexBufferLayout {
             array_stride: 12,
             step_mode: wgpu::VertexStepMode::Vertex,
@@ -568,7 +789,7 @@ impl Gfx {
             &pl_plain,
             "vs_unit",
             "fs_unit",
-            &[v3, inst],
+            &[v3u, inst],
             &opaque_t,
             &depth_opaque,
         );
@@ -619,10 +840,16 @@ impl Gfx {
             bytemuck::cast_slice(&water),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let cube = cube_vertices();
-        let cube_buf = mkbuf(
-            "cube",
-            bytemuck::cast_slice(&cube),
+        let infantry = infantry_mesh();
+        let infantry_buf = mkbuf(
+            "infantry",
+            bytemuck::cast_slice(&infantry),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let barracks = barracks_mesh();
+        let barracks_buf = mkbuf(
+            "barracks",
+            bytemuck::cast_slice(&barracks),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
         let rq = ring_quad();
@@ -659,8 +886,10 @@ impl Gfx {
             terrain_ibuf,
             terrain_indices: ti.len() as u32,
             water_buf,
-            cube_buf,
-            cube_len: cube.len() as u32,
+            infantry_buf,
+            infantry_len: infantry.len() as u32,
+            barracks_buf,
+            barracks_len: barracks.len() as u32,
             ring_quad_buf,
             instance_buf,
             ring_buf,
@@ -692,14 +921,18 @@ impl Gfx {
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
-        units: &[InstanceRaw],
+        infantry: &[InstanceRaw],
+        barracks: &[InstanceRaw],
         rings: &[RingRaw],
         fow: &[u8],
         view_proj: [[f32; 4]; 4],
         eye: [f32; 3],
         time: f32,
     ) {
-        let nu = units.len().min(MAX_INSTANCES);
+        // Infantry and barracks share one instance buffer: infantry in [0..ni),
+        // barracks in [ni..ni+nb). Each mesh is drawn over its own range.
+        let ni = infantry.len().min(MAX_INSTANCES);
+        let nb = barracks.len().min(MAX_INSTANCES - ni);
         let nr = rings.len().min(MAX_RINGS);
         self.queue.write_buffer(
             &self.camera_buf,
@@ -732,9 +965,17 @@ impl Gfx {
                 },
             );
         }
-        if nu > 0 {
+        if ni > 0 {
             self.queue
-                .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&units[..nu]));
+                .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&infantry[..ni]));
+        }
+        if nb > 0 {
+            let off = (ni * std::mem::size_of::<InstanceRaw>()) as u64;
+            self.queue.write_buffer(
+                &self.instance_buf,
+                off,
+                bytemuck::cast_slice(&barracks[..nb]),
+            );
         }
         if nr > 0 {
             self.queue
@@ -793,11 +1034,17 @@ impl Gfx {
             pass.set_index_buffer(self.terrain_ibuf.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.terrain_indices, 0, 0..1);
 
-            if nu > 0 {
+            if ni > 0 || nb > 0 {
                 pass.set_pipeline(&self.unit_pipeline);
-                pass.set_vertex_buffer(0, self.cube_buf.slice(..));
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
-                pass.draw(0..self.cube_len, 0..nu as u32);
+                if ni > 0 {
+                    pass.set_vertex_buffer(0, self.infantry_buf.slice(..));
+                    pass.draw(0..self.infantry_len, 0..ni as u32);
+                }
+                if nb > 0 {
+                    pass.set_vertex_buffer(0, self.barracks_buf.slice(..));
+                    pass.draw(0..self.barracks_len, ni as u32..(ni + nb) as u32);
+                }
             }
 
             pass.set_pipeline(&self.water_pipeline);
@@ -814,5 +1061,37 @@ impl Gfx {
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check_mesh(verts: &[UnitVertex], name: &str) {
+        assert!(!verts.is_empty(), "{name} mesh is empty");
+        assert_eq!(verts.len() % 3, 0, "{name} mesh isn't whole triangles");
+        for (k, v) in verts.iter().enumerate() {
+            assert!(
+                v.pos.iter().all(|c| c.is_finite()),
+                "{name}[{k}] non-finite position"
+            );
+            let n = v.normal;
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            assert!(
+                (len - 1.0).abs() < 1e-3,
+                "{name}[{k}] normal not unit length ({len})"
+            );
+            assert!(
+                v.color[3] == 0.0 || v.color[3] == 1.0,
+                "{name}[{k}] team weight must be 0 or 1"
+            );
+        }
+    }
+
+    #[test]
+    fn unit_meshes_are_well_formed() {
+        check_mesh(&infantry_mesh(), "infantry");
+        check_mesh(&barracks_mesh(), "barracks");
     }
 }

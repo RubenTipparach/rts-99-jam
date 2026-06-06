@@ -103,19 +103,22 @@ fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
 struct UnitOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
-    @location(1) color: vec3<f32>,
+    @location(1) albedo: vec3<f32>,
 };
 @vertex
 fn vs_unit(
     @location(0) pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(5) mcol: vec4<f32>,
     @location(2) offset: vec3<f32>,
     @location(3) scale: vec3<f32>,
-    @location(4) color: vec4<f32>,
+    @location(4) tcol: vec4<f32>,
 ) -> UnitOut {
     var o: UnitOut;
     o.normal = normal;
-    o.color = color.rgb;
+    // mcol.a is the team-tint weight: blend the material toward the faction
+    // color so banners/tabards/plumes read as team color, metal/skin stay neutral.
+    o.albedo = mix(mcol.rgb, tcol.rgb, mcol.a);
     o.clip = cam.view_proj * vec4<f32>(pos * scale + offset, 1.0);
     return o;
 }
@@ -123,7 +126,7 @@ fn vs_unit(
 fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    return vec4<f32>(in.color * (0.45 + 0.7 * ndl), 1.0);
+    return vec4<f32>(in.albedo * (0.45 + 0.7 * ndl), 1.0);
 }
 
 // ---------------- selection rings ----------------

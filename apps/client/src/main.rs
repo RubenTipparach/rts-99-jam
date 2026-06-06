@@ -261,11 +261,12 @@ impl ApplicationHandler<UserEvent> for App {
 
                 if let Some(gfx) = self.gfx.as_mut() {
                     let aspect = gfx.aspect();
-                    let (units, rings) = self.game.render_data();
+                    let (infantry, barracks, rings) = self.game.render_data();
                     let fow = self.game.fow_bytes();
                     let vp = self.camera.view_proj(aspect);
                     gfx.render(
-                        &units,
+                        &infantry,
+                        &barracks,
                         &rings,
                         &fow,
                         vp,
