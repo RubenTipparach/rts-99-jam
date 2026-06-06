@@ -1,24 +1,23 @@
 name: deploy
 
-# Every push on every branch builds the wasm client and deploys it to GitHub
-# Pages — mirrors the working setup in RubenTipparach/sea-of-lost-souls
-# (peaceiris -> gh-pages branch). Publishes to the site root.
+# Deploy the wasm client to GitHub Pages using the "GitHub Actions" Pages source.
+# Runs on every branch.
 on:
   push:
     branches: ["**"]
   workflow_dispatch:
 
 permissions:
-  contents: write # publish to the gh-pages branch
-  pages: write # point Pages at that branch via the API (idempotent)
+  contents: read
+  pages: write
+  id-token: write
 
-# Serialize deploys so parallel branch builds don't race on gh-pages.
 concurrency:
-  group: pages-deploy
+  group: pages
   cancel-in-progress: false
 
 jobs:
-  build-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,26 +39,18 @@ jobs:
         working-directory: apps/client
         run: trunk build --release --public-url /rts-99-jam/
 
-      - name: Deploy to GitHub Pages (gh-pages branch)
-        uses: peaceiris/actions-gh-pages@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: apps/client/dist
-          force_orphan: true
+          path: apps/client/dist
 
-      # Make Pages serve the gh-pages branch (the source must be "branch", not
-      # "GitHub Actions"). Idempotent: creates the Pages site, or switches an
-      # existing one from the Actions build type to the gh-pages branch.
-      - name: Point Pages at the gh-pages branch
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          api="https://api.github.com/repos/${{ github.repository }}/pages"
-          hdr=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
-          body='{"build_type":"legacy","source":{"branch":"gh-pages","path":"/"}}'
-          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${hdr[@]}" "$api" -d "$body")
-          echo "POST /pages -> $code"
-          if [ "$code" != "201" ]; then
-            put=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "${hdr[@]}" "$api" -d "$body")
-            echo "PUT /pages -> $put (204 = switched to gh-pages branch)"
-          fi
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
