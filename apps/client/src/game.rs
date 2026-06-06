@@ -479,6 +479,18 @@ impl Game {
         }
     }
 
+    /// The local player's ore stockpile (for the HUD).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn player_ore(&self) -> f32 {
+        f(self.world.ore(0))
+    }
+
+    /// Ore cost to train one unit (for the HUD).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn train_cost(&self) -> f32 {
+        sim::TRAIN_COST as f32
+    }
+
     /// (queued, build-progress 0..1) for the selected building, for the HUD.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn selected_production(&self) -> Option<(u32, f32)> {

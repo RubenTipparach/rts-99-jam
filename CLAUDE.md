@@ -45,6 +45,12 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
   apart on arrival. Never issue the same destination to every selected unit.
 - If you add new mobile unit kinds, give them separation too (and a sensible
   per-kind spacing) so the no-stacking rule holds.
+- **No auto-production.** Every unit is queued by `Command::Train`; nothing
+  spawns on its own. Training costs **ore** (per-player stockpile in the sim,
+  income trickles in per building) — see `STARTING_ORE`/`TRAIN_COST`/
+  `INCOME_PER_BUILDING` in `crates/sim`. The player drives it from the HUD
+  command card (button / `T`); the enemy is static until an AI issues `Train`.
+  Ore is part of the state hash, so tuning it re-pins the golden value.
 
 ## Web UI policy (DOM vs WASM)
 

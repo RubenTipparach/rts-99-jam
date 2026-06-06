@@ -124,8 +124,9 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
     ctx.set_font("bold 16px monospace");
     let _ = ctx.fill_text(
         &format!(
-            "SOL DOMINION    your force: {pu} inf / {pb} barracks      visible enemy: {eu} inf / {eb} barracks      selected: {}",
-            game.selected_count()
+            "SOL DOMINION    ore {ore}      your force: {pu} inf / {pb} barracks      visible enemy: {eu} inf / {eb} barracks      selected: {}",
+            game.selected_count(),
+            ore = game.player_ore() as i64,
         ),
         14.0,
         24.0,
@@ -141,17 +142,27 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
     // Production command card when one of your buildings is selected.
     if let Some((queued, frac)) = game.selected_production() {
         let (bx, by, bw, bh) = train_btn_css(h);
+        let cost = game.train_cost() as i64;
+        let afford = game.player_ore() >= game.train_cost();
         ctx.set_fill_style_str("#cfe0ff");
         ctx.set_font("12px monospace");
         let _ = ctx.fill_text(&format!("BARRACKS — queue {queued}/6"), bx, by - 6.0);
-        ctx.set_fill_style_str("rgba(40,80,140,0.95)");
+        ctx.set_fill_style_str(if afford {
+            "rgba(40,80,140,0.95)"
+        } else {
+            "rgba(48,54,66,0.92)"
+        });
         ctx.fill_rect(bx, by, bw, bh);
         ctx.set_stroke_style_str("rgba(150,190,240,0.95)");
         ctx.set_line_width(1.5);
         ctx.stroke_rect(bx, by, bw, bh);
-        ctx.set_fill_style_str("#eaf2ff");
+        ctx.set_fill_style_str(if afford { "#eaf2ff" } else { "#8a93a4" });
         ctx.set_font("bold 14px monospace");
-        let _ = ctx.fill_text("Train Infantry  [T]", bx + 10.0, by + 22.0);
+        let _ = ctx.fill_text(
+            &format!("Train Infantry [T] — {cost}"),
+            bx + 10.0,
+            by + 22.0,
+        );
         if frac > 0.0 {
             ctx.set_fill_style_str("rgba(255,211,107,0.95)");
             ctx.fill_rect(bx, by + bh - 3.0, bw * frac.clamp(0.0, 1.0) as f64, 3.0);

@@ -74,6 +74,13 @@ const PROD_TICKS: i32 = 55;
 const TEAM_UNIT_CAP: usize = 30;
 const MAX_QUEUE: u32 = 6;
 
+// Economy: a single resource ("ore"). Players start with a stockpile, gain a
+// trickle of income per owned building, and pay per trained unit. Nobody
+// auto-produces — every unit is queued by command.
+const STARTING_ORE: i32 = 200;
+pub const TRAIN_COST: i32 = 50;
+const INCOME_PER_BUILDING: Fx = Fx::from_ratio(1, 2); // per building, per tick
+
 // Collision avoidance: infantry never share a spot. Each tick a unit is pushed
 // away from any other infantry whose center is closer than `SEP_DIST`, so a
 // crowd drifts apart and a group-move settles into distinct cells rather than
@@ -159,6 +166,8 @@ pub struct World {
     prod: Vec<Fx>,
     queue: Vec<u32>,
     rally: Vec<Vec3>,
+    /// Per-player ore stockpile, indexed by `PlayerId`.
+    ore: Vec<Fx>,
 }
 
 #[inline]
@@ -183,7 +192,24 @@ impl World {
             prod: Vec::new(),
             queue: Vec::new(),
             rally: Vec::new(),
+            ore: Vec::new(),
         }
+    }
+
+    /// A player's current ore (defaults to the starting stockpile).
+    pub fn ore(&self, player: PlayerId) -> Fx {
+        self.ore
+            .get(player as usize)
+            .copied()
+            .unwrap_or(Fx::from_int(STARTING_ORE))
+    }
+
+    fn ore_mut(&mut self, player: PlayerId) -> &mut Fx {
+        let i = player as usize;
+        while self.ore.len() <= i {
+            self.ore.push(Fx::from_int(STARTING_ORE));
+        }
+        &mut self.ore[i]
     }
 
     #[inline]
@@ -219,15 +245,11 @@ impl World {
         self.hp[i] = stats(kind).max_hp;
         self.order[i] = Order::Idle;
         self.cooldown[i] = Fx::ZERO;
-        // Enemy/AI barracks auto-produce; the player's produce only what is
-        // queued via Command::Train, so they start idle.
-        self.prod[i] = if kind == Kind::Barracks && owner != 0 {
-            Fx::from_int(PROD_TICKS)
-        } else {
-            Fx::ZERO
-        };
+        // Nobody auto-produces: a building stays idle until a unit is queued.
+        self.prod[i] = Fx::ZERO;
         self.queue[i] = 0;
-        // Default rally a little "south" of a building.
+        let _ = self.ore_mut(owner); // materialize the owner's stockpile
+                                     // Default rally a little "south" of a building.
         self.rally[i] = Vec3::new(x, y - Fx::from_int(7), Fx::ZERO);
         id
     }
@@ -264,9 +286,20 @@ impl World {
     pub fn step(&mut self, commands: &[Command]) {
         self.apply_commands(commands);
         self.acquire_targets();
+        self.economy();
         self.production();
         self.units_update();
         self.tick += 1;
+    }
+
+    /// Trickle ore income to each player for every building they own.
+    fn economy(&mut self) {
+        for i in 0..self.arena.capacity() {
+            if self.arena.alive[i] && self.kind[i] == Kind::Barracks {
+                let owner = self.owner[i];
+                *self.ore_mut(owner) += INCOME_PER_BUILDING;
+            }
+        }
     }
 
     fn apply_commands(&mut self, commands: &[Command]) {
@@ -295,10 +328,15 @@ impl World {
                 }
                 Command::Train { building } => {
                     let b = building as usize;
-                    if self.arena.alive_at(building) && self.kind[b] == Kind::Barracks {
-                        if self.queue[b] < MAX_QUEUE {
-                            self.queue[b] += 1;
-                        }
+                    let cost = Fx::from_int(TRAIN_COST);
+                    if self.arena.alive_at(building)
+                        && self.kind[b] == Kind::Barracks
+                        && self.queue[b] < MAX_QUEUE
+                        && self.ore(self.owner[b]) >= cost
+                    {
+                        let owner = self.owner[b];
+                        *self.ore_mut(owner) -= cost;
+                        self.queue[b] += 1;
                         if self.prod[b] <= Fx::ZERO {
                             self.prod[b] = Fx::from_int(PROD_TICKS);
                         }
@@ -343,10 +381,8 @@ impl World {
             if !self.arena.alive[i] || self.kind[i] != Kind::Barracks {
                 continue;
             }
-            let owner = self.owner[i];
-            // The player builds only what is queued (Command::Train); enemy/AI
-            // barracks produce continuously.
-            if owner == 0 && self.queue[i] == 0 {
+            // Every building is manual: it builds only what has been queued.
+            if self.queue[i] == 0 {
                 continue;
             }
             self.prod[i] = (self.prod[i] - Fx::ONE).max(Fx::ZERO);
@@ -354,19 +390,15 @@ impl World {
                 continue;
             }
             // Built — but hold (without consuming the queue) if at the unit cap.
-            if self.team_unit_count(owner) >= TEAM_UNIT_CAP {
+            if self.team_unit_count(self.owner[i]) >= TEAM_UNIT_CAP {
                 continue;
             }
-            if owner == 0 {
-                self.queue[i] -= 1;
-                self.prod[i] = if self.queue[i] > 0 {
-                    Fx::from_int(PROD_TICKS)
-                } else {
-                    Fx::ZERO
-                };
+            self.queue[i] -= 1;
+            self.prod[i] = if self.queue[i] > 0 {
+                Fx::from_int(PROD_TICKS)
             } else {
-                self.prod[i] = Fx::from_int(PROD_TICKS);
-            }
+                Fx::ZERO
+            };
             self.produce_at(i);
         }
     }
@@ -604,6 +636,9 @@ impl World {
             h.write_i64(a);
             h.write_i64(b);
         }
+        for &ore in &self.ore {
+            h.write_i64(ore.to_raw());
+        }
         h.finish()
     }
 }
@@ -704,17 +739,43 @@ mod tests {
     }
 
     #[test]
-    fn enemy_barracks_auto_produces() {
+    fn no_barracks_auto_produces() {
+        // Nobody auto-produces — an idle barracks (any owner) stays alone.
+        for owner in [0u16, 1] {
+            let mut w = World::new(7);
+            w.step(&[Command::SpawnBuilding {
+                owner,
+                kind: BuildingKind::Barracks,
+                x: fx(0),
+                y: fx(0),
+            }]);
+            for _ in 0..200 {
+                w.step(&[]);
+            }
+            assert_eq!(w.alive_count(), 1);
+        }
+    }
+
+    #[test]
+    fn training_costs_ore_and_is_capped() {
         let mut w = World::new(7);
         w.step(&[Command::SpawnBuilding {
-            owner: 1,
+            owner: 0,
             kind: BuildingKind::Barracks,
             x: fx(0),
             y: fx(0),
         }]);
-        for _ in 0..200 {
-            w.step(&[]);
+        let start = w.ore(0);
+        // More Train commands than the 200 stockpile can pay for (50 each).
+        let mut cmds = Vec::new();
+        for _ in 0..8 {
+            cmds.push(Command::Train { building: 0 });
         }
-        assert!(w.alive_count() > 1);
+        w.step(&cmds);
+        // Only what we could afford got queued, and ore was spent.
+        let snap = w.snapshot();
+        let b = snap.iter().find(|s| s.index == 0).unwrap();
+        assert_eq!(b.queued, 4); // 200 / 50
+        assert!(w.ore(0) < start);
     }
 }
