@@ -48,6 +48,8 @@ pub enum Command {
     AttackMove { unit: u32, x: Fx, y: Fx },
     /// Attack a specific entity (chase it).
     Attack { unit: u32, target: u32 },
+    /// Queue one unit for production at a building.
+    Train { building: u32 },
     /// Hold position.
     Stop { unit: u32 },
     /// Set where a building's new units gather.

@@ -436,11 +436,57 @@ impl Game {
         best.map(|(i, _)| i)
     }
 
+    fn nearest_player_building(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
+        let mut best: Option<(u32, f32)> = None;
+        for s in &self.curr {
+            if s.owner != 0 || s.kind != Kind::Barracks {
+                continue;
+            }
+            let d = (f(s.pos.x) - wx).hypot(f(s.pos.y) - wz);
+            if d <= r && best.is_none_or(|(_, bd)| d < bd) {
+                best = Some((s.index, d));
+            }
+        }
+        best.map(|(i, _)| i)
+    }
+
     pub fn select_single(&mut self, wx: f32, wz: f32) {
         self.selected.clear();
+        // Prefer a unit under the cursor; otherwise select a building.
         if let Some(i) = self.nearest_player(wx, wz, 4.0) {
             self.selected.push(i);
+        } else if let Some(i) = self.nearest_player_building(wx, wz, 7.0) {
+            self.selected.push(i);
         }
+    }
+
+    /// The selected entity if it is exactly one of the player's buildings.
+    pub fn selected_barracks(&self) -> Option<u32> {
+        if self.selected.len() != 1 {
+            return None;
+        }
+        let i = self.selected[0];
+        self.curr
+            .iter()
+            .find(|s| s.index == i && s.owner == 0 && s.kind == Kind::Barracks)
+            .map(|s| s.index)
+    }
+
+    /// Queue a unit at the selected building.
+    pub fn train_selected(&mut self) {
+        if let Some(b) = self.selected_barracks() {
+            self.pending.push(Command::Train { building: b });
+        }
+    }
+
+    /// (queued, build-progress 0..1) for the selected building, for the HUD.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn selected_production(&self) -> Option<(u32, f32)> {
+        let b = self.selected_barracks()?;
+        self.curr
+            .iter()
+            .find(|s| s.index == b)
+            .map(|s| (s.queued, f(s.build_frac)))
     }
 
     /// Box-select using the on-screen rectangle (pixel coordinates), matching

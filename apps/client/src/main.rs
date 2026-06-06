@@ -207,6 +207,22 @@ impl App {
             .map(|g| (g.width as f32, g.height as f32))
             .unwrap_or((1.0, 1.0))
     }
+
+    /// If a building is selected and the point is on its Train button, queue a
+    /// unit and report that the click was consumed (web HUD only).
+    #[cfg(target_arch = "wasm32")]
+    fn train_button_hit(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
+        if self.game.selected_barracks().is_none() {
+            return false;
+        }
+        let (x0, y0, x1, y1) = hud::train_button_rect(w, h);
+        if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
+            self.game.train_selected();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -286,6 +302,7 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
                         KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
                         KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
+                        KeyCode::KeyT if down => self.game.train_selected(),
                         _ => {}
                     }
                 }
@@ -296,7 +313,13 @@ impl ApplicationHandler<UserEvent> for App {
                 match button {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
-                            self.input.left_press = Some((cx, cy));
+                            #[cfg(target_arch = "wasm32")]
+                            let consumed = self.train_button_hit(cx, cy, w, h);
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let consumed = false;
+                            if !consumed {
+                                self.input.left_press = Some((cx, cy));
+                            }
                         } else if let Some((px, py)) = self.input.left_press.take() {
                             if (px - cx).hypot(py - cy) < 8.0 {
                                 if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
@@ -341,8 +364,13 @@ impl ApplicationHandler<UserEvent> for App {
                     TouchPhase::Moved => {}
                     TouchPhase::Cancelled => self.input.left_press = None,
                     TouchPhase::Ended => {
-                        if let Some((px, py)) = self.input.left_press.take() {
-                            let (w, h) = self.dims();
+                        let pressed = self.input.left_press.take();
+                        let (w, h) = self.dims();
+                        #[cfg(target_arch = "wasm32")]
+                        if self.train_button_hit(cx, cy, w, h) {
+                            return;
+                        }
+                        if let Some((px, py)) = pressed {
                             #[cfg(target_arch = "wasm32")]
                             let rc = mobile::snapshot().rc_mode;
                             #[cfg(not(target_arch = "wasm32"))]

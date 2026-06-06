@@ -4,6 +4,37 @@
 use crate::camera::Camera;
 use crate::game::Game;
 
+/// Device pixel ratio (web); the HUD draws in CSS pixels scaled by this.
+#[cfg(target_arch = "wasm32")]
+fn dpr() -> f32 {
+    web_sys::window()
+        .map(|w| w.device_pixel_ratio() as f32)
+        .filter(|d| *d > 0.5)
+        .unwrap_or(1.0)
+}
+
+/// Train button rect in CSS pixels `(x, y, w, h)`, given the CSS canvas height.
+#[cfg(target_arch = "wasm32")]
+fn train_btn_css(h_css: f32) -> (f64, f64, f64, f64) {
+    let bar = 96.0;
+    (14.0, (h_css - bar + 44.0) as f64, 170.0, 34.0)
+}
+
+/// Train button rect in physical pixels `(x0, y0, x1, y1)`, for hit-testing
+/// against raw cursor/touch coordinates.
+#[cfg(target_arch = "wasm32")]
+pub fn train_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
+    let _ = w_phys;
+    let d = dpr();
+    let (x, y, bw, bh) = train_btn_css(h_phys / d);
+    (
+        x as f32 * d,
+        y as f32 * d,
+        (x + bw) as f32 * d,
+        (y + bh) as f32 * d,
+    )
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn draw(_c: &Camera, _g: &Game, _w: f32, _h: f32, _drag: Option<(f32, f32, f32, f32)>) {}
 
@@ -37,10 +68,7 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
     // The buffer is physical pixels but is shown CSS-downscaled by the device
     // pixel ratio. Draw in CSS pixels (absolute transform, so it doesn't
     // compound across frames) so the HUD stays readable on high-DPI phones.
-    let dpr = web_sys::window()
-        .map(|win| win.device_pixel_ratio() as f32)
-        .filter(|d| *d > 0.5)
-        .unwrap_or(1.0);
+    let dpr = dpr();
     let _ = ctx.set_transform(dpr as f64, 0.0, 0.0, dpr as f64, 0.0, 0.0);
     let (w, h) = (w / dpr, h / dpr);
     let (wf, hf) = (w as f64, h as f64);
@@ -109,6 +137,26 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
         14.0,
         hf - bar + 22.0,
     );
+
+    // Production command card when one of your buildings is selected.
+    if let Some((queued, frac)) = game.selected_production() {
+        let (bx, by, bw, bh) = train_btn_css(h);
+        ctx.set_fill_style_str("#cfe0ff");
+        ctx.set_font("12px monospace");
+        let _ = ctx.fill_text(&format!("BARRACKS — queue {queued}/6"), bx, by - 6.0);
+        ctx.set_fill_style_str("rgba(40,80,140,0.95)");
+        ctx.fill_rect(bx, by, bw, bh);
+        ctx.set_stroke_style_str("rgba(150,190,240,0.95)");
+        ctx.set_line_width(1.5);
+        ctx.stroke_rect(bx, by, bw, bh);
+        ctx.set_fill_style_str("#eaf2ff");
+        ctx.set_font("bold 14px monospace");
+        let _ = ctx.fill_text("Train Infantry  [T]", bx + 10.0, by + 22.0);
+        if frac > 0.0 {
+            ctx.set_fill_style_str("rgba(255,211,107,0.95)");
+            ctx.fill_rect(bx, by + bh - 3.0, bw * frac.clamp(0.0, 1.0) as f64, 3.0);
+        }
+    }
 
     // Minimap, bottom-right of the command bar.
     let mm = bar - 16.0;

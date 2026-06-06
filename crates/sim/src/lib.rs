@@ -72,6 +72,7 @@ fn stats(kind: Kind) -> Stats {
 
 const PROD_TICKS: i32 = 55;
 const TEAM_UNIT_CAP: usize = 30;
+const MAX_QUEUE: u32 = 6;
 
 // Collision avoidance: infantry never share a spot. Each tick a unit is pushed
 // away from any other infantry whose center is closer than `SEP_DIST`, so a
@@ -93,6 +94,10 @@ pub struct Snap {
     pub hp: Fx,
     pub max_hp: Fx,
     pub moving: bool,
+    /// Buildings only: units queued for production and the current unit's
+    /// build progress (0..1). Display-only; not part of the state hash.
+    pub queued: u32,
+    pub build_frac: Fx,
 }
 
 #[derive(Default)]
@@ -152,6 +157,7 @@ pub struct World {
     order: Vec<Order>,
     cooldown: Vec<Fx>,
     prod: Vec<Fx>,
+    queue: Vec<u32>,
     rally: Vec<Vec3>,
 }
 
@@ -175,6 +181,7 @@ impl World {
             order: Vec::new(),
             cooldown: Vec::new(),
             prod: Vec::new(),
+            queue: Vec::new(),
             rally: Vec::new(),
         }
     }
@@ -197,6 +204,7 @@ impl World {
             self.order.push(Order::Idle);
             self.cooldown.push(Fx::ZERO);
             self.prod.push(Fx::ZERO);
+            self.queue.push(0);
             self.rally.push(Vec3::ZERO);
         }
     }
@@ -211,11 +219,14 @@ impl World {
         self.hp[i] = stats(kind).max_hp;
         self.order[i] = Order::Idle;
         self.cooldown[i] = Fx::ZERO;
-        self.prod[i] = if kind == Kind::Barracks {
+        // Enemy/AI barracks auto-produce; the player's produce only what is
+        // queued via Command::Train, so they start idle.
+        self.prod[i] = if kind == Kind::Barracks && owner != 0 {
             Fx::from_int(PROD_TICKS)
         } else {
             Fx::ZERO
         };
+        self.queue[i] = 0;
         // Default rally a little "south" of a building.
         self.rally[i] = Vec3::new(x, y - Fx::from_int(7), Fx::ZERO);
         id
@@ -282,6 +293,17 @@ impl World {
                         self.set_order(unit, Order::Attack { target });
                     }
                 }
+                Command::Train { building } => {
+                    let b = building as usize;
+                    if self.arena.alive_at(building) && self.kind[b] == Kind::Barracks {
+                        if self.queue[b] < MAX_QUEUE {
+                            self.queue[b] += 1;
+                        }
+                        if self.prod[b] <= Fx::ZERO {
+                            self.prod[b] = Fx::from_int(PROD_TICKS);
+                        }
+                    }
+                }
                 Command::Stop { unit } => self.set_order(unit, Order::Idle),
                 Command::SetRally { building, x, y } => {
                     if self.arena.alive_at(building) {
@@ -321,26 +343,46 @@ impl World {
             if !self.arena.alive[i] || self.kind[i] != Kind::Barracks {
                 continue;
             }
+            let owner = self.owner[i];
+            // The player builds only what is queued (Command::Train); enemy/AI
+            // barracks produce continuously.
+            if owner == 0 && self.queue[i] == 0 {
+                continue;
+            }
             self.prod[i] = (self.prod[i] - Fx::ONE).max(Fx::ZERO);
             if self.prod[i] > Fx::ZERO {
                 continue;
             }
-            self.prod[i] = Fx::from_int(PROD_TICKS);
-            let owner = self.owner[i];
+            // Built — but hold (without consuming the queue) if at the unit cap.
             if self.team_unit_count(owner) >= TEAM_UNIT_CAP {
                 continue;
             }
-            // Spawn just in front, then send to the rally point.
-            let p = self.pos[i];
-            let rally = self.rally[i];
-            // tiny deterministic spread so they don't stack perfectly
-            let jitter = Fx::from_ratio((self.rng.range_u32(7) as i64) - 3, 2);
-            let id = self.spawn(Kind::Infantry, owner, p.x + jitter, p.y - Fx::from_int(3));
-            self.order[id.index as usize] = Order::Move {
-                x: rally.x,
-                y: rally.y,
-            };
+            if owner == 0 {
+                self.queue[i] -= 1;
+                self.prod[i] = if self.queue[i] > 0 {
+                    Fx::from_int(PROD_TICKS)
+                } else {
+                    Fx::ZERO
+                };
+            } else {
+                self.prod[i] = Fx::from_int(PROD_TICKS);
+            }
+            self.produce_at(i);
         }
+    }
+
+    /// Spawn one infantry just in front of building `i`, headed to its rally.
+    fn produce_at(&mut self, i: usize) {
+        let owner = self.owner[i];
+        let p = self.pos[i];
+        let rally = self.rally[i];
+        // tiny deterministic spread so they don't stack perfectly
+        let jitter = Fx::from_ratio((self.rng.range_u32(7) as i64) - 3, 2);
+        let id = self.spawn(Kind::Infantry, owner, p.x + jitter, p.y - Fx::from_int(3));
+        self.order[id.index as usize] = Order::Move {
+            x: rally.x,
+            y: rally.y,
+        };
     }
 
     fn units_update(&mut self) {
@@ -508,6 +550,12 @@ impl World {
             if !self.arena.alive[i] {
                 continue;
             }
+            // Build progress of the current unit (display-only).
+            let build_frac = if self.kind[i] == Kind::Barracks && self.prod[i] > Fx::ZERO {
+                (Fx::from_int(PROD_TICKS) - self.prod[i]) / Fx::from_int(PROD_TICKS)
+            } else {
+                Fx::ZERO
+            };
             out.push(Snap {
                 index: i as u32,
                 generation: self.arena.generation[i],
@@ -517,6 +565,8 @@ impl World {
                 hp: self.hp[i],
                 max_hp: stats(self.kind[i]).max_hp,
                 moving: !matches!(self.order[i], Order::Idle),
+                queued: self.queue[i],
+                build_frac,
             });
         }
         out
@@ -543,6 +593,7 @@ impl World {
             h.write_i64(self.hp[i].to_raw());
             h.write_i64(self.cooldown[i].to_raw());
             h.write_i64(self.prod[i].to_raw());
+            h.write_u32(self.queue[i]);
             let (tag, a, b) = match self.order[i] {
                 Order::Idle => (0u64, 0i64, 0i64),
                 Order::Move { x, y } => (1, x.to_raw(), y.to_raw()),
@@ -628,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn barracks_produces_infantry() {
+    fn player_barracks_trains_only_on_command() {
         let mut w = World::new(7);
         w.step(&[Command::SpawnBuilding {
             owner: 0,
@@ -636,10 +687,34 @@ mod tests {
             x: fx(0),
             y: fx(0),
         }]);
+        // The player's barracks must not auto-produce.
+        for _ in 0..120 {
+            w.step(&[]);
+        }
+        assert_eq!(w.alive_count(), 1);
+        // Queue training; units build over time.
+        w.step(&[
+            Command::Train { building: 0 },
+            Command::Train { building: 0 },
+        ]);
         for _ in 0..200 {
             w.step(&[]);
         }
-        // 1 barracks + several produced infantry.
+        assert!(w.alive_count() > 1);
+    }
+
+    #[test]
+    fn enemy_barracks_auto_produces() {
+        let mut w = World::new(7);
+        w.step(&[Command::SpawnBuilding {
+            owner: 1,
+            kind: BuildingKind::Barracks,
+            x: fx(0),
+            y: fx(0),
+        }]);
+        for _ in 0..200 {
+            w.step(&[]);
+        }
         assert!(w.alive_count() > 1);
     }
 }
