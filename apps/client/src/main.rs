@@ -322,9 +322,7 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         } else if let Some((px, py)) = self.input.left_press.take() {
                             if (px - cx).hypot(py - cy) < 8.0 {
-                                if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                                    self.game.select_single(wx, wz);
-                                }
+                                self.game.select_single(&self.camera, w, h, cx, cy);
                             } else {
                                 let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
                                 self.game.select_box_screen(&self.camera, w, h, rect);
@@ -380,9 +378,7 @@ impl ApplicationHandler<UserEvent> for App {
                                     self.game.order(wx, wz);
                                 }
                             } else if (px - cx).hypot(py - cy) < 8.0 {
-                                if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                                    self.game.select_single(wx, wz);
-                                }
+                                self.game.select_single(&self.camera, w, h, cx, cy);
                             } else {
                                 let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
                                 self.game.select_box_screen(&self.camera, w, h, rect);

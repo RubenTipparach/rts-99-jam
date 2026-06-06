@@ -128,10 +128,12 @@ impl Game {
         self.prev = self.curr.clone();
         self.world.step(&cmds);
         self.curr = self.world.snapshot();
+        // Keep any of the player's still-living entities selected (units AND
+        // buildings) — dropping buildings here deselected them every tick.
         let live: HashSet<u32> = self
             .curr
             .iter()
-            .filter(|s| s.owner == 0 && s.kind == Kind::Infantry)
+            .filter(|s| s.owner == 0)
             .map(|s| s.index)
             .collect();
         self.selected.retain(|i| live.contains(i));
@@ -210,11 +212,7 @@ impl Game {
             .filter(|s| s.owner == 0)
             .map(|s| {
                 let (wx, wz) = self.lerped(s);
-                let r = if s.kind == Kind::Barracks {
-                    62.5
-                } else {
-                    45.0
-                };
+                let r = if s.kind == Kind::Barracks { 62.5 } else { 45.0 };
                 (wx, wz, r)
             })
             .collect();
@@ -403,20 +401,6 @@ impl Game {
 
     // ---- input → selection / orders ----
 
-    fn nearest_player(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
-        let mut best: Option<(u32, f32)> = None;
-        for s in &self.curr {
-            if s.owner != 0 || s.kind != Kind::Infantry {
-                continue;
-            }
-            let d = (f(s.pos.x) - wx).hypot(f(s.pos.y) - wz);
-            if d <= r && best.is_none_or(|(_, bd)| d < bd) {
-                best = Some((s.index, d));
-            }
-        }
-        best.map(|(i, _)| i)
-    }
-
     fn nearest_enemy(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
         let mut best: Option<(u32, f32)> = None;
         for s in &self.curr {
@@ -436,26 +420,48 @@ impl Game {
         best.map(|(i, _)| i)
     }
 
-    fn nearest_player_building(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
+    /// Select the player entity nearest the click, in screen space (units
+    /// first, then buildings). Screen-space picking works on slopes, where a
+    /// ground-plane pick would land past an elevated unit and miss it.
+    pub fn select_single(&mut self, cam: &Camera, w: f32, h: f32, sx: f32, sy: f32) {
+        self.selected.clear();
         let mut best: Option<(u32, f32)> = None;
+
+        // Nearest infantry within a click radius.
+        let unit_r = (h * 0.03).max(18.0);
         for s in &self.curr {
-            if s.owner != 0 || s.kind != Kind::Barracks {
+            if s.owner != 0 || s.kind != Kind::Infantry {
                 continue;
             }
-            let d = (f(s.pos.x) - wx).hypot(f(s.pos.y) - wz);
-            if d <= r && best.is_none_or(|(_, bd)| d < bd) {
-                best = Some((s.index, d));
+            let (wx, wz) = self.lerped(s);
+            let wy = terrain::height(wx, wz) + 1.4;
+            if let Some((px, py)) = cam.project(glam::Vec3::new(wx, wy, wz), w, h) {
+                let d = (px - sx).hypot(py - sy);
+                if d <= unit_r && best.is_none_or(|(_, bd)| d < bd) {
+                    best = Some((s.index, d));
+                }
             }
         }
-        best.map(|(i, _)| i)
-    }
 
-    pub fn select_single(&mut self, wx: f32, wz: f32) {
-        self.selected.clear();
-        // Prefer a unit under the cursor; otherwise select a building.
-        if let Some(i) = self.nearest_player(wx, wz, 4.0) {
-            self.selected.push(i);
-        } else if let Some(i) = self.nearest_player_building(wx, wz, 7.0) {
+        // Otherwise the nearest building (larger radius — buildings are big).
+        if best.is_none() {
+            let bldg_r = (h * 0.06).max(36.0);
+            for s in &self.curr {
+                if s.owner != 0 || s.kind != Kind::Barracks {
+                    continue;
+                }
+                let (wx, wz) = self.lerped(s);
+                let wy = terrain::height(wx, wz) + 3.0;
+                if let Some((px, py)) = cam.project(glam::Vec3::new(wx, wy, wz), w, h) {
+                    let d = (px - sx).hypot(py - sy);
+                    if d <= bldg_r && best.is_none_or(|(_, bd)| d < bd) {
+                        best = Some((s.index, d));
+                    }
+                }
+            }
+        }
+
+        if let Some((i, _)) = best {
             self.selected.push(i);
         }
     }
