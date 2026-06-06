@@ -89,14 +89,36 @@ fn vs_water(@location(0) pos: vec3<f32>) -> WaterOut {
 @fragment
 fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
     let t = cam.params.x;
-    let wx = sin(in.world.x * 0.06 + t * 1.2);
-    let wz = cos(in.world.z * 0.055 - t * 1.0);
-    let nrm = normalize(vec3<f32>(wx * 0.18, 1.0, wz * 0.18));
-    let ndl = max(dot(nrm, normalize(cam.light_dir.xyz)), 0.0);
-    let tone = 0.5 + 0.25 * (wx + wz);
-    var col = mix(vec3<f32>(0.05, 0.18, 0.32), vec3<f32>(0.12, 0.40, 0.52), tone);
-    col = (col + vec3<f32>(ndl * 0.15)) * fow(in.world);
-    return vec4<f32>(col, 0.80);
+    let p = in.world.xz;
+    // Rippled surface normal: sum of animated directional waves at a few scales
+    // (a procedural stand-in for a scrolling normal map).
+    var dx = 0.0;
+    var dz = 0.0;
+    dx += cos(p.x * 0.090 + t * 1.40) * 0.30;
+    dz += cos(p.y * 0.085 - t * 1.20) * 0.30;
+    dx += cos((p.x * 0.05 + p.y * 0.03) + t * 0.90) * 0.18;
+    dz += cos((p.y * 0.05 - p.x * 0.035) - t * 1.05) * 0.18;
+    dx += cos(p.x * 0.210 - t * 2.30) * 0.07;
+    dz += cos(p.y * 0.190 + t * 2.10) * 0.07;
+    let n = normalize(vec3<f32>(dx, 1.0, dz));
+    let view = normalize(cam.eye.xyz - in.world);
+    let light = normalize(cam.light_dir.xyz);
+
+    let deep = vec3<f32>(0.04, 0.13, 0.24);
+    let shallow = vec3<f32>(0.10, 0.34, 0.46);
+    let ndl = max(dot(n, light), 0.0);
+    var col = mix(deep, shallow, ndl);
+    // Fresnel: more sky reflection at grazing angles.
+    let fres = pow(1.0 - max(dot(n, view), 0.0), 4.0);
+    let sky = vec3<f32>(0.45, 0.62, 0.85);
+    col = mix(col, sky, fres * 0.6);
+    // Sharp sun glint.
+    let spec = pow(max(dot(reflect(-light, n), view), 0.0), 80.0);
+    col += vec3<f32>(spec) * 0.8;
+    col = col * fow(in.world);
+    // Mostly opaque (so the seabed doesn't read through), more so at grazing.
+    let alpha = mix(0.85, 0.98, fres);
+    return vec4<f32>(col, alpha);
 }
 
 // ---------------- units / buildings ----------------

@@ -336,6 +336,23 @@ fn barracks_mesh() -> Vec<UnitVertex> {
     m
 }
 
+/// Opaque dark walls around the map rim, from above the water down past the
+/// seabed, so you don't see under the (translucent) water at the edges. Drawn
+/// with the unit pipeline via an identity instance.
+fn water_walls() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let h = terrain::HALF;
+    let top = terrain::SEA_LEVEL + 3.0;
+    let bot = terrain::SEABED - 4.0;
+    let c = [0.09, 0.12, 0.16];
+    let t = 3.0;
+    push_box(&mut m, [h - t, bot, -h], [h, top, h], c, 0.0); // east
+    push_box(&mut m, [-h, bot, -h], [-h + t, top, h], c, 0.0); // west
+    push_box(&mut m, [-h, bot, h - t], [h, top, h], c, 0.0); // south
+    push_box(&mut m, [-h, bot, -h], [h, top, -h + t], c, 0.0); // north
+    m
+}
+
 fn terrain_mesh() -> (Vec<Vertex3>, Vec<u32>) {
     let n: usize = 220;
     let half = terrain::HALF;
@@ -486,6 +503,9 @@ pub struct Gfx {
     infantry_len: u32,
     barracks_buf: wgpu::Buffer,
     barracks_len: u32,
+    walls_buf: wgpu::Buffer,
+    walls_len: u32,
+    wall_inst_buf: wgpu::Buffer,
     instance_buf: wgpu::Buffer,
     ring_buf: wgpu::Buffer,
     camera_buf: wgpu::Buffer,
@@ -876,6 +896,21 @@ impl Gfx {
             bytemuck::cast_slice(&barracks),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let walls = water_walls();
+        let walls_buf = mkbuf(
+            "walls",
+            bytemuck::cast_slice(&walls),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let wall_inst_buf = mkbuf(
+            "wall-inst",
+            bytemuck::bytes_of(&InstanceRaw {
+                offset: [0.0, 0.0, 0.0],
+                scale: [1.0, 1.0, 1.0],
+                color: [0.0, 0.0, 0.0, 1.0],
+            }),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instances"),
             size: (MAX_INSTANCES * std::mem::size_of::<InstanceRaw>()) as u64,
@@ -907,6 +942,9 @@ impl Gfx {
             infantry_len: infantry.len() as u32,
             barracks_buf,
             barracks_len: barracks.len() as u32,
+            walls_buf,
+            walls_len: walls.len() as u32,
+            wall_inst_buf,
             instance_buf,
             ring_buf,
             camera_buf,
@@ -1051,8 +1089,12 @@ impl Gfx {
             pass.set_index_buffer(self.terrain_ibuf.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.terrain_indices, 0, 0..1);
 
+            pass.set_pipeline(&self.unit_pipeline);
+            // Map-rim walls (always), via an identity instance.
+            pass.set_vertex_buffer(0, self.walls_buf.slice(..));
+            pass.set_vertex_buffer(1, self.wall_inst_buf.slice(..));
+            pass.draw(0..self.walls_len, 0..1);
             if ni > 0 || nb > 0 {
-                pass.set_pipeline(&self.unit_pipeline);
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                 if ni > 0 {
                     pass.set_vertex_buffer(0, self.infantry_buf.slice(..));
