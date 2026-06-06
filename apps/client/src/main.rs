@@ -33,6 +33,17 @@ fn browser_size() -> Option<(u32, u32)> {
     Some((w.max(1.0) as u32, h.max(1.0) as u32))
 }
 
+/// Fade out and remove the HTML loading overlay once the game is drawing.
+#[cfg(target_arch = "wasm32")]
+fn hide_loading() {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("loading"))
+    {
+        let _ = el.set_attribute("style", "display:none");
+    }
+}
+
 #[derive(Default)]
 struct Input {
     fwd: bool,
@@ -53,6 +64,8 @@ struct App {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     last_css: (u32, u32),
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    first_frame_done: bool,
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     proxy: EventLoopProxy<UserEvent>,
 }
 
@@ -66,6 +79,7 @@ impl App {
             input: Input::default(),
             last_frame: Instant::now(),
             last_css: (0, 0),
+            first_frame_done: false,
             proxy,
         }
     }
@@ -238,6 +252,13 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 let (w, h) = self.dims();
                 hud::draw(&self.camera, &self.game, w, h, drag_rect);
+
+                // Remove the loading overlay once the first frame is on screen.
+                #[cfg(target_arch = "wasm32")]
+                if self.gfx.is_some() && !self.first_frame_done {
+                    self.first_frame_done = true;
+                    hide_loading();
+                }
             }
             _ => {}
         }
