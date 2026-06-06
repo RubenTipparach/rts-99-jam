@@ -86,38 +86,58 @@ fn vs_water(@location(0) pos: vec3<f32>) -> WaterOut {
     o.clip = cam.view_proj * vec4<f32>(o.world, 1.0);
     return o;
 }
+// Animated surface normal, evaluated per fragment: large slow swells plus
+// fine fast ripples from several directions (so it isn't a visible grid). This
+// is what makes the reflection shimmer per-pixel.
+fn water_normal(p: vec2<f32>, t: f32) -> vec3<f32> {
+    var d = vec2<f32>(0.0, 0.0);
+    d += vec2<f32>(1.0, 0.0) * 0.30 * cos(p.x * 0.090 + t * 1.40);
+    d += vec2<f32>(0.0, 1.0) * 0.30 * cos(p.y * 0.085 - t * 1.20);
+    d += normalize(vec2<f32>(1.0, 0.7)) * 0.16 * cos(dot(p, vec2<f32>(0.050, 0.035)) + t * 0.90);
+    d += normalize(vec2<f32>(-0.6, 1.0)) * 0.16 * cos(dot(p, vec2<f32>(-0.035, 0.050)) - t * 1.05);
+    d += vec2<f32>(1.0, 0.0) * 0.07 * cos(p.x * 0.420 - t * 2.60);
+    d += vec2<f32>(0.0, 1.0) * 0.07 * cos(p.y * 0.390 + t * 2.40);
+    d += normalize(vec2<f32>(1.0, 1.0)) * 0.05 * cos(dot(p, vec2<f32>(0.330, 0.300)) + t * 3.10);
+    return normalize(vec3<f32>(d.x, 1.0, d.y));
+}
+
+// Cheap procedural sky the water reflects: horizon→zenith gradient plus a sun
+// disc and glow around the light direction.
+fn water_sky(dir: vec3<f32>) -> vec3<f32> {
+    let up = clamp(dir.y, 0.0, 1.0);
+    let horizon = vec3<f32>(0.62, 0.72, 0.86);
+    let zenith = vec3<f32>(0.17, 0.35, 0.62);
+    var c = mix(horizon, zenith, pow(up, 0.55));
+    let sun = max(dot(dir, normalize(cam.light_dir.xyz)), 0.0);
+    c += vec3<f32>(1.00, 0.95, 0.80) * pow(sun, 250.0) * 1.4; // disc
+    c += vec3<f32>(1.00, 0.90, 0.72) * pow(sun, 18.0) * 0.14; // glow
+    return c;
+}
+
 @fragment
 fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
     let t = cam.params.x;
-    let p = in.world.xz;
-    // Rippled surface normal: sum of animated directional waves at a few scales
-    // (a procedural stand-in for a scrolling normal map).
-    var dx = 0.0;
-    var dz = 0.0;
-    dx += cos(p.x * 0.090 + t * 1.40) * 0.30;
-    dz += cos(p.y * 0.085 - t * 1.20) * 0.30;
-    dx += cos((p.x * 0.05 + p.y * 0.03) + t * 0.90) * 0.18;
-    dz += cos((p.y * 0.05 - p.x * 0.035) - t * 1.05) * 0.18;
-    dx += cos(p.x * 0.210 - t * 2.30) * 0.07;
-    dz += cos(p.y * 0.190 + t * 2.10) * 0.07;
-    let n = normalize(vec3<f32>(dx, 1.0, dz));
-    let view = normalize(cam.eye.xyz - in.world);
-    let light = normalize(cam.light_dir.xyz);
+    let n = water_normal(in.world.xz, t);
+    let view = normalize(cam.eye.xyz - in.world); // surface -> eye
+    let refl = reflect(-view, n); // reflected view ray, into the sky
+    let sky = water_sky(refl);
 
-    let deep = vec3<f32>(0.04, 0.13, 0.24);
-    let shallow = vec3<f32>(0.10, 0.34, 0.46);
-    let ndl = max(dot(n, light), 0.0);
-    var col = mix(deep, shallow, ndl);
-    // Fresnel: more sky reflection at grazing angles.
-    let fres = pow(1.0 - max(dot(n, view), 0.0), 4.0);
-    let sky = vec3<f32>(0.45, 0.62, 0.85);
-    col = mix(col, sky, fres * 0.6);
-    // Sharp sun glint.
-    let spec = pow(max(dot(reflect(-light, n), view), 0.0), 80.0);
-    col += vec3<f32>(spec) * 0.8;
+    // Water body colour, a touch lighter where the surface tilts toward us.
+    let deep = vec3<f32>(0.02, 0.10, 0.18);
+    let shallow = vec3<f32>(0.05, 0.24, 0.36);
+    let body = mix(deep, shallow, clamp(n.y, 0.0, 1.0));
+
+    // Schlick fresnel: reflective at grazing angles, darker/transmissive
+    // looking straight down.
+    let fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, view), 0.0), 5.0);
+    var col = mix(body, sky, fres);
+
+    // Sharp sun glint riding the ripples.
+    let spec = pow(max(dot(refl, normalize(cam.light_dir.xyz)), 0.0), 120.0);
+    col += vec3<f32>(1.0, 0.96, 0.85) * spec * 0.6;
+
     col = col * fow(in.world);
-    // Mostly opaque (so the seabed doesn't read through), more so at grazing.
-    let alpha = mix(0.85, 0.98, fres);
+    let alpha = clamp(0.80 + fres * 0.18, 0.0, 0.98);
     return vec4<f32>(col, alpha);
 }
 

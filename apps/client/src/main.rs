@@ -550,3 +550,21 @@ fn main() {
     }
     run();
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod shader_tests {
+    // wgpu compiles WGSL at pipeline-creation time, so a malformed shader would
+    // only blow up on the GPU. Validate it here (same naga wgpu uses) so CI
+    // catches it.
+    #[test]
+    fn wgsl_compiles_and_validates() {
+        let src = include_str!("shader.wgsl");
+        let module = naga::front::wgsl::parse_str(src).expect("shader.wgsl should parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("shader.wgsl should validate");
+    }
+}

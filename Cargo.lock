@@ -320,6 +320,7 @@ dependencies = [
  "image",
  "log",
  "math",
+ "naga",
  "pollster",
  "protocol",
  "sim",
