@@ -24,6 +24,15 @@ enum UserEvent {
     GfxReady(Gfx),
 }
 
+/// Browser window inner size in CSS pixels (web only).
+#[cfg(target_arch = "wasm32")]
+fn browser_size() -> Option<(u32, u32)> {
+    let win = web_sys::window()?;
+    let w = win.inner_width().ok()?.as_f64()?;
+    let h = win.inner_height().ok()?.as_f64()?;
+    Some((w.max(1.0) as u32, h.max(1.0) as u32))
+}
+
 #[derive(Default)]
 struct Input {
     fwd: bool,
@@ -42,6 +51,8 @@ struct App {
     input: Input,
     last_frame: Instant,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    last_css: (u32, u32),
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     proxy: EventLoopProxy<UserEvent>,
 }
 
@@ -54,6 +65,7 @@ impl App {
             camera: Camera::default(),
             input: Input::default(),
             last_frame: Instant::now(),
+            last_css: (0, 0),
             proxy,
         }
     }
@@ -79,10 +91,18 @@ impl ApplicationHandler<UserEvent> for App {
             use winit::platform::web::WindowAttributesExtWebSys;
             attrs = attrs.with_append(true);
         }
-        attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1024.0, 640.0));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            attrs = attrs.with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0));
+        }
 
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         self.window = Some(window.clone());
+        #[cfg(target_arch = "wasm32")]
+        if let Some((bw, bh)) = browser_size() {
+            let _ = window.request_inner_size(winit::dpi::LogicalSize::new(bw as f64, bh as f64));
+            self.last_css = (bw, bh);
+        }
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -168,6 +188,18 @@ impl ApplicationHandler<UserEvent> for App {
                 self.camera.zoom(units);
             }
             WindowEvent::RedrawRequested => {
+                // Keep the canvas matched to the browser window (web).
+                #[cfg(target_arch = "wasm32")]
+                if let Some((bw, bh)) = browser_size() {
+                    if (bw, bh) != self.last_css && bw > 1 && bh > 1 {
+                        self.last_css = (bw, bh);
+                        if let Some(w) = &self.window {
+                            let _ = w.request_inner_size(winit::dpi::LogicalSize::new(
+                                bw as f64, bh as f64,
+                            ));
+                        }
+                    }
+                }
                 let now = Instant::now();
                 let dt = (now - self.last_frame).as_secs_f32().min(0.1);
                 self.last_frame = now;

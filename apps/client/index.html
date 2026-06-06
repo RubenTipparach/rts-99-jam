@@ -5,14 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Sol Dominion — rts-99-jam</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #070b14; overflow: hidden; }
-      body { display: flex; align-items: center; justify-content: center; }
-      canvas { display: block; box-shadow: 0 0 48px #0a1530; }
-      /* HUD overlay, centered over the 1024×640 game canvas. */
-      #hud {
-        position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
-        width: 1024px; height: 640px; pointer-events: none; z-index: 10;
-      }
+      html, body { margin: 0; height: 100%; width: 100%; overflow: hidden; background: #070b14; }
+      canvas { display: block; }
+      /* Full-window HUD overlay above the WebGL canvas. */
+      #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
     </style>
     <link data-trunk rel="rust" />
   </head>
