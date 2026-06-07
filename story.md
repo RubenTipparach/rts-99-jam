@@ -24,8 +24,8 @@ posterity (**★** = were favorites):
   behind. Poetic, captures the tragedy.
 - **★ Fission & Sorcery** — nuclear + magic, said plainly (after "sword &
   sorcery"). Pulpy and exact.
-- **Philosophia** — the wizard nation's earlier name, now renamed **the
-  Astromancers** (and the game with it).
+- **Philosophia** — the wizards' founding **order**, whose crest the
+  **Astromancers** still wear; the game is named for its casters.
 - **The Great Work** / **Magnum Opus** — the alchemical term for creating the
   philosopher's stone. Breaking the genetic lock *was* their Great Work.
 - **Astramancy** — "star-magic," a coined word in the vein of necromancy.
@@ -70,25 +70,34 @@ world. Earth becomes a **scorched wasteland**. **Billions** flee toward space;
 **billions more** die in the great wars that follow. Radiation, the weapon
 meant to end the wizards, becomes the element they alone can live in.
 
+### The Made-Beasts — the War of '99
+Depleted and desperate, the Astromancers try to swell their ranks by **granting
+animals sentience**. Most attempts fail; only the most magic-attuned take — and
+**cats** and **rats** wake into thinking peoples, the **Ninefold** and the
+**Warren**. Neither stays grateful.
+
 ### The Exodus & the Race for the Planets — 2005–2050
 - **2005** — the Astromancers establish the **first Mars colony**, beating the
-  magicless to a second world.
-- **the following decade** — the **moons of Jupiter** are settled.
+  Hollowmen to a second world.
+- **the following decade** — the **moons of Jupiter** are settled. Under the ice
+  of **Europa**, settlers find the **Rimeborn**: an alien people who can drink
+  magic but make none. Magicless and magic-thirsty, they throw in with the
+  Hollowmen.
 - **by 2050** — nearly every major body in the solar system **except Venus**
   is being colonized. The wizards, immune to the radiation and hardened to
-  hostile worlds, take the richest ground; the magicless take what's left.
+  hostile worlds, take the richest ground; the Hollowmen take what's left.
 
 ### The Long Tension — 2050–2156
 The wars never quite stop. The Astromancers **conquer world after world**, while
-the magicless cling to **space colonies, the Moon, and the asteroids**. Over
+the Hollowmen cling to **space colonies, the Moon, and the asteroids**. Over
 generations the two peoples intermarry, and the hard line between "wizard" and
 "human" blurs into a spectrum.
 
 ### The Present — 2157
 Humanity is now two intertwined civilizations:
 
-- The **magicless**, who carry a little magic in their blood but stake
-  everything on **advanced technology**, live on **rocks and stations** — the
+- The **Hollowmen**, hollow of working magic, stake everything on **advanced
+  technology** and live on **rocks and stations** — the
   belt, the lesser moons, the deep-space habitats.
 - The **pure-blooded**, the heirs of the Astromancers, live on **sprawling
   gas-giant moons and planets**, their cities grown as much as built.
@@ -98,25 +107,24 @@ where the game begins.)*
 
 ---
 
-## The two peoples (factions)
+## The peoples (factions)
 
-These are the asymmetric sides the RTS is built around. Names for the second
-faction are proposals — easy to change.
+Five asymmetric sides, born from one catastrophe. This table is the canon; the
+ground RTS and the turn-based system map are built around these identities.
 
-### The Astromancers — the Purebloods
-Heirs of the wizard nation. They hold the **gas-giant moons and planets** and
-the system's best worlds. Their power is **arcane and biological**: cities and
-machines that are partly *grown*, weapons that bend radiation and aether,
-populations that thrive where others can't breathe. Grand, organic, and
-dangerous — but slower to industrialize than they once were.
+| Faction | Origin | Magic & character |
+|---|---|---|
+| **Astromancers** | The hidden wizard bloodline that broke its ancient genetic lock in the 1950s, founded the order of **Philosophia**, and rode magic-fuelled tech off a dying Earth. After the War of '99 they took the richest worlds. | Magic-native and radiation-immune. **Arcane-biological** — grown cities, aether weapons, peoples who thrive where others suffocate. Grand, organic, dangerous. |
+| **Hollowmen** | Earth-born humanity with no working magic — the billions who fled the Scorching with nothing but machines. Scattered across stations, the belt, and the lesser moons. | **Hollow** of magic, so they cage and deny it. Industry, numbers, mass production, anti-magic fields. Scrappy and relentless. |
+| **Rimeborn** | An alien people found frozen in the ice of **Europa** when the exodus reached Jupiter's moons. They can *drain* magic from any caster but make none of their own — so they bound themselves to the Hollowmen. | **Magic-parasites** — siphon the enemy's power, helpless without a victim. Cold, patient, eerie. The Hollowmen's wellhead. |
+| **Ninefold** | Cats, woken to sentience by Astromancer experiments during the War of '99 — the most magic-attuned of the made-beasts, and certain of their own superiority. | **Quality over quantity** — few, elite, lunar/witch sorcery, the proverbial nine lives. Aloof; allied to no one but themselves. |
+| **Warren** | Rats, uplifted in the same wartime experiments. Where the cats *ascended*, the rats *multiplied*. | **Swarm** — cheap, many, tunnelling, tinkering scavengers. Sabotage and numbers. The system's wildcard. |
 
-### The magicless — *the Tellurian Coalition* (proposed)
-Earth-born exiles and their descendants, scattered across **stations,
-asteroids, and the Moon**. They carry a trace of magic but bet on **engineering,
-industry, and numbers**: factories, fleets, salvage, and the kind of brute
-logistics that built the off-world colonies in the first place. Scrappy,
-modular, and relentless.
-*(Other name ideas: the Coalition, the Diaspora, the Unbound, the Foundry.)*
+**Alignments.** The war splits roughly two ways, with a wildcard: the
+**Astromancers** (and, on their own terms, the **Ninefold**) hold the magic
+side; the **Hollowmen + Rimeborn** are the anti-magic pact — humans who deny
+magic fighting beside aliens who steal it. The **Warren** sells its swarm to
+whoever's winning.
 
 ---
 
@@ -138,15 +146,16 @@ modular, and relentless.
 Magic in this world is **practical and industrial**, not whimsical: it powers
 reactors, propels ships, infuses weapons, and heals radiation. The signature
 fusion is the **magic-infused nuclear warhead** of 1999. The Purebloods wield
-magic natively; the Coalition reproduces its *effects* with machines and a
-thinning bloodline. How "spells" map to in-game abilities/economy is TBD.
+magic natively; the Hollowmen can't make it at all — they cage and deny it, and
+drink it secondhand from the Rimeborn. How "spells" map to in-game abilities/economy is TBD.
 
 ---
 
 ## Open questions / TBD
 - **Who set the genetic lock, and why?** A rival order, a god, the wizards
   themselves? This is the lore's biggest lever.
-- **Name of the magicless faction** (see proposals above).
+- **Faction rosters** — units, buildings, and ships for each of the five
+  (in progress).
 - **Magic system rules** — what magic *can* and *can't* do; how it reads as an
   RTS mechanic (resource? abilities? unit types?).
 - **Where exactly the game sits** — the opening battle of the 2157 war? A
