@@ -8,8 +8,8 @@
 <path id="arcTop" d="M 39,240 A 201,201 0 0 1 441,240"/>
 <path id="arcBottom" d="M 23,240 A 217,217 0 0 0 457,240"/>
 
-<linearGradient id="laser" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fff4d0" stop-opacity="0.9"/><stop offset="100%" stop-color="#ff7a2c" stop-opacity="0"/></linearGradient>
-<radialGradient id="heart" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="26%" stop-color="#ffe089"/><stop offset="62%" stop-color="#ff8a36"/><stop offset="100%" stop-color="#ff5a2c" stop-opacity="0"/></radialGradient>
+<linearGradient id="laser" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#fff4d0" stop-opacity="0.85"/><stop offset="100%" stop-color="#ff7a2c" stop-opacity="0"/></linearGradient>
+<radialGradient id="heart" cx="50%" cy="45%" r="55%"><stop offset="0%" stop-color="#ffffff"/><stop offset="34%" stop-color="#ffe089"/><stop offset="80%" stop-color="#ff8a36"/><stop offset="100%" stop-color="#ff6a2c"/></radialGradient>
 <clipPath id="earthbig"><circle cx="240" cy="498" r="262"/></clipPath>
 <radialGradient id="eshade" cx="38%" cy="28%" r="84%"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.20"/><stop offset="55%" stop-color="#000000" stop-opacity="0"/><stop offset="100%" stop-color="#000814" stop-opacity="0.55"/></radialGradient>
 
@@ -20,7 +20,6 @@
 <circle cx="240" cy="240" r="188" fill="url(#space)"/>
 <g fill="#ffffff"><circle cx="300" cy="92" r="1.4" opacity="0.8"/><circle cx="352" cy="150" r="1" opacity="0.6"/><circle cx="392" cy="210" r="1.2" opacity="0.7"/><circle cx="150" cy="170" r="1" opacity="0.6"/><circle cx="92" cy="210" r="1.1" opacity="0.6"/><circle cx="210" cy="118" r="0.9" opacity="0.6"/><circle cx="408" cy="270" r="1" opacity="0.5"/><circle cx="86" cy="280" r="0.9" opacity="0.5"/></g>
 
-<!-- Earth: big curved horizon behind the giant mech -->
 <g clip-path="url(#earthbig)">
   <circle cx="240" cy="498" r="262" fill="#1f5c92"/>
   <path d="M96,300 C140,286 176,300 196,322 C170,340 120,338 92,322 Z" fill="#3f9a5a"/>
@@ -30,7 +29,6 @@
   <circle cx="240" cy="498" r="262" fill="url(#eshade)"/>
 </g>
 <path d="M64,318 A262,262 0 0 1 416,318" fill="none" stroke="#86ccff" stroke-width="4" opacity="0.5" filter="url(#softglow)"/>
-<!-- satellite / mega-laser station -->
 <g>
   <rect x="150" y="84" width="56" height="18" rx="2" fill="#8c98ac" stroke="#5f6b80" stroke-width="1.2"/>
   <rect x="274" y="84" width="56" height="18" rx="2" fill="#8c98ac" stroke="#5f6b80" stroke-width="1.2"/>
@@ -47,27 +45,26 @@
 <g stroke="#ffb070" stroke-width="1.8" opacity="0.8" fill="none" stroke-linecap="round">
   <path d="M205,97 L275,97"/><path d="M150,102 H206"/><path d="M274,102 H330"/>
 </g>
-<!-- laser beam + sun glow BEHIND the mech -->
-<path d="M226,112 L214,232 L266,232 L254,112 Z" fill="url(#laser)" filter="url(#softglow)" opacity="0.9"/>
-<line x1="240" y1="108" x2="240" y2="232" stroke="#fff4d0" stroke-width="5" filter="url(#glow)"/>
-<circle cx="240" cy="232" r="50" fill="url(#heart)" filter="url(#softglow)"/>
-<circle cx="240" cy="230" r="22" fill="url(#heart)"/>
-<!-- giant mech silhouette (foreground, backlit) -->
+<!-- laser + backlight glow behind the head -->
+<path d="M228,112 L218,232 L262,232 L252,112 Z" fill="url(#laser)" filter="url(#softglow)" opacity="0.85"/>
+<line x1="240" y1="108" x2="240" y2="230" stroke="#fff4d0" stroke-width="4.5" filter="url(#glow)"/>
+<circle cx="240" cy="228" r="40" fill="url(#heart)" filter="url(#softglow)" opacity="0.85"/>
+<!-- mech bust (narrower, first-iteration width) -->
 <path fill="#06090f" stroke="#1c2840" stroke-width="1"
-  d="M84,430 L90,300 C92,272 118,256 150,252 C170,248 188,246 200,244 L208,240 L208,206 C208,196 218,190 240,190 C262,190 272,196 272,206 L272,240 L280,244 C292,246 310,248 330,252 C362,256 388,272 390,300 L396,430 Z"/>
-<!-- warm backlight rim (from the sun behind) -->
-<g fill="none" stroke="#ffc488" stroke-width="2.8" opacity="0.9" stroke-linecap="round">
-  <path d="M208,206 C208,197 224,191 240,190 C256,191 272,197 272,206"/>
-  <path d="M150,252 C170,248 190,246 208,240"/>
-  <path d="M272,240 C292,246 312,248 330,252"/>
+  d="M150,368 L150,304 C152,274 172,256 196,252 L208,244 L214,210 C216,200 264,200 266,210 L272,244 L284,252 C308,256 328,274 330,304 L330,368 Z"/>
+<g fill="none" stroke="#ffc488" stroke-width="2.6" opacity="0.9" stroke-linecap="round">
+  <path d="M214,210 C216,200 264,200 266,210"/>
+  <path d="M196,252 L208,244 L214,210"/>
+  <path d="M150,304 C152,276 172,258 196,253"/>
 </g>
-<!-- cool fill rim (from Earth) -->
 <g fill="none" stroke="#5f9fd6" stroke-width="2" opacity="0.4" stroke-linecap="round">
-  <path d="M92,300 C98,278 120,260 150,253"/>
-  <path d="M388,300 C382,278 362,260 330,253"/>
+  <path d="M330,304 C328,276 308,258 284,252"/>
 </g>
-<!-- mech running lights -->
 <rect x="220" y="214" width="40" height="5" rx="2" fill="#8fd0ff" opacity="0.85" filter="url(#glow)"/>
+<!-- star at the heart -->
+<path d="M240.0,278.0L245.3,292.7L260.9,293.2L248.6,302.8L252.9,317.8L240.0,309.0L227.1,317.8L231.4,302.8L219.1,293.2L234.7,292.7Z" fill="url(#heart)" filter="url(#softglow)" opacity="0.6"/>
+<path d="M240.0,278.0L245.3,292.7L260.9,293.2L248.6,302.8L252.9,317.8L240.0,309.0L227.1,317.8L231.4,302.8L219.1,293.2L234.7,292.7Z" fill="url(#heart)" stroke="#fff2d0" stroke-width="1.2"/>
+<circle cx="240" cy="300" r="4.5" fill="#fff6e6"/>
 
 </g>
 <circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
