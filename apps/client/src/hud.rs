@@ -215,7 +215,7 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
     ctx.set_font("bold 16px monospace");
     let _ = ctx.fill_text(
         &format!(
-            "ASTROMANCY    ore {ore}      your force: {pu} inf / {pb} barracks      visible enemy: {eu} inf / {eb} barracks      selected: {}",
+            "ASTROMANCERS  ore {ore}      your force: {pu} inf / {pb} barracks      visible enemy: {eu} inf / {eb} barracks      selected: {}",
             game.selected_count(),
             ore = game.player_ore() as i64,
         ),

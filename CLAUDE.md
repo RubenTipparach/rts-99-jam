@@ -1,4 +1,4 @@
-# Astromancy — project guide
+# Astromancers — project guide
 
 A deterministic, lockstep RTS in Rust + wgpu (not Bevy), built to run native and
 on the web (WASM, GitHub Pages). Design: **two worlds, one wall** — a fixed-point

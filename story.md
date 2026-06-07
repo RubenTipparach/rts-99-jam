@@ -11,9 +11,10 @@
 
 ---
 
-## Title — **ASTROMANCY**
+## Title — **ASTROMANCERS**
 
-The game's name is **Astromancy** ("star-magic"). The mission-patch logo lives
+The game's name is **Astromancers** — named for its wizard faction, the masters
+of *astromancy* ("star-magic"). The mission-patch logo lives
 in [`assets/branding/`](assets/branding/). Earlier candidates, kept for
 posterity (**★** = were favorites):
 
@@ -23,8 +24,8 @@ posterity (**★** = were favorites):
   behind. Poetic, captures the tragedy.
 - **★ Fission & Sorcery** — nuclear + magic, said plainly (after "sword &
   sorcery"). Pulpy and exact.
-- **Philosophia** — name the game after the wizard nation. Mysterious, owns
-  the lore.
+- **Philosophia** — the wizard nation's earlier name, now renamed **the
+  Astromancers** (and the game with it).
 - **The Great Work** / **Magnum Opus** — the alchemical term for creating the
   philosopher's stone. Breaking the genetic lock *was* their Great Work.
 - **Astramancy** — "star-magic," a coined word in the vein of necromancy.
@@ -49,28 +50,28 @@ spell had managed: break the millennium-old lock on their blood. It works. For
 the first time in recorded history, wizards can have many children — and they
 do. A scattered society becomes a population, and a population needs a country.
 
-### The Rise of Philosophia
-They found **Philosophia**, a nation of magic-folk. With magic guiding their
+### The Rise of the Astromancers
+They found the **Astromancers**, a nation of magic-folk. With magic guiding their
 hand they adopt — and outrun — modern technology at an alarming rate: new kinds
 of **power plants**, **hover vehicles**, **spacecraft**, and, eventually,
 **weapons**. In a generation, a hidden people becomes a frontier power.
 
 ### The Preemptive Strike — 1999
-The world's nations take notice, and fear. They plot to end Philosophia before
-it eclipses them. In **1999**, the strike comes: a **nuclear weapon** falls on
-Philosophia and its capital is reduced to rubble. What the attackers don't know
+The world's nations take notice, and fear. They plot to end the Astromancers
+before they eclipse the rest. In **1999**, the strike comes: a **nuclear weapon**
+falls on the Astromancers, and their capital is reduced to rubble. What the attackers don't know
 is that the wizards have already perfected a **spell that cures radiation
 sickness** — so the bomb kills the city, but not the people.
 
 ### Retaliation & the Scorching
-Wounded and enraged, Philosophia engineers terrible weapons in a matter of
+Wounded and enraged, the Astromancers engineer terrible weapons in a matter of
 weeks: **magically infused nuclear warheads** that fall on the heart of the
 world. Earth becomes a **scorched wasteland**. **Billions** flee toward space;
 **billions more** die in the great wars that follow. Radiation, the weapon
 meant to end the wizards, becomes the element they alone can live in.
 
 ### The Exodus & the Race for the Planets — 2005–2050
-- **2005** — Philosophia establishes the **first Mars colony**, beating the
+- **2005** — the Astromancers establish the **first Mars colony**, beating the
   magicless to a second world.
 - **the following decade** — the **moons of Jupiter** are settled.
 - **by 2050** — nearly every major body in the solar system **except Venus**
@@ -78,7 +79,7 @@ meant to end the wizards, becomes the element they alone can live in.
   hostile worlds, take the richest ground; the magicless take what's left.
 
 ### The Long Tension — 2050–2156
-The wars never quite stop. Philosophia **conquers world after world**, while
+The wars never quite stop. The Astromancers **conquer world after world**, while
 the magicless cling to **space colonies, the Moon, and the asteroids**. Over
 generations the two peoples intermarry, and the hard line between "wizard" and
 "human" blurs into a spectrum.
@@ -89,7 +90,7 @@ Humanity is now two intertwined civilizations:
 - The **magicless**, who carry a little magic in their blood but stake
   everything on **advanced technology**, live on **rocks and stations** — the
   belt, the lesser moons, the deep-space habitats.
-- The **pure-blooded**, the heirs of Philosophia, live on **sprawling
+- The **pure-blooded**, the heirs of the Astromancers, live on **sprawling
   gas-giant moons and planets**, their cities grown as much as built.
 
 The colonists are raising tensions again. **Another war is brewing.** *(This is
@@ -102,7 +103,7 @@ where the game begins.)*
 These are the asymmetric sides the RTS is built around. Names for the second
 faction are proposals — easy to change.
 
-### Philosophia — the Purebloods
+### The Astromancers — the Purebloods
 Heirs of the wizard nation. They hold the **gas-giant moons and planets** and
 the system's best worlds. Their power is **arcane and biological**: cities and
 machines that are partly *grown*, weapons that bend radiation and aether,
@@ -121,7 +122,7 @@ modular, and relentless.
 
 ## Themes & motifs
 
-- **Alchemy & the philosopher's stone.** *Philosophia*, the "genetic lock,"
+- **Alchemy & the philosopher's stone.** The "genetic lock,"
   transmutation, the prolonging of a bloodline — the founding act is alchemy's
   *Great Work* dressed as 1950s biotech.
 - **Bloodline & inheritance.** Who is "pure," who is "magicless," and the wide

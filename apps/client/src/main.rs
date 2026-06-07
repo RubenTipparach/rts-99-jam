@@ -248,7 +248,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
         event_loop.set_control_flow(ControlFlow::Poll);
 
-        let mut attrs = Window::default_attributes().with_title("Astromancy");
+        let mut attrs = Window::default_attributes().with_title("Astromancers");
         #[cfg(target_arch = "wasm32")]
         {
             use winit::platform::web::WindowAttributesExtWebSys;

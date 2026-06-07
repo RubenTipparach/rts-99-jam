@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="assets/branding/logo.png" alt="Astromancy — Space · Magic · Real-Time Strategy" width="760">
+  <img src="assets/branding/logo.png" alt="Astromancers — Space · Magic · Real-Time Strategy" width="760">
 </p>
 
 <p align="center"><em>Brand kit in <a href="assets/branding/">assets/branding/</a></em></p>
 
-# Astromancy
+# Astromancers
 
 A deterministic, lockstep real-time strategy game of **space and magic**, in the
 lineage of *StarCraft* and *Planetary Annihilation* — built in **Rust** with a

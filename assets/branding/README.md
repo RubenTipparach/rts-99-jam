@@ -1,16 +1,16 @@
 # Branding
 
-> **Title:** *ASTROMANCY* — a deterministic RTS of **space and magic**. The
+> **Title:** *ASTROMANCERS* — a deterministic RTS of **space and magic**. The
 > wordmark is one line of text in `logo.svg`, trivially re-lettered (see
 > [Renaming](#renaming)).
 
 ## Concept
 
-A deterministic RTS of **space and magic**. The emblem is the **Astromancy
-mission patch** (NRO/NASA style): a hooded Philosophia magus standing over a
+A deterministic RTS of **space and magic**. The emblem is the **Astromancers
+mission patch** (NRO/NASA style): a hooded Astromancer magus standing over a
 world, conjuring a starship that rises straight up on a plume of arcane sparkles,
 ringed by the motto *SCIENTIA EST MAGIA*. Pure vector, so it scales from favicon
-to banner. (Sibling patches — the kraken-and-ship **Astromancy** badge and
+to banner. (Sibling patches — the kraken-and-ship **Astromancers** badge and
 **Draco** — live one level up in [`../`](../) as `logo*.svg`.)
 
 ## Files
@@ -18,7 +18,7 @@ to banner. (Sibling patches — the kraken-and-ship **Astromancy** badge and
 | File | What it is | Use for |
 |---|---|---|
 | `emblem.svg` / `.png` | The mission patch alone (480² / 1024²) | **Default logo** — README header, favicon, Discord/app icon |
-| `logo-square.svg` / `.png` | Patch + ASTROMANCY wordmark, 1:1 (1024²) | Avatar, app/store icon, square social posts |
+| `logo-square.svg` / `.png` | Patch + ASTROMANCERS wordmark, 1:1 (1024²) | Avatar, app/store icon, square social posts |
 | `social-card.svg` / `.png` | Share card, 1200×630 | Link previews (Open Graph) + GitHub **Social Preview** |
 | `logo.svg` / `.png` | Patch + wordmark, wide (1600×520 / 2000px) | Wide banner / title-screen header |
 | `emblem-preview.png` | Patch on a dark disc | Quick preview |
@@ -71,7 +71,7 @@ JS
 The wordmark lives in `logo.svg` as a single `<text>`:
 
 ```xml
-<text ... fill="url(#wm)">ASTROMANCY</text>
+<text ... fill="url(#wm)">ASTROMANCERS</text>
 ```
 
 Change the text (and the tagline/motto `<text>`s below it), re-render, done. The
