@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/branding/emblem.png" alt="Astromancy" width="300">
+  <img src="assets/branding/logo.png" alt="Astromancy — Space · Magic · Real-Time Strategy" width="760">
 </p>
 
-<p align="center"><em>Space · Magic · Real-Time Strategy — branding in <a href="assets/branding/">assets/branding/</a></em></p>
+<p align="center"><em>Brand kit in <a href="assets/branding/">assets/branding/</a></em></p>
 
 # Astromancy
 
