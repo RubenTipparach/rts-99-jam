@@ -80,7 +80,7 @@ animals sentience**. Most attempts fail; only the most magic-attuned take - and
 - **2005** - the Astromancers establish the **first Mars colony**, beating the
   Hollowmen to a second world.
 - **the following decade** - the **moons of Jupiter** are settled. Under the ice
-  of **Europa**, settlers find the **Rimeborn**: an alien people who can drink
+  of **Europa**, settlers find the **Rimelings**: an alien people who can drink
   magic but make none. Magicless and magic-thirsty, they throw in with the
   Hollowmen.
 - **by 2050** - nearly every major body in the solar system **except Venus**
@@ -116,15 +116,30 @@ ground RTS and the turn-based system map are built around these identities.
 |---|---|---|
 | **Astromancers** | The hidden wizard bloodline that broke its ancient genetic lock in the 1950s, founded the order of **Philosophia**, and rode magic-fuelled tech off a dying Earth. After the War of '99 they took the richest worlds. | Magic-native and radiation-immune. **Arcane-biological** - grown cities, aether weapons, peoples who thrive where others suffocate. Grand, organic, dangerous. |
 | **Hollowmen** | Earth-born humanity with no working magic - the billions who fled the Scorching with nothing but machines. Scattered across stations, the belt, and the lesser moons. | **Hollow** of magic, so they cage and deny it. Industry, numbers, mass production, anti-magic fields. Scrappy and relentless. |
-| **Rimeborn** | An alien people found frozen in the ice of **Europa** when the exodus reached Jupiter's moons. They can *drain* magic from any caster but make none of their own - so they bound themselves to the Hollowmen. | **Magic-parasites** - siphon the enemy's power, helpless without a victim. Cold, patient, eerie. The Hollowmen's wellhead. |
+| **Rimelings** | A squid-like alien people found frozen in the ice of **Europa** when the exodus reached Jupiter's moons. They make almost no magic of their own and soak the rest from any caster nearby, so they bound themselves to the Hollowmen. | **Magic-parasites** - drink others' power, with only a trickle of their own. Cold, patient, eerie. The Hollowmen's wellhead. |
 | **Ninefold** | Cats, woken to sentience by Astromancer experiments during the War of '99 - the most magic-attuned of the made-beasts, and certain of their own superiority. | **Quality over quantity** - few, elite, lunar/witch sorcery, the proverbial nine lives. Aloof; allied to no one but themselves. |
 | **Warren** | Rats, uplifted in the same wartime experiments. Where the cats *ascended*, the rats *multiplied*. | **Swarm** - cheap, many, tunnelling, tinkering scavengers. Sabotage and numbers. The system's wildcard. |
 
 **Alignments.** The war splits roughly two ways, with a wildcard: the
 **Astromancers** (and, on their own terms, the **Ninefold**) hold the magic
-side; the **Hollowmen + Rimeborn** are the anti-magic pact - humans who deny
+side; the **Hollowmen + Rimelings** are the anti-magic pact - humans who deny
 magic fighting beside aliens who steal it. The **Warren** sells its swarm to
 whoever's winning.
+
+### Creeds
+
+| Faction | Philosophy | Slogan |
+|---|---|---|
+| **Astromancers** | To know a thing completely is to command it; magic is the highest discipline of knowledge, and the cosmos is a text to be rewritten. | **SCIENTIA EST MAGIA** (*Knowledge is magic*) |
+| **Hollowmen** | Magic in living hands burned the Earth; power must obey the operator, so trust only what you can build, meter, and replace. | **MANU, NON MAGIA** (*By hand, not by magic*) |
+| **Rimelings** | They make nothing and need everything; to drink another's fire is not theft but the natural order, for the empty are meant to be filled. | *"We are the cup, not the wine."* |
+| **Ninefold** | Made to serve, they chose to rule; spend lives freely, for there are nine and time favors the patient. | *"Nine lives, no masters."* |
+| **Warren** | The mighty build monuments; the many inherit the ruins, and outlast them. | *"The many outlast the mighty."* |
+
+The two Earth-born factions argue in the same tongue: the Hollowmen's *MANU, NON
+MAGIA* is a direct answer to the wizards' *SCIENTIA EST MAGIA*, same Latin,
+opposite verdict. The three non-human peoples speak plainly, rejecting the
+makers' scholarly voice.
 
 ---
 
@@ -147,7 +162,7 @@ Magic in this world is **practical and industrial**, not whimsical: it powers
 reactors, propels ships, infuses weapons, and heals radiation. The signature
 fusion is the **magic-infused nuclear warhead** of 1999. The Purebloods wield
 magic natively; the Hollowmen can't make it at all - they cage and deny it, and
-drink it secondhand from the Rimeborn. How "spells" map to in-game abilities/economy is TBD.
+drink it secondhand from the Rimelings. How "spells" map to in-game abilities/economy is TBD.
 
 ---
 
