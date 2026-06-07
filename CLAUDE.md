@@ -23,6 +23,9 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
 - `crates/replay` - recorded command logs.
 - `crates/testkit` - headless harness + the pinned determinism test.
 - `apps/client` - wgpu/winit renderer, camera, HUD, fog-of-war, input → commands.
+- `docs/` - all project documentation. **Every `.md` file lives in `docs/`,**
+  except the root `CLAUDE.md` and `README` files (the root `readme.md`, plus
+  conventional folder-level `README.md`s such as `assets/branding/README.md`).
 
 ## Determinism rules (do not break these)
 

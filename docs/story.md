@@ -15,7 +15,7 @@
 
 The game's name is **Astromancers** - named for its wizard faction, the masters
 of *astromancy* ("star-magic"). The mission-patch logo lives
-in [`assets/branding/`](assets/branding/). Earlier candidates, kept for
+in [`assets/branding/`](../assets/branding/). Earlier candidates, kept for
 posterity (**★** = were favorites):
 
 - **★ Sol Arcanum** - "the secret of the sun." *Arcanum* is both "hidden

@@ -1,6 +1,6 @@
 # Faction design - units, structures, doctrine
 
-Game-design companion to the lore in [`../story.md`](../story.md). Five
+Game-design companion to the lore in [`story.md`](story.md). Five
 asymmetric factions for the **ground RTS**. (Space battles are out of scope for
 now; "ships" here are the air / heavy tier that shows up in ground fights.)
 Origins, philosophies, and slogans live in `story.md`; this file is the roster.
