@@ -10,7 +10,7 @@
 
 <clipPath id="jup"><circle cx="240" cy="252" r="78"/></clipPath>
 <clipPath id="gob"><path d="M184,196 C188,236 212,276 233,300 L233,342 C224,347 204,353 190,363 L290,363 C276,353 256,347 247,342 L247,300 C268,276 292,236 296,196 Z"/></clipPath>
-<radialGradient id="fglow" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffd86a" stop-opacity="0.7"/><stop offset="100%" stop-color="#ff7a2c" stop-opacity="0"/></radialGradient>
+<radialGradient id="fglow" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffd86a" stop-opacity="0.8"/><stop offset="100%" stop-color="#ff7a2c" stop-opacity="0"/></radialGradient>
 
 </defs>
 <circle cx="240" cy="240" r="232" fill="#06161c" stroke="#e9cd84" stroke-width="3"/>
@@ -27,22 +27,27 @@
 </g>
 <circle cx="240" cy="252" r="78" fill="none" stroke="#d8b890" stroke-width="1.2" opacity="0.35"/>
 <circle cx="158" cy="150" r="7" fill="#e6c45a"/><path d="M158,143 A7,7 0 0 1 158,157 A4.8999999999999995,7 0 0 0 158,143 Z" fill="#9c7e2e" opacity="0.8"/><circle cx="212" cy="118" r="7" fill="#dcebf3"/><path d="M212,111 A7,7 0 0 1 212,125 A4.8999999999999995,7 0 0 0 212,111 Z" fill="#9fbccb" opacity="0.8"/><circle cx="290" cy="122" r="9" fill="#b8a07e"/><path d="M290,113 A9,9 0 0 1 290,131 A6.3,9 0 0 0 290,113 Z" fill="#7c6646" opacity="0.8"/><circle cx="340" cy="152" r="7" fill="#9c8a72"/><path d="M340,145 A7,7 0 0 1 340,159 A4.8999999999999995,7 0 0 0 340,145 Z" fill="#6a5a46" opacity="0.8"/>
-<path d="M158,159 Q199,150 240,156" fill="none" stroke="#ffce7a" stroke-width="1.6" opacity="0.5" stroke-linecap="round"/><path d="M212,127 Q226,134 240,156" fill="none" stroke="#ffce7a" stroke-width="1.6" opacity="0.5" stroke-linecap="round"/><path d="M290,133 Q265,136 240,156" fill="none" stroke="#ffce7a" stroke-width="1.6" opacity="0.5" stroke-linecap="round"/><path d="M340,161 Q290,151 240,156" fill="none" stroke="#ffce7a" stroke-width="1.6" opacity="0.5" stroke-linecap="round"/>
+<path d="M158,159 Q199,150 240,150" fill="none" stroke="#ffce7a" stroke-width="1.6" opacity="0.5" stroke-linecap="round"/><path d="M212,127 Q226,134 240,150" fill="none" stroke="#ffce7a" stroke-width="1.6" opacity="0.5" stroke-linecap="round"/><path d="M290,133 Q265,136 240,150" fill="none" stroke="#ffce7a" stroke-width="1.6" opacity="0.5" stroke-linecap="round"/><path d="M340,161 Q290,151 240,150" fill="none" stroke="#ffce7a" stroke-width="1.6" opacity="0.5" stroke-linecap="round"/>
 <circle cx="199" cy="154" r="1.6" fill="#ffe49a" opacity="0.8"/><circle cx="226" cy="138" r="1.6" fill="#ffe49a" opacity="0.8"/><circle cx="265" cy="140" r="1.6" fill="#ffe49a" opacity="0.8"/><circle cx="290" cy="155" r="1.6" fill="#ffe49a" opacity="0.8"/>
 <g fill="none" stroke="#2bbfe0" opacity="0.13"><circle cx="240" cy="244" r="150" stroke-width="1" stroke-dasharray="2 12"/></g>
-<!-- borrowed flame -->
-<ellipse cx="240" cy="172" rx="32" ry="48" fill="url(#fglow)" filter="url(#softglow)"/>
-<path d="M240,210 C212,194 216,154 232,126 C236,144 247,142 242,120 C253,138 270,168 263,194 C257,208 250,210 240,210 Z" fill="#ff8a36"/>
-<path d="M240,202 C224,192 226,164 238,142 C240,158 248,156 245,142 C254,160 257,178 251,192 C246,201 246,202 240,202 Z" fill="#ffd86a"/>
-<path d="M240,194 C233,188 234,172 240,160 C246,174 246,184 240,194 Z" fill="#fff4cc"/>
-<!-- goblet: smooth bowl-into-stem, flat 2-tone -->
-<ellipse cx="240" cy="196" rx="56" ry="11" fill="#08323f"/>
+<!-- cup body -->
 <path d="M184,196 C188,236 212,276 233,300 L233,342 C224,347 204,353 190,363 L290,363 C276,353 256,347 247,342 L247,300 C268,276 292,236 296,196 Z" fill="#5fdcec"/>
 <g clip-path="url(#gob)"><rect x="240" y="184" width="70" height="186" fill="#1f7a90"/></g>
 <g clip-path="url(#gob)" stroke="#0a3744" stroke-width="1.2" opacity="0.5"><path d="M214,200 L233,298"/><path d="M266,200 L247,298"/></g>
 <path d="M184,196 C188,236 212,276 233,300 L233,342 C224,347 204,353 190,363 L290,363 C276,353 256,347 247,342 L247,300 C268,276 292,236 296,196 Z" fill="none" stroke="#0a3744" stroke-width="1.8" stroke-linejoin="round"/>
-<path d="M184,196 A56,11 0 0 1 296,196" fill="none" stroke="#8af0fa" stroke-width="2" opacity="0.85"/>
 <path d="M186,198 C190,236 212,274 232,300 L232,342" fill="none" stroke="#9ef0fa" stroke-width="1.6" opacity="0.5"/>
+<!-- mouth interior + fire glowing inside -->
+<ellipse cx="240" cy="196" rx="56" ry="11" fill="#06303c"/>
+<path d="M184,196 A56,11 0 0 1 296,196" fill="none" stroke="#5fc6d8" stroke-width="2" opacity="0.5"/>
+<ellipse cx="240" cy="198" rx="46" ry="9" fill="url(#fglow)"/>
+<!-- borrowed flame, nested in the cup -->
+<ellipse cx="240" cy="172" rx="30" ry="46" fill="url(#fglow)" filter="url(#softglow)"/>
+<path d="M240,208 C214,194 218,154 233,126 C237,144 247,142 242,120 C253,138 269,166 262,192 C256,206 250,208 240,208 Z" fill="#ff8a36"/>
+<path d="M240,201 C225,191 227,164 238,142 C240,158 248,156 245,142 C254,160 256,176 250,190 C246,198 246,201 240,201 Z" fill="#ffd86a"/>
+<path d="M240,193 C233,187 234,171 240,159 C246,173 246,183 240,193 Z" fill="#fff4cc"/>
+<!-- near rim (front lip) over the flame base -->
+<path d="M184,196 A56,11 0 0 0 296,196 A52,8 0 0 1 184,196 Z" fill="#52cfe0" stroke="#0a3744" stroke-width="1.2"/>
+<path d="M184,196 A56,11 0 0 0 296,196" fill="none" stroke="#8af0fa" stroke-width="2" opacity="0.85"/>
 
 </g>
 <circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
