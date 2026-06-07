@@ -252,7 +252,7 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
         let afford = game.player_ore() >= game.train_cost();
         ctx.set_fill_style_str("#cfe0ff");
         ctx.set_font("12px monospace");
-        let _ = ctx.fill_text(&format!("BARRACKS — queue {queued}/6"), bx, by - 6.0);
+        let _ = ctx.fill_text(&format!("BARRACKS - queue {queued}/6"), bx, by - 6.0);
         ctx.set_fill_style_str(if afford {
             "rgba(40,80,140,0.95)"
         } else {
@@ -265,7 +265,7 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
         ctx.set_fill_style_str(if afford { "#eaf2ff" } else { "#8a93a4" });
         ctx.set_font("bold 14px monospace");
         let _ = ctx.fill_text(
-            &format!("Train Infantry [T] — {cost}"),
+            &format!("Train Infantry [T] - {cost}"),
             bx + 10.0,
             by + 22.0,
         );

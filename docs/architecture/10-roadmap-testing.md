@@ -1,4 +1,4 @@
-# 10 — Roadmap, Testing & Tooling
+# 10 - Roadmap, Testing & Tooling
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: AI Bots](09-ai-bots.md)
 
@@ -11,7 +11,7 @@
 The riskiest assumption in the whole engine is "the sim is bit-identical
 everywhere." So **Milestone 0 builds and proves that before any rendering exists.**
 Every later milestone keeps the cross-platform replay-hash test
-([Ch.01 §8](01-determinism.md)) green — it's the canary for the entire design.
+([Ch.01 §8](01-determinism.md)) green - it's the canary for the entire design.
 
 ```mermaid
 graph LR
@@ -51,7 +51,7 @@ graph LR
 
 ## 3. Testing strategy
 
-Determinism makes testing unusually powerful — the sim is a pure function, so
+Determinism makes testing unusually powerful - the sim is a pure function, so
 tests are cheap, fast, and exhaustive.
 
 ```mermaid
@@ -75,7 +75,7 @@ graph TD
 - **The replay-hash test is the keystone** ([Ch.01 §8](01-determinism.md)): a
   recorded command log must reduce to the same state hash on every platform. It
   runs in CI on Linux/Windows/macOS and `wasm32`. If it ever goes red, a
-  determinism bug shipped — stop and fix.
+  determinism bug shipped - stop and fix.
 - **Bot-vs-bot soak/fuzz** ([Ch.09 §6](09-ai-bots.md)): seeded long matches catch
   rare desyncs, overflow, and panics, and double as performance regression
   benchmarks for the "1000s of units" target.
@@ -83,7 +83,7 @@ graph TD
   can't erode silently ([Ch.01 §8](01-determinism.md)).
 - **Network tests**: lockstep over a simulated lossy/latent link; verify stalls,
   recovery, drop handling ([Ch.03 §3,§8](03-networking-lockstep.md)).
-- **Render tests** are necessarily looser (GPU/driver variance) — golden-image
+- **Render tests** are necessarily looser (GPU/driver variance) - golden-image
   smoke tests + frame-budget assertions on reference hardware.
 
 ## 4. Tooling & developer experience
@@ -91,7 +91,7 @@ graph TD
 | Tool | Purpose |
 |---|---|
 | **Tracy** (`tracing-tracy`) / **puffin** | Frame + tick profiling; find the 6.9 ms/frame ([Ch.04 §6](04-rendering-wgpu.md)) and per-tick hotspots ([Ch.02 §6](02-simulation.md)) |
-| **Desync inspector** | On hash mismatch, dump both peers' serialized state and **diff to the first differing component** ([Ch.01 §6](01-determinism.md)) — the #1 lockstep debugging tool |
+| **Desync inspector** | On hash mismatch, dump both peers' serialized state and **diff to the first differing component** ([Ch.01 §6](01-determinism.md)) - the #1 lockstep debugging tool |
 | **Replay player** | Re-sim any match, free camera, variable speed ([Ch.03 §6](03-networking-lockstep.md)); also a repro tool for bug reports (attach the tiny command log) |
 | **Headless runner** | Run matches with no renderer for CI, fuzzing, AI training ([Ch.02 §8](02-simulation.md), [Ch.09](09-ai-bots.md)) |
 | **Worldgen previewer** | Render seeds offline; run fairness/reachability checks ([Ch.08 §5](08-procedural-generation.md)) |

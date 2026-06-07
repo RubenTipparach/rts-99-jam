@@ -1,7 +1,7 @@
 //! Wire types shared across the engine.
 //!
 //! The network transports **only commands** (player/AI intents), never world
-//! state — see `docs/architecture/03-networking-lockstep.md`. Everything here is
+//! state - see `docs/architecture/03-networking-lockstep.md`. Everything here is
 //! fixed-point (no floats), so a command means the same thing on every machine.
 
 #![forbid(unsafe_code)]

@@ -1,25 +1,32 @@
-# Astromancers — project guide
+# Astromancers - project guide
 
 A deterministic, lockstep RTS in Rust + wgpu (not Bevy), built to run native and
-on the web (WASM, GitHub Pages). Design: **two worlds, one wall** — a fixed-point
+on the web (WASM, GitHub Pages). Design: **two worlds, one wall** - a fixed-point
 integer simulation produces all game truth; the float-based client only presents
 it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
 
+## House style
+
+- **No em-dashes (Unicode U+2014) anywhere in this repo.** Not in docs, code,
+  comments, strings, commit messages, or assets. Use a comma, a colon,
+  parentheses, or a spaced hyphen (` - `) instead, always with a plain ASCII
+  hyphen `-`.
+
 ## Workspace layout
 
-- `crates/math` — `Fx` fixed-point scalar (`I40F24`) + `Vec2`/`Vec3`. Integer-only.
-- `crates/protocol` — wire `Command`s (the only thing the network carries).
-- `crates/sim` — the deterministic `World`: entities, production, movement,
+- `crates/math` - `Fx` fixed-point scalar (`I40F24`) + `Vec2`/`Vec3`. Integer-only.
+- `crates/protocol` - wire `Command`s (the only thing the network carries).
+- `crates/sim` - the deterministic `World`: entities, production, movement,
   combat, fog-free game truth. **All game logic that affects state lives here.**
-- `crates/replay` — recorded command logs.
-- `crates/testkit` — headless harness + the pinned determinism test.
-- `apps/client` — wgpu/winit renderer, camera, HUD, fog-of-war, input → commands.
+- `crates/replay` - recorded command logs.
+- `crates/testkit` - headless harness + the pinned determinism test.
+- `apps/client` - wgpu/winit renderer, camera, HUD, fog-of-war, input → commands.
 
 ## Determinism rules (do not break these)
 
 - **No floats and no nondeterminism in the sim crates.** CI greps
   `crates/{math,sim,protocol,replay}/src` and fails on `f32`, `f64`, `HashMap`,
-  `HashSet`, `Instant`, `SystemTime`, or `thread_rng` — **including in comments**.
+  `HashSet`, `Instant`, `SystemTime`, or `thread_rng` - **including in comments**.
   Use `Fx` and ordered `Vec`/index iteration. Floats are allowed only in
   `apps/client` (presentation) and at the sim→render boundary.
 - **Iterate in a fixed order** (ascending index). Never let iteration order or
@@ -35,7 +42,7 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
 - **Units never stack on the same spot.** Infantry have collision avoidance:
   each tick a unit is pushed away from any other infantry closer than `SEP_DIST`,
   so a crowd drifts apart and a group settles into distinct cells. This lives in
-  `World::separate` (`crates/sim/src/lib.rs`) — fixed-point, computed from one
+  `World::separate` (`crates/sim/src/lib.rs`) - fixed-point, computed from one
   consistent snapshot (read all, then apply) so it stays order-independent. Push
   magnitude is proportional to overlap and clamped to `SEP_MAX`, so it's a smooth
   drift that settles exactly at `SEP_DIST` with no oscillation.
@@ -47,7 +54,7 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
   per-kind spacing) so the no-stacking rule holds.
 - **No auto-production.** Every unit is queued by `Command::Train`; nothing
   spawns on its own. Training costs **ore** (per-player stockpile in the sim,
-  income trickles in per building) — see `STARTING_ORE`/`TRAIN_COST`/
+  income trickles in per building) - see `STARTING_ORE`/`TRAIN_COST`/
   `INCOME_PER_BUILDING` in `crates/sim`. The player drives it from the HUD
   command card (button / `T`); the enemy is static until an AI issues `Train`.
   Ore is part of the state hash, so tuning it re-pins the golden value.
@@ -55,12 +62,12 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
 ## Web UI policy (DOM vs WASM)
 
 This game targets **desktop**. **All functional game UI is rendered from
-Rust/WASM** — the wgpu scene plus the Rust-driven HUD canvas (`hud.rs`). Do
+Rust/WASM** - the wgpu scene plus the Rust-driven HUD canvas (`hud.rs`). Do
 **not** add HTML/DOM widgets (buttons, menus, panels, overlays) for gameplay.
 
 The **only** DOM controls allowed are **mobile test controls**, so a developer on
 a phone can exercise desktop interactions: a **pan** d-pad, **zoom** in/out, and a
-**right-click** toggle — *nothing else*. They live in `apps/client/index.html` as
+**right-click** toggle - *nothing else*. They live in `apps/client/index.html` as
 bare elements; all their behavior is wired from Rust (the `mobile` module in
 `main.rs`), and they're shown only on touch devices via `@media (pointer:
 coarse)`. The game itself is not meant to be played on mobile.
@@ -70,11 +77,11 @@ before the WASM module has loaded.)
 
 ## Build / test / run
 
-- `cargo test --workspace` — unit tests + the pinned determinism test.
-- `cargo clippy --workspace --all-targets -- -D warnings` — must be clean.
-- `cargo fmt --all` — must be clean (CI checks `--check`).
-- `cargo run -p client` — native window.
-- `cd apps/client && trunk serve` — run in the browser; `trunk build --release
+- `cargo test --workspace` - unit tests + the pinned determinism test.
+- `cargo clippy --workspace --all-targets -- -D warnings` - must be clean.
+- `cargo fmt --all` - must be clean (CI checks `--check`).
+- `cargo run -p client` - native window.
+- `cd apps/client && trunk serve` - run in the browser; `trunk build --release
   --public-url /rts-99-jam/` is what deploys to GitHub Pages.
 - CI toolchain is pinned to Rust **1.94.1**; match it locally to avoid clippy
   version drift.
@@ -83,4 +90,4 @@ before the WASM module has loaded.)
 
 Tile textures are generated by `assets/gen_textures.py` (pure stdlib, no deps) and
 sampled with nearest filtering for a chunky PS1 look. The fog-of-war field is the
-exception — it is linear-filtered and feathered so its borders stay soft.
+exception - it is linear-filtered and feathered so its borders stay soft.

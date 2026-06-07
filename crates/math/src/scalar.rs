@@ -18,7 +18,7 @@ const FRAC_MASK: u128 = (1u128 << FRAC_BITS) - 1;
 /// Every operation is integer arithmetic, so results are identical on all
 /// platforms. `add`/`sub`/`neg` saturate; `mul`/`div` use an `i128` intermediate
 /// and saturate on the way back. Multiplication truncates toward negative
-/// infinity (arithmetic shift) and division toward zero — both fully
+/// infinity (arithmetic shift) and division toward zero - both fully
 /// deterministic.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Fx(i64);

@@ -1,6 +1,6 @@
-# Deterministic-lockstep RTS — Cargo workspace.
+# Deterministic-lockstep RTS - Cargo workspace.
 # Milestone 0: the deterministic core. NO rendering, networking, or external deps
-# here — see docs/architecture/01-determinism.md and docs/architecture/10-roadmap-testing.md.
+# here - see docs/architecture/01-determinism.md and docs/architecture/10-roadmap-testing.md.
 [workspace]
 resolver = "2"
 members = [

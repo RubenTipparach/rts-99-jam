@@ -71,7 +71,7 @@ def lerp(a, b, t):
 
 
 def rnd(x, y, s):
-    """Deterministic per-pixel hash in [0, 1) — scattered, not periodic."""
+    """Deterministic per-pixel hash in [0, 1) - scattered, not periodic."""
     n = (x * 374761393 + y * 668265263 + s * 362437) & 0xFFFFFFFF
     n = ((n ^ (n >> 13)) * 1274126177) & 0xFFFFFFFF
     return ((n ^ (n >> 16)) & 0xFFFF) / 65535.0

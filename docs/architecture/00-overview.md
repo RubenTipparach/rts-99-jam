@@ -1,4 +1,4 @@
-# 00 — Overview, Glossary & References
+# 00 - Overview, Glossary & References
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md)
 
@@ -6,14 +6,14 @@
 
 A deterministic, lockstep real-time strategy engine in the lineage of *StarCraft*,
 *Supreme Commander*, and *Planetary Annihilation*, written in **Rust** with a
-**wgpu** renderer (deliberately not Bevy — we want explicit control over the
+**wgpu** renderer (deliberately not Bevy - we want explicit control over the
 render graph, the simulation, and the determinism boundary).
 
 The defining tension of the brief is this:
 
 > 1000s of units, online, at 120–160 FPS, on large maps.
 
-You cannot send 1000 unit positions to every player every frame — that is
+You cannot send 1000 unit positions to every player every frame - that is
 megabytes per second per player. The only known solution at this scale is
 **deterministic lockstep**: every machine runs the identical simulation and the
 network carries only the handful of *commands* players issue. That single
@@ -73,26 +73,26 @@ in tests.
 
 ## Reference games & techniques (prior art worth studying)
 
-- **StarCraft / Brood War, Age of Empires** — classic deterministic lockstep with
+- **StarCraft / Brood War, Age of Empires** - classic deterministic lockstep with
   input delay; the model this engine follows. (See Bettner & Terrano's "1500
-  Archers on a 28.8" — the canonical lockstep RTS paper.)
-- **Supreme Commander** — flow-field-style movement, very large unit counts.
-- **Planetary Annihilation** — *spherical* planets, flow-field pathfinding on a
+  Archers on a 28.8" - the canonical lockstep RTS paper.)
+- **Supreme Commander** - flow-field-style movement, very large unit counts.
+- **Planetary Annihilation** - *spherical* planets, flow-field pathfinding on a
   geodesic grid, 1000s of units. The reference for the "spherical" requirement.
-- **GGPO / rollback netcode** — the alternative to lockstep; great for fighting
+- **GGPO / rollback netcode** - the alternative to lockstep; great for fighting
   games, the wrong tool for crowd-scale RTS (see [03](03-networking-lockstep.md)).
-- **"Fix Your Timestep!" (Gaffer on Games)** — the fixed-update + interpolation
+- **"Fix Your Timestep!" (Gaffer on Games)** - the fixed-update + interpolation
   loop in [ARCHITECTURE.md §4](../ARCHITECTURE.md).
-- **Recast/Detour** — navmesh generation; we port the *ideas*, not the C++.
-- **ORCA / RVO2** — reciprocal collision avoidance; **our chosen local-avoidance
+- **Recast/Detour** - navmesh generation; we port the *ideas*, not the C++.
+- **ORCA / RVO2** - reciprocal collision avoidance; **our chosen local-avoidance
   algorithm**, reimplemented in fixed-point ([Ch.07 §5](07-pathfinding-navigation.md)).
 
 ## Non-goals (initially)
 
 - A full PBR cinematic pipeline (stylized/vertex-lit look is the chosen aesthetic
-  and the performance budget — see [04](04-rendering-wgpu.md)).
+  and the performance budget - see [04](04-rendering-wgpu.md)).
 - Rollback netcode (explicitly out; see [03](03-networking-lockstep.md)).
 - A dedicated authoritative *simulation* server (the server **relays** commands;
-  it does not simulate — see [03](03-networking-lockstep.md)).
+  it does not simulate - see [03](03-networking-lockstep.md)).
 - Modding/scripting runtime (designed for, but not built early; note the
   determinism constraint it would impose).

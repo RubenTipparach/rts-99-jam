@@ -683,11 +683,11 @@ impl Gfx {
         let terrain_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain-layout"),
             entries: &[
-                tex_entry(0, false), // grass — nearest (PS1 look)
+                tex_entry(0, false), // grass - nearest (PS1 look)
                 tex_entry(1, false), // dirt
                 tex_entry(2, false), // rock
                 tex_entry(3, false), // sand
-                tex_entry(4, true),  // fog of war — linear-filtered soft borders
+                tex_entry(4, true),  // fog of war - linear-filtered soft borders
                 samp_entry(5, wgpu::SamplerBindingType::NonFiltering), // tiles
                 samp_entry(6, wgpu::SamplerBindingType::Filtering), // fow
             ],

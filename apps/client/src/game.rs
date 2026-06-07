@@ -88,7 +88,7 @@ impl Game {
                 y: fxi(180),
             });
         }
-        // Two enemy barracks far to the north, each with a guard squad — hidden
+        // Two enemy barracks far to the north, each with a guard squad - hidden
         // by fog until you scout up to them.
         for &bx in &[-150i32, 150] {
             setup.push(Command::SpawnBuilding {
@@ -134,7 +134,7 @@ impl Game {
         self.world.step(&cmds);
         self.curr = self.world.snapshot();
         // Keep any of the player's still-living entities selected (units AND
-        // buildings) — dropping buildings here deselected them every tick.
+        // buildings) - dropping buildings here deselected them every tick.
         let live: HashSet<u32> = self
             .curr
             .iter()
@@ -213,7 +213,7 @@ impl Game {
     pub fn toggle_fog_explored(&mut self) {
         self.fog_explored = !self.fog_explored;
     }
-    /// (unexplored fog on, explored fog on) — for the debug readout.
+    /// (unexplored fog on, explored fog on) - for the debug readout.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn fog_flags(&self) -> (bool, bool) {
         (self.fog_unexplored, self.fog_explored)
@@ -241,7 +241,7 @@ impl Game {
     /// Fog-of-war as an R8 field for the terrain shader: visible = bright,
     /// explored = dim, unexplored = dark. A light separable blur feathers the
     /// borders so the fog fades in smoothly rather than stepping per cell.
-    /// (Units don't read this — they're shown/hidden outright via `revealed`.)
+    /// (Units don't read this - they're shown/hidden outright via `revealed`.)
     pub fn fow_bytes(&self) -> Vec<u8> {
         let n = FOW_RES;
         let explored_v = if self.fog_explored { 0.45 } else { 1.0 };
@@ -488,7 +488,7 @@ impl Game {
             }
         }
 
-        // Otherwise the nearest building (larger radius — buildings are big).
+        // Otherwise the nearest building (larger radius - buildings are big).
         if best.is_none() {
             let bldg_r = (h * 0.06).max(36.0);
             for s in &self.curr {

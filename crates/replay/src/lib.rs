@@ -3,7 +3,7 @@
 //! Because the simulation is deterministic and consumes only commands, a whole
 //! match is fully described by its **seed plus the per-tick command stream**.
 //! Re-feeding that to a fresh [`sim::World`](../sim) reconstructs the match
-//! byte-for-byte — so a replay is tiny, and it doubles as a determinism test
+//! byte-for-byte - so a replay is tiny, and it doubles as a determinism test
 //! fixture and a bug-repro format. See `docs/architecture/03-networking-lockstep.md`.
 
 #![forbid(unsafe_code)]

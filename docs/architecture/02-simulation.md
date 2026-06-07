@@ -1,4 +1,4 @@
-# 02 — Simulation & Data Model (100s–1000s of units)
+# 02 - Simulation & Data Model (100s–1000s of units)
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Determinism](01-determinism.md) · [Next: Networking](03-networking-lockstep.md)
 
@@ -107,7 +107,7 @@ game-start config** so peers can't silently disagree about what a Marine is.
 ## 4. Spatial partitioning (the key to scale)
 
 Naively, "every unit checks every other unit" for targeting and avoidance is
-O(n²) — 1000 units = 1,000,000 checks per tick. Unacceptable. A **uniform
+O(n²) - 1000 units = 1,000,000 checks per tick. Unacceptable. A **uniform
 spatial grid** (hash grid) reduces neighbor queries to O(units × local density):
 
 - Cell size ≈ the largest common query radius (e.g. attack range / avoidance
@@ -158,9 +158,9 @@ but we want it in single-digit ms to leave headroom and allow catch-up). Levers:
   ([Ch.07](07-pathfinding-navigation.md)).
 - **Sleep idle units**: units with `Idle` order and no nearby enemies skip most
   systems until something changes (event/dirty flags).
-- **Fixed-point is integer math** — fast and branch-predictable.
+- **Fixed-point is integer math** - fast and branch-predictable.
 - **Deterministic parallelism** (double-buffered columns, `rayon` with fixed-order
-  merges) *after* the single-threaded version is proven — see
+  merges) *after* the single-threaded version is proven - see
   [Ch.01 §7](01-determinism.md).
 
 ```mermaid
@@ -177,7 +177,7 @@ graph LR
 
 The renderer needs to draw smoothly at 144 FPS between 25 Hz ticks. The sim
 exposes a **read-only snapshot** of the columns the renderer needs (position,
-facing, anim state, team, type). Two snapshots — `prev` and `curr` — are kept;
+facing, anim state, team, type). Two snapshots - `prev` and `curr` - are kept;
 the renderer interpolates ([ARCHITECTURE.md §4](../ARCHITECTURE.md)).
 
 - The snapshot is a **copy or a frozen view**; rendering must not mutate it.

@@ -1,6 +1,6 @@
 # Branding
 
-> **Title:** *ASTROMANCERS* — a deterministic RTS of **space and magic**. The
+> **Title:** *ASTROMANCERS* - a deterministic RTS of **space and magic**. The
 > wordmark is one line of text in `logo.svg`, trivially re-lettered (see
 > [Renaming](#renaming)).
 
@@ -9,16 +9,16 @@
 A deterministic RTS of **space and magic**. The emblem is the **Astromancers
 mission patch** (NRO/NASA style): a hooded Astromancer magus standing over a
 world, conjuring a starship that rises straight up on a plume of arcane sparkles,
-crested **PHILOSOPHIA** (the wizards' founding order — intentionally kept on the
+crested **PHILOSOPHIA** (the wizards' founding order - intentionally kept on the
 patch, though the wordmark/name is *Astromancers*) over the motto *SCIENTIA EST MAGIA*. Pure vector, so it scales from favicon
-to banner. (Sibling patches — the kraken-and-ship **Astromancers** badge and
-**Draco** — live one level up in [`../`](../) as `logo*.svg`.)
+to banner. (Sibling patches - the kraken-and-ship **Astromancers** badge and
+**Draco** - live one level up in [`../`](../) as `logo*.svg`.)
 
 ## Files
 
 | File | What it is | Use for |
 |---|---|---|
-| `emblem.svg` / `.png` | The mission patch alone (480² / 1024²) | **Default logo** — README header, favicon, Discord/app icon |
+| `emblem.svg` / `.png` | The mission patch alone (480² / 1024²) | **Default logo** - README header, favicon, Discord/app icon |
 | `logo-square.svg` / `.png` | Patch + ASTROMANCERS wordmark, 1:1 (1024²) | Avatar, app/store icon, square social posts |
 | `social-card.svg` / `.png` | Share card, 1200×630 | Link previews (Open Graph) + GitHub **Social Preview** |
 | `logo.svg` / `.png` | Patch + wordmark, wide (1600×520 / 2000px) | Wide banner / title-screen header |
@@ -27,7 +27,7 @@ to banner. (Sibling patches — the kraken-and-ship **Astromancers** badge and
 The wide/square/card SVGs pull the patch in via `<image href="emblem.png">`, so
 re-render `emblem.png` first, then the rest.
 
-The PNGs are generated from the SVGs — edit the SVGs, then re-render (below).
+The PNGs are generated from the SVGs - edit the SVGs, then re-render (below).
 
 ## Palette
 
@@ -43,7 +43,7 @@ The PNGs are generated from the SVGs — edit the SVGs, then re-render (below).
 
 ## Re-rendering the PNGs
 
-No system renderer needed — uses the self-contained `@resvg/resvg-js`:
+No system renderer needed - uses the self-contained `@resvg/resvg-js`:
 
 ```bash
 npm install @resvg/resvg-js
@@ -55,7 +55,7 @@ const out = (svg, png, width, bg) => {
   if (bg) opts.background = bg;
   fs.writeFileSync(png, new Resvg(fs.readFileSync(svg), opts).render().asPng());
 };
-out('emblem.svg',      'emblem.png',      1024);          // render first — the rest embed it
+out('emblem.svg',      'emblem.png',      1024);          // render first - the rest embed it
 out('logo.svg',        'logo.png',        2000, '#070b14');
 out('logo-square.svg', 'logo-square.png', 1024);
 out('social-card.svg', 'social-card.png', 1200);

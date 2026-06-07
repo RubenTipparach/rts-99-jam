@@ -1,4 +1,4 @@
-# 01 — Determinism: The Foundation
+# 01 - Determinism: The Foundation
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Overview](00-overview.md) · [Next: Simulation](02-simulation.md)
 
@@ -7,7 +7,7 @@
 > This chapter is the rulebook. Every other chapter obeys it.
 
 A simulation is **deterministic** if, given the same initial state and the same
-sequence of commands, it produces the *exact same* state — byte for byte — on
+sequence of commands, it produces the *exact same* state - byte for byte - on
 every CPU, OS, compiler, and run. Not "approximately the same." Identical.
 
 ```mermaid
@@ -25,7 +25,7 @@ flowchart LR
 
 ## 1. Why floating point is banned in the simulation
 
-IEEE-754 floats give *almost* the same answer everywhere — and "almost" is fatal
+IEEE-754 floats give *almost* the same answer everywhere - and "almost" is fatal
 when a 1-ULP difference, compounded over 10,000 ticks across 1000 units,
 relocates an army. Float results legitimately differ across machines because of:
 
@@ -72,7 +72,7 @@ impl Fx {
     pub fn from_int(i: i32) -> Self { Fx(Fixed::from_num(i)) }
     pub fn to_f32(self) -> f32 { self.0.to_num() }   // PRESENTATION ONLY
 }
-// + Add/Sub/Mul/Div via the fixed crate (saturating or checked — pick one and
+// + Add/Sub/Mul/Div via the fixed crate (saturating or checked - pick one and
 //   keep it everywhere; overflow behavior must be deterministic too).
 ```
 
@@ -80,21 +80,21 @@ Then `Vec2/Vec3/Quat` built on `Fx`, and a fixed-point transform for units.
 
 ### Deterministic transcendentals
 
-`sqrt`, `sin`, `cos`, `atan2`, normalization — needed for movement and rotation —
+`sqrt`, `sin`, `cos`, `atan2`, normalization - needed for movement and rotation -
 must be deterministic. Options:
 
 1. **CORDIC** (the [`cordic`](https://docs.rs/cordic) crate works on `fixed`
    types): iterative integer algorithm, identical on all hardware. Recommended
    for trig, atan2, hypot.
-2. **Integer sqrt**: Newton/bit-by-bit on the raw integer — exact and portable.
+2. **Integer sqrt**: Newton/bit-by-bit on the raw integer - exact and portable.
 3. **Lookup tables**: precomputed fixed-point `sin`/`cos` tables for angles
    quantized to N steps; great when you also want to *quantize* facings (units
-   turn in fixed increments — common and cheap in RTS).
+   turn in fixed increments - common and cheap in RTS).
 
 Wrap them in `math` so the sim never calls a float trig function:
 
 ```rust
-// crates/math/src/trig.rs — deterministic, fixed-point.
+// crates/math/src/trig.rs - deterministic, fixed-point.
 pub fn sin(a: Fx) -> Fx { Fx(cordic::sin(a.0)) }
 pub fn sqrt(x: Fx) -> Fx { Fx(cordic::sqrt(x.0)) }
 pub fn atan2(y: Fx, x: Fx) -> Fx { Fx(cordic::atan2(y.0, x.0)) }
@@ -107,20 +107,20 @@ pub fn atan2(y: Fx, x: Fx) -> Fx { Fx(cordic::atan2(y.0, x.0)) }
 `rand::thread_rng()` is forbidden in the sim (seeded from the OS, non-portable).
 The PRNG lives **inside the simulation state** and is part of the hashed state.
 
-- **Pin a stable algorithm** you control the source of — e.g. a hand-rolled
+- **Pin a stable algorithm** you control the source of - e.g. a hand-rolled
   **PCG32** or **SplitMix64**. Do *not* depend on a crate whose default algorithm
   could change in a minor version.
 - Seed it from the shared **map seed** at game start (same on all peers).
 - Every random draw advances the *same* generator in the *same* order on every
-  machine — which means draw order is itself part of determinism (see §4).
+  machine - which means draw order is itself part of determinism (see §4).
 
 ```rust
-// crates/sim/src/rng.rs — part of the World state, hashed and serialized.
+// crates/sim/src/rng.rs - part of the World state, hashed and serialized.
 #[derive(Clone)]
 pub struct DetRng { state: u64 }
 impl DetRng {
     pub fn new(seed: u64) -> Self { Self { state: seed.wrapping_add(0x9E3779B97F4A7C15) } }
-    pub fn next_u64(&mut self) -> u64 {          // SplitMix64 — pinned, never changes
+    pub fn next_u64(&mut self) -> u64 {          // SplitMix64 - pinned, never changes
         self.state = self.state.wrapping_add(0x9E3779B97F4A7C15);
         let mut z = self.state;
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
@@ -133,14 +133,14 @@ impl DetRng {
 ```
 
 > **Cosmetic randomness** (particle jitter, idle animation variation, screen
-> shake) uses a *separate*, presentation-side RNG seeded however you like — it
+> shake) uses a *separate*, presentation-side RNG seeded however you like - it
 > must never touch `DetRng`.
 
 ---
 
 ## 4. Deterministic ordering & data structures
 
-Same math, same RNG — but iterate entities in a different order and you desync.
+Same math, same RNG - but iterate entities in a different order and you desync.
 The rules:
 
 - **No `std::HashMap`/`HashSet` iteration in the sim.** Their default hasher is
@@ -152,11 +152,11 @@ The rules:
   allocation** (a deterministic free list, not address-based). See
   [Simulation](02-simulation.md).
 - **Systems run in a fixed, declared order.** Combat before movement before
-  death-resolution, etc. — a static schedule, never data-dependent.
+  death-resolution, etc. - a static schedule, never data-dependent.
 - **Stable sorts** with explicit tie-breakers (e.g. by `EntityId`) anywhere
   order could otherwise be ambiguous.
 - **Spatial queries** (neighbors for avoidance/targeting) must return results in
-  a deterministic order — sort candidates by `EntityId` before acting on them.
+  a deterministic order - sort candidates by `EntityId` before acting on them.
 
 ---
 
@@ -170,13 +170,13 @@ the sim, never**:
 - branch on pointer/address values, allocation order, or `Vec` capacity;
 - use uninitialized memory or rely on `HashMap` capacity/iteration;
 - spawn threads whose results merge in non-deterministic order (see §7);
-- call any `f32`/`f64` op (enforced by lint — see §8).
+- call any `f32`/`f64` op (enforced by lint - see §8).
 
 ---
 
 ## 6. State hashing & desync detection
 
-Every tick, hash the simulation state and exchange the hash with peers (cheaply —
+Every tick, hash the simulation state and exchange the hash with peers (cheaply -
 it's a few bytes). Mismatch = desync caught *immediately*, at the tick it
 happened, not 10 minutes later.
 
@@ -191,7 +191,7 @@ happened, not 10 minutes later.
 ```rust
 // Desync hunt mode (dev): when hashes diverge at tick T, both peers dump their
 // full serialized state for T-1 and T. A diff tool pinpoints the first differing
-// component — usually a stray f32, an unordered iteration, or a non-pinned RNG.
+// component - usually a stray f32, an unordered iteration, or a non-pinned RNG.
 pub fn state_hash(w: &World) -> u64 {
     let mut h = Fnv::new();
     h.write_u64(w.tick);
@@ -203,14 +203,14 @@ pub fn state_hash(w: &World) -> u64 {
 }
 ```
 
-This is the single most valuable debugging tool in a lockstep engine — build it
+This is the single most valuable debugging tool in a lockstep engine - build it
 in [Milestone 0](10-roadmap-testing.md), not later.
 
 ---
 
 ## 7. Determinism and multithreading
 
-Determinism does **not** forbid parallelism — it forbids *non-deterministic*
+Determinism does **not** forbid parallelism - it forbids *non-deterministic*
 parallelism. Rules for a parallel sim (do this *only after* the single-threaded
 core is proven correct):
 
@@ -224,13 +224,13 @@ core is proven correct):
   order-fixed. Floating-point reductions are still banned (FP is not associative).
 
 The renderer, asset loading, particle setup, and worldgen *preview* can use
-threads freely — they're presentation-side.
+threads freely - they're presentation-side.
 
 ---
 
 ## 8. Enforcement (so it stays true)
 
-Determinism rots silently — someone adds a `* 0.5f32` and it works fine in
+Determinism rots silently - someone adds a `* 0.5f32` and it works fine in
 single-player for months. Guardrails:
 
 1. **Lint the float ban.** A `clippy` deny-list / custom lint / `#![forbid]`

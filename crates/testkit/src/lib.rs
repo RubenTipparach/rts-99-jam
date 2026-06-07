@@ -1,6 +1,6 @@
 //! Headless simulation harness.
 //!
-//! No window, no renderer — just drive [`sim::World`] from a [`Replay`] and read
+//! No window, no renderer - just drive [`sim::World`] from a [`Replay`] and read
 //! the resulting state hash. Powers the determinism CI and (later) bot-vs-bot.
 //! See `docs/architecture/10-roadmap-testing.md`.
 
@@ -20,7 +20,7 @@ pub fn run_replay(replay: &Replay) -> World {
     world
 }
 
-/// Run a replay and return the final state hash — identical on every platform.
+/// Run a replay and return the final state hash - identical on every platform.
 pub fn final_hash(replay: &Replay) -> u64 {
     run_replay(replay).state_hash()
 }
