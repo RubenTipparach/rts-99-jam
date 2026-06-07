@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480" font-family="'Eurostile','Michroma','Bahnschrift','Arial Narrow',sans-serif">
+<defs>
+<radialGradient id="space" cx="50%" cy="36%" r="80%"><stop offset="0%" stop-color="#0c2e38"/><stop offset="48%" stop-color="#08222a"/><stop offset="100%" stop-color="#04080c"/></radialGradient>
+<filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3.2"/></filter>
+<g id="spark"><path d="M0,-8 L1.7,-1.7 L8,0 L1.7,1.7 L0,8 L-1.7,1.7 L-8,0 L-1.7,-1.7 Z" fill="currentColor"/></g>
+<clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
+<path id="arcTop" d="M 39,240 A 201,201 0 0 1 441,240"/>
+<path id="arcBottom" d="M 23,240 A 217,217 0 0 0 457,240"/>
+<linearGradient id="squid" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#33d6e6"/><stop offset="60%" stop-color="#1b7f9e"/><stop offset="100%" stop-color="#0b3346"/></linearGradient><radialGradient id="ether" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="35%" stop-color="#7ff0ff"/><stop offset="100%" stop-color="#1bbfe6" stop-opacity="0"/></radialGradient>
+</defs>
+<circle cx="240" cy="240" r="232" fill="#06161c" stroke="#e9cd84" stroke-width="3"/>
+<circle cx="240" cy="240" r="227" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.45"/>
+<g clip-path="url(#scene)">
+<circle cx="240" cy="240" r="188" fill="url(#space)"/>
+<g fill="#ffffff"><circle cx="300" cy="92" r="1.4" opacity="0.8"/>
+<circle cx="352" cy="150" r="1" opacity="0.6"/>
+<circle cx="392" cy="210" r="1.2" opacity="0.7"/>
+<circle cx="150" cy="170" r="1" opacity="0.6"/>
+<circle cx="92" cy="210" r="1.1" opacity="0.6"/>
+<circle cx="210" cy="118" r="0.9" opacity="0.6"/>
+<circle cx="408" cy="270" r="1" opacity="0.5"/>
+<circle cx="86" cy="280" r="0.9" opacity="0.5"/></g>
+
+<g stroke="url(#squid)" stroke-width="9" fill="none" stroke-linecap="round" opacity="0.95">
+  <path d="M214,256 C176,270 150,300 138,332"/>
+  <path d="M222,262 C198,292 188,316 196,346"/>
+  <path d="M232,266 C224,300 232,324 244,346"/>
+  <path d="M266,256 C304,270 330,300 342,332"/>
+  <path d="M258,262 C282,292 292,316 284,346"/>
+  <path d="M248,266 C256,300 248,324 236,346"/>
+</g>
+<g stroke="#bdf0ff" stroke-width="2" opacity="0.5" fill="none" filter="url(#glow)">
+  <path d="M150,330 L196,318 L230,334 L258,316 L304,330"/>
+  <path d="M212,334 L216,354"/><path d="M260,330 L264,350"/><path d="M184,326 L180,346"/>
+</g>
+<path d="M240,166 C286,172 302,214 286,248 C272,266 252,270 240,270 C228,270 208,266 194,248 C178,214 194,172 240,166 Z"
+      fill="url(#squid)" stroke="#7ff0ff" stroke-width="2" stroke-opacity="0.6"/>
+<g stroke="#9af6ff" stroke-width="1.4" fill="none" opacity="0.45">
+  <path d="M212,198 L268,198"/><path d="M206,216 L274,216"/>
+</g>
+<circle cx="240" cy="222" r="22" fill="url(#ether)" filter="url(#glow)"/>
+<circle cx="240" cy="222" r="9" fill="#ffffff"/>
+<circle cx="240" cy="222" r="4.5" fill="#0bd3ff"/>
+
+</g>
+<circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
+<circle cx="240" cy="240" r="184" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.4"/>
+<text fill="#bfeffb" font-size="27" font-weight="700" letter-spacing="4"><textPath href="#arcTop" startOffset="50%" text-anchor="middle">RIMELINGS</textPath></text>
+<text fill="#bfeffb" font-size="13" font-weight="600" letter-spacing="2"><textPath href="#arcBottom" startOffset="50%" text-anchor="middle">THE CUP, NOT THE WINE</textPath></text>
+<use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#41e7ff"/>
+<use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#41e7ff"/>
+</svg>

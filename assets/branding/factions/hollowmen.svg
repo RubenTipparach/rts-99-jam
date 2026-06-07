@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480" font-family="'Eurostile','Michroma','Bahnschrift','Arial Narrow',sans-serif">
+<defs>
+<radialGradient id="space" cx="50%" cy="36%" r="80%"><stop offset="0%" stop-color="#243043"/><stop offset="48%" stop-color="#141c28"/><stop offset="100%" stop-color="#070a0f"/></radialGradient>
+<filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3.2"/></filter>
+<g id="spark"><path d="M0,-8 L1.7,-1.7 L8,0 L1.7,1.7 L0,8 L-1.7,1.7 L-8,0 L-1.7,-1.7 Z" fill="currentColor"/></g>
+<clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
+<path id="arcTop" d="M 39,240 A 201,201 0 0 1 441,240"/>
+<path id="arcBottom" d="M 23,240 A 217,217 0 0 0 457,240"/>
+<linearGradient id="steel" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#cdd6e4"/><stop offset="50%" stop-color="#8b97ab"/><stop offset="100%" stop-color="#3a4356"/></linearGradient>
+</defs>
+<circle cx="240" cy="240" r="232" fill="#0e141d" stroke="#e9cd84" stroke-width="3"/>
+<circle cx="240" cy="240" r="227" fill="none" stroke="#ff8a3c" stroke-width="1" opacity="0.45"/>
+<g clip-path="url(#scene)">
+<circle cx="240" cy="240" r="188" fill="url(#space)"/>
+<g fill="#ffffff"><circle cx="300" cy="92" r="1.4" opacity="0.8"/>
+<circle cx="352" cy="150" r="1" opacity="0.6"/>
+<circle cx="392" cy="210" r="1.2" opacity="0.7"/>
+<circle cx="150" cy="170" r="1" opacity="0.6"/>
+<circle cx="92" cy="210" r="1.1" opacity="0.6"/>
+<circle cx="210" cy="118" r="0.9" opacity="0.6"/>
+<circle cx="408" cy="270" r="1" opacity="0.5"/>
+<circle cx="86" cy="280" r="0.9" opacity="0.5"/></g>
+<g fill="#46566e" opacity="0.42">
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(0.00 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(22.50 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(45.00 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(67.50 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(90.00 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(112.50 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(135.00 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(157.50 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(180.00 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(202.50 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(225.00 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(247.50 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(270.00 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(292.50 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(315.00 240 236)"/>
+<rect x="232.0" y="98.0" width="16" height="21" rx="2" transform="rotate(337.50 240 236)"/>
+</g>
+<circle cx="240" cy="236" r="96" fill="none" stroke="#46566e" stroke-width="3" opacity="0.5"/>
+<g stroke="#161d2a" stroke-width="2" stroke-linejoin="round">
+  <path d="M196,210 L232,204 L234,240 L194,244 Z" fill="url(#steel)"/>
+  <path d="M284,210 L248,204 L246,240 L286,244 Z" fill="url(#steel)"/>
+  <rect x="192" y="240" width="15" height="36" rx="2" fill="url(#steel)"/>
+  <rect x="273" y="240" width="15" height="36" rx="2" fill="url(#steel)"/>
+  <rect x="219" y="276" width="18" height="46" fill="url(#steel)"/>
+  <rect x="243" y="276" width="18" height="46" fill="url(#steel)"/>
+  <rect x="211" y="316" width="32" height="14" rx="2" fill="url(#steel)"/>
+  <rect x="237" y="316" width="32" height="14" rx="2" fill="url(#steel)"/>
+  <path d="M209,205 L271,205 L263,284 L217,284 Z" fill="url(#steel)"/>
+  <path d="M222,177 L258,177 L261,203 L219,203 Z" fill="url(#steel)"/>
+</g>
+<g stroke="#2b3445" stroke-width="1.4" fill="none" opacity="0.8">
+  <path d="M240,205 L240,284"/><path d="M224,222 L256,222"/>
+</g>
+<rect x="225" y="187" width="30" height="8" rx="3" fill="#ff8a3c" filter="url(#glow)"/>
+<circle cx="240" cy="242" r="10" fill="#ff8a3c" filter="url(#glow)"/>
+<circle cx="240" cy="242" r="4.5" fill="#ffe2c4"/>
+
+</g>
+<circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
+<circle cx="240" cy="240" r="184" fill="none" stroke="#ff8a3c" stroke-width="1" opacity="0.4"/>
+<text fill="#ffcaa0" font-size="27" font-weight="700" letter-spacing="4"><textPath href="#arcTop" startOffset="50%" text-anchor="middle">HOLLOWMEN</textPath></text>
+<text fill="#ffd9bf" font-size="16" font-weight="600" letter-spacing="3"><textPath href="#arcBottom" startOffset="50%" text-anchor="middle">MANU, NON MAGIA</textPath></text>
+<use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#ff8a3c"/>
+<use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#ff8a3c"/>
+</svg>

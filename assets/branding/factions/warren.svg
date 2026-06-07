@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480" font-family="'Eurostile','Michroma','Bahnschrift','Arial Narrow',sans-serif">
+<defs>
+<radialGradient id="space" cx="50%" cy="36%" r="80%"><stop offset="0%" stop-color="#26301a"/><stop offset="48%" stop-color="#161d0e"/><stop offset="100%" stop-color="#080a05"/></radialGradient>
+<filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3.2"/></filter>
+<g id="spark"><path d="M0,-8 L1.7,-1.7 L8,0 L1.7,1.7 L0,8 L-1.7,1.7 L-8,0 L-1.7,-1.7 Z" fill="currentColor"/></g>
+<clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
+<path id="arcTop" d="M 39,240 A 201,201 0 0 1 441,240"/>
+<path id="arcBottom" d="M 23,240 A 217,217 0 0 0 457,240"/>
+<linearGradient id="fur" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#c69640"/><stop offset="55%" stop-color="#8a6a2c"/><stop offset="100%" stop-color="#4a3814"/></linearGradient>
+</defs>
+<circle cx="240" cy="240" r="232" fill="#10160a" stroke="#e9cd84" stroke-width="3"/>
+<circle cx="240" cy="240" r="227" fill="none" stroke="#9be23c" stroke-width="1" opacity="0.45"/>
+<g clip-path="url(#scene)">
+<circle cx="240" cy="240" r="188" fill="url(#space)"/>
+<g fill="#ffffff"><circle cx="300" cy="92" r="1.4" opacity="0.8"/>
+<circle cx="352" cy="150" r="1" opacity="0.6"/>
+<circle cx="392" cy="210" r="1.2" opacity="0.7"/>
+<circle cx="150" cy="170" r="1" opacity="0.6"/>
+<circle cx="92" cy="210" r="1.1" opacity="0.6"/>
+<circle cx="210" cy="118" r="0.9" opacity="0.6"/>
+<circle cx="408" cy="270" r="1" opacity="0.5"/>
+<circle cx="86" cy="280" r="0.9" opacity="0.5"/></g>
+<g stroke="#6f7a3a" stroke-width="1.6" opacity="0.4" fill="none"><path d="M120,300 L166,266 L210,296 L255,262 L300,292 L346,268"/><path d="M166,266 L176,316"/><path d="M255,262 L262,314"/></g><g opacity="0.45"><circle cx="120" cy="300" r="4" fill="#8a9648"/><circle cx="166" cy="266" r="4" fill="#8a9648"/><circle cx="210" cy="296" r="4" fill="#8a9648"/><circle cx="255" cy="262" r="4" fill="#8a9648"/><circle cx="300" cy="292" r="4" fill="#8a9648"/><circle cx="346" cy="268" r="4" fill="#8a9648"/></g>
+<path d="M266,298 C322,300 332,250 300,230" fill="none" stroke="url(#fur)" stroke-width="8" stroke-linecap="round"/>
+<circle cx="209" cy="214" r="25" fill="url(#fur)" stroke="#332710" stroke-width="2"/>
+<circle cx="271" cy="214" r="25" fill="url(#fur)" stroke="#332710" stroke-width="2"/>
+<circle cx="209" cy="216" r="12" fill="#5a4418"/>
+<circle cx="271" cy="216" r="12" fill="#5a4418"/>
+<path d="M212,226 C203,250 210,279 240,303 C270,279 277,250 268,226 C258,209 222,209 212,226 Z"
+      fill="url(#fur)" stroke="#332710" stroke-width="2"/>
+<ellipse cx="227" cy="247" rx="6" ry="7" fill="#b6f84a" filter="url(#glow)"/>
+<ellipse cx="253" cy="247" rx="6" ry="7" fill="#b6f84a" filter="url(#glow)"/>
+<circle cx="227" cy="247" r="2.4" fill="#15240a"/><circle cx="253" cy="247" r="2.4" fill="#15240a"/>
+<path d="M232,289 L248,289 L240,301 Z" fill="#3f2f10"/>
+<circle cx="240" cy="300" r="4" fill="#211806"/>
+<g stroke="#d8e0b0" stroke-width="1.2" opacity="0.65">
+  <path d="M235,294 L196,286"/><path d="M235,298 L198,301"/><path d="M235,302 L200,315"/>
+  <path d="M245,294 L284,286"/><path d="M245,298 L282,301"/><path d="M245,302 L280,315"/>
+</g>
+
+</g>
+<circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
+<circle cx="240" cy="240" r="184" fill="none" stroke="#9be23c" stroke-width="1" opacity="0.4"/>
+<text fill="#d6f29a" font-size="27" font-weight="700" letter-spacing="4"><textPath href="#arcTop" startOffset="50%" text-anchor="middle">WARREN</textPath></text>
+<text fill="#cfe79a" font-size="11" font-weight="600" letter-spacing="1.5"><textPath href="#arcBottom" startOffset="50%" text-anchor="middle">THE MANY OUTLAST THE MIGHTY</textPath></text>
+<use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#9be23c"/>
+<use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#9be23c"/>
+</svg>

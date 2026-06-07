@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480" font-family="'Eurostile','Michroma','Bahnschrift','Arial Narrow',sans-serif">
+<defs>
+<radialGradient id="space" cx="50%" cy="36%" r="80%"><stop offset="0%" stop-color="#241d52"/><stop offset="48%" stop-color="#16113b"/><stop offset="100%" stop-color="#070518"/></radialGradient>
+<filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3.2"/></filter>
+<mask id="moonmask"><rect x="0" y="0" width="480" height="480" fill="#fff"/><circle cx="172" cy="148" r="60" fill="#000"/></mask>
+<g id="spark"><path d="M0,-8 L1.7,-1.7 L8,0 L1.7,1.7 L0,8 L-1.7,1.7 L-8,0 L-1.7,-1.7 Z" fill="currentColor"/></g>
+<clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
+<path id="arcTop" d="M 39,240 A 201,201 0 0 1 441,240"/>
+<path id="arcBottom" d="M 23,240 A 217,217 0 0 0 457,240"/>
+</defs>
+<circle cx="240" cy="240" r="232" fill="#0c0a24" stroke="#e9cd84" stroke-width="3"/>
+<circle cx="240" cy="240" r="227" fill="none" stroke="#b69cff" stroke-width="1" opacity="0.45"/>
+<g clip-path="url(#scene)">
+<circle cx="240" cy="240" r="188" fill="url(#space)"/>
+<circle cx="126" cy="150" r="47" fill="#e7ebff" mask="url(#moonmask)"/>
+<use href="#spark" transform="translate(121.6,208.9) scale(0.55)" color="#e7ebff" opacity="0.95"/>
+<use href="#spark" transform="translate(140.0,175.3) scale(0.55)" color="#e7ebff" opacity="0.95"/>
+<use href="#spark" transform="translate(167.7,148.8) scale(0.55)" color="#e7ebff" opacity="0.95"/>
+<use href="#spark" transform="translate(202.1,131.8) scale(0.55)" color="#e7ebff" opacity="0.95"/>
+<use href="#spark" transform="translate(240.0,126.0) scale(0.55)" color="#e7ebff" opacity="0.95"/>
+<use href="#spark" transform="translate(277.9,131.8) scale(0.55)" color="#e7ebff" opacity="0.95"/>
+<use href="#spark" transform="translate(312.3,148.8) scale(0.55)" color="#e7ebff" opacity="0.95"/>
+<use href="#spark" transform="translate(340.0,175.3) scale(0.55)" color="#e7ebff" opacity="0.95"/>
+<use href="#spark" transform="translate(358.4,208.9) scale(0.55)" color="#e7ebff" opacity="0.95"/>
+
+<path d="M206,234 L216,190 L240,222 L264,190 L274,234 C282,256 274,288 240,305 C206,288 198,256 206,234 Z"
+      fill="#2a2350" stroke="#b69cff" stroke-width="2" stroke-linejoin="round"/>
+<ellipse cx="227" cy="248" rx="5.6" ry="12" fill="#b6ff5a" filter="url(#glow)"/>
+<ellipse cx="253" cy="248" rx="5.6" ry="12" fill="#b6ff5a" filter="url(#glow)"/>
+<rect x="225.4" y="240" width="3.2" height="16" rx="1.4" fill="#15300d"/>
+<rect x="251.4" y="240" width="3.2" height="16" rx="1.4" fill="#15300d"/>
+<path d="M235,262 L245,262 L240,269 Z" fill="#b69cff"/>
+</g>
+<circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
+<circle cx="240" cy="240" r="184" fill="none" stroke="#b69cff" stroke-width="1" opacity="0.4"/>
+<text fill="#dfe0ff" font-size="27" font-weight="700" letter-spacing="4"><textPath href="#arcTop" startOffset="50%" text-anchor="middle">NINEFOLD</textPath></text>
+<text fill="#cfd2ff" font-size="13" font-weight="600" letter-spacing="2"><textPath href="#arcBottom" startOffset="50%" text-anchor="middle">NINE LIVES, NO MASTERS</textPath></text>
+<use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#b69cff"/>
+<use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#b69cff"/>
+</svg>
