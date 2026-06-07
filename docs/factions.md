@@ -62,7 +62,7 @@ structures can uproot and relocate (the flying fortress).
 
 ## Hollowmen - conventional, industrial, anti-magic
 
-*"By hand, not by magic."* Mass-produced conventional war: tanks, mechs, powered
+*"We make our own power."* Mass-produced conventional war: tanks, mechs, powered
 armor, lasers, and nukes. They cannot cast, so their edge is **denial**
 (null-fields) plus industrial output and firepower.
 
@@ -94,7 +94,7 @@ Cheapest, fastest reinforcements in the game.
 
 ## Ninefold (cats) - stealth, holograms, glass cannons
 
-*"Nine lives, no masters."* Few, fragile, and nearly invisible. Stealth on
+*"Made to serve, born to rule."* Few, fragile, and nearly invisible. Stealth on
 everything, holographic disguises, snipers, and stealth airpower. Low HP and
 armor, but hard to find and hard to finish. Arbiter-era Protoss in spirit.
 
@@ -124,7 +124,7 @@ them**. Key units revive once when killed. Quality over quantity.
 
 ## Warren (rats) - swarm, tunnels, conversion
 
-*"The many outlast the mighty."* A hivemind swarm: cheap, countless, organic.
+*"There are always more of us."* A hivemind swarm: cheap, countless, organic.
 Nests link into a tunnel network for instant army redeployment, and the dead
 (theirs and yours) become more rats. Zerg-adjacent.
 
@@ -154,7 +154,7 @@ casualties into more Warren via plague. Attrition that grows the more it fights.
 
 ## Rimelings (squid aliens) - parasitic, fissures, hybrid tech-organic
 
-*"We are the cup, not the wine."* Squid-like, many-legged aliens. They make
+*"All fire is borrowed."* Squid-like, many-legged aliens. They make
 almost no magic (a trickle from ether-collectors) and **soak the rest from
 nearby magic-folk** (Astromancers, Ninefold, Warren). Hybrid tech-organic, like
 the Protoss: energy beams that must be charged, planet-cracking fissure weapons,

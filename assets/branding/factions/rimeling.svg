@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480" font-family="'Eurostile','Michroma','Bahnschrift','Arial Narrow',sans-serif">
+<defs>
+<radialGradient id="space" cx="50%" cy="36%" r="80%"><stop offset="0%" stop-color="#0c3038"/><stop offset="48%" stop-color="#082028"/><stop offset="100%" stop-color="#04080c"/></radialGradient>
+<filter id="glow" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3.2"/></filter>
+<filter id="softglow" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="7"/></filter>
+<g id="spark"><path d="M0,-8 L1.7,-1.7 L8,0 L1.7,1.7 L0,8 L-1.7,1.7 L-8,0 L-1.7,-1.7 Z" fill="currentColor"/></g>
+<clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
+<path id="arcTop" d="M 39,240 A 201,201 0 0 1 441,240"/>
+<path id="arcBottom" d="M 23,240 A 217,217 0 0 0 457,240"/>
+
+<clipPath id="jup"><circle cx="240" cy="334" r="134"/></clipPath>
+<linearGradient id="octo" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#46e0ee"/><stop offset="55%" stop-color="#178ba8"/><stop offset="100%" stop-color="#0a3344"/></linearGradient>
+<radialGradient id="eye" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="40%" stop-color="#7ff0ff"/><stop offset="100%" stop-color="#1bbfe6" stop-opacity="0"/></radialGradient>
+<radialGradient id="jshade" cx="38%" cy="32%" r="80%"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/><stop offset="60%" stop-color="#000000" stop-opacity="0"/><stop offset="100%" stop-color="#000000" stop-opacity="0.5"/></radialGradient>
+
+</defs>
+<circle cx="240" cy="240" r="232" fill="#06161c" stroke="#e9cd84" stroke-width="3"/>
+<circle cx="240" cy="240" r="227" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.45"/>
+<g clip-path="url(#scene)">
+<circle cx="240" cy="240" r="188" fill="url(#space)"/>
+<g fill="#ffffff"><circle cx="300" cy="92" r="1.4" opacity="0.8"/><circle cx="352" cy="150" r="1" opacity="0.6"/><circle cx="392" cy="210" r="1.2" opacity="0.7"/><circle cx="150" cy="170" r="1" opacity="0.6"/><circle cx="92" cy="210" r="1.1" opacity="0.6"/><circle cx="210" cy="118" r="0.9" opacity="0.6"/><circle cx="408" cy="270" r="1" opacity="0.5"/><circle cx="86" cy="280" r="0.9" opacity="0.5"/></g>
+
+<g clip-path="url(#jup)">
+  <circle cx="240" cy="334" r="134" fill="#caa06a"/>
+  <rect x="96" y="206" width="288" height="13" fill="#d8b483"/><rect x="96" y="219" width="288" height="19" fill="#b07a46"/><rect x="96" y="238" width="288" height="13" fill="#e4cba0"/><rect x="96" y="251" width="288" height="19" fill="#a06a3a"/><rect x="96" y="270" width="288" height="13" fill="#cda06a"/><rect x="96" y="283" width="288" height="19" fill="#8f5d33"/><rect x="96" y="302" width="288" height="13" fill="#dcc096"/><rect x="96" y="315" width="288" height="19" fill="#b88652"/><rect x="96" y="334" width="288" height="13" fill="#d8b483"/><rect x="96" y="347" width="288" height="19" fill="#b07a46"/><rect x="96" y="366" width="288" height="13" fill="#e4cba0"/><rect x="96" y="379" width="288" height="19" fill="#a06a3a"/><rect x="96" y="398" width="288" height="13" fill="#cda06a"/><rect x="96" y="411" width="288" height="19" fill="#8f5d33"/><rect x="96" y="430" width="288" height="13" fill="#dcc096"/><rect x="96" y="443" width="288" height="19" fill="#b88652"/><rect x="96" y="462" width="288" height="13" fill="#d8b483"/>
+  <ellipse cx="292" cy="306" rx="22" ry="13" fill="#b5482a" opacity="0.9"/>
+  <ellipse cx="292" cy="306" rx="13" ry="7" fill="#d76a3e"/>
+  <circle cx="240" cy="334" r="134" fill="url(#jshade)"/>
+</g>
+<circle cx="240" cy="334" r="134" fill="none" stroke="#eccfa0" stroke-width="1.5" opacity="0.45"/>
+<g stroke="url(#octo)" stroke-width="12" fill="none" stroke-linecap="round" opacity="0.96">
+  <path d="M214,232 C160,236 126,280 140,330"/>
+  <path d="M222,240 C184,258 158,302 178,346"/>
+  <path d="M230,246 C208,276 200,318 222,352"/>
+  <path d="M266,232 C320,236 354,280 340,330"/>
+  <path d="M258,240 C296,258 322,302 302,346"/>
+  <path d="M250,246 C272,276 280,318 258,352"/>
+</g>
+<g fill="#7ff0ff" opacity="0.8">
+  <circle cx="146" cy="316" r="3"/><circle cx="182" cy="338" r="3"/><circle cx="334" cy="316" r="3"/><circle cx="298" cy="338" r="3"/>
+</g>
+<path d="M240,150 C288,156 302,198 288,228 C272,250 250,254 240,254 C230,254 208,250 192,228 C178,198 192,156 240,150 Z"
+      fill="url(#octo)" stroke="#8ff4ff" stroke-width="2" stroke-opacity="0.6"/>
+<circle cx="223" cy="200" r="12" fill="#04222a"/><circle cx="257" cy="200" r="12" fill="#04222a"/>
+<circle cx="223" cy="200" r="7" fill="url(#eye)"/><circle cx="257" cy="200" r="7" fill="url(#eye)"/>
+<circle cx="225" cy="198" r="2.6" fill="#ffffff"/><circle cx="259" cy="198" r="2.6" fill="#ffffff"/>
+
+</g>
+<circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
+<circle cx="240" cy="240" r="184" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.4"/>
+<text fill="#bfeffb" font-size="27" font-weight="700" letter-spacing="4"><textPath href="#arcTop" startOffset="50%" text-anchor="middle">RIMELING</textPath></text>
+<text fill="#bfeffb" font-size="13" font-weight="600" letter-spacing="2"><textPath href="#arcBottom" startOffset="50%" text-anchor="middle">ALL FIRE IS BORROWED</textPath></text>
+<use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#41e7ff"/>
+<use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#41e7ff"/>
+</svg>

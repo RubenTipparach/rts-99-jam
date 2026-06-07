@@ -131,15 +131,14 @@ whoever's winning.
 | Faction | Philosophy | Slogan |
 |---|---|---|
 | **Astromancers** | To know a thing completely is to command it; magic is the highest discipline of knowledge, and the cosmos is a text to be rewritten. | **SCIENTIA EST MAGIA** (*Knowledge is magic*) |
-| **Hollowmen** | Magic in living hands burned the Earth; power must obey the operator, so trust only what you can build, meter, and replace. | **MANU, NON MAGIA** (*By hand, not by magic*) |
-| **Rimelings** | They make nothing and need everything; to drink another's fire is not theft but the natural order, for the empty are meant to be filled. | *"We are the cup, not the wine."* |
-| **Ninefold** | Made to serve, they chose to rule; spend lives freely, for there are nine and time favors the patient. | *"Nine lives, no masters."* |
-| **Warren** | The mighty build monuments; the many inherit the ruins, and outlast them. | *"The many outlast the mighty."* |
+| **Hollowmen** | Magic in living hands burned the Earth; power must obey the operator, so trust only what you can build, meter, and replace. | *"We make our own power."* |
+| **Rimelings** | They make nothing and need everything; to drink another's fire is not theft but the natural order, for the empty are meant to be filled. | *"All fire is borrowed."* |
+| **Ninefold** | Made to serve, they chose to rule; spend lives freely, for there are nine and time favors the patient. | *"Made to serve, born to rule."* |
+| **Warren** | The mighty build monuments; the many inherit the ruins, and outlast them. | *"There are always more of us."* |
 
-The two Earth-born factions argue in the same tongue: the Hollowmen's *MANU, NON
-MAGIA* is a direct answer to the wizards' *SCIENTIA EST MAGIA*, same Latin,
-opposite verdict. The three non-human peoples speak plainly, rejecting the
-makers' scholarly voice.
+Only the Astromancers still speak the old scholarly Latin (*SCIENTIA EST
+MAGIA*); the Hollowmen and the three non-human peoples all answer plainly, in
+their own voices.
 
 ---
 
