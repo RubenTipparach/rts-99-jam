@@ -39,7 +39,7 @@ distinct central motif, palette, and motto on the shared gold-ringed disc.
 |---|---|---|
 | `emblem` (Astromancers) | hooded magus conjuring a starship | SCIENTIA EST MAGIA |
 | `factions/hollowmen` | rim-lit mech torso, a station firing into its heart | WE MAKE OUR OWN POWER |
-| `factions/rimeling` | octopus perched on Jupiter (NRO style) | ALL FIRE IS BORROWED |
+| `factions/rimeling` | crystalline chalice drinking borrowed fire (Jupiter + 4 moons) | ALL FIRE IS BORROWED |
 | `factions/ninefold` | ninja cat rising off a stealth bomber | MADE TO SERVE, BORN TO RULE |
 | `factions/warren` | rat-tower planting a flag on the moon | THERE ARE ALWAYS MORE OF US |
 
