@@ -1,21 +1,23 @@
 # Branding
 
-> **Working title:** *SOL DOMINION* — "Wars of the Nation-Corps." This is a
-> placeholder; the wordmark is one line of text in `logo.svg`, trivially
-> re-lettered (see [Renaming](#renaming)).
+> **Title:** *ASTROMANCY* — a deterministic RTS of **space and magic**. The
+> wordmark is one line of text in `logo.svg`, trivially re-lettered (see
+> [Renaming](#renaming)).
 
 ## Concept
 
-A hard-SF RTS where rival **nation-corps** fight for the solar system. The emblem
-is a **divided Sol**: orbital rings around a hot sun, cut by an ember **fault
-line**, the two halves faintly tinted to two factions, all inside a navigation /
-targeting **reticle ring**. Pure vector, so it scales from favicon to banner.
+A deterministic RTS of **space and magic**. The emblem is the **Astromancy
+mission patch** (NRO/NASA style): a hooded Philosophia magus standing over a
+world, conjuring a starship that rises straight up on a plume of arcane sparkles,
+ringed by the motto *SCIENTIA EST MAGIA*. Pure vector, so it scales from favicon
+to banner. (Sibling patches — the kraken-and-ship **Astromancy** badge and
+**Draco** — live one level up in [`../`](../) as `logo*.svg`.)
 
 ## Files
 
 | File | What it is | Use for |
 |---|---|---|
-| `emblem.svg` | The icon mark (512², transparent field) | Source of truth for the icon |
+| `emblem.svg` | The icon mark (480², transparent field) | Source of truth for the icon |
 | `emblem.png` | Rendered icon, 1024², transparent corners | **Discord app icon**, app/store icon, favicon |
 | `emblem-preview.png` | Icon on a dark disc | Quick preview |
 | `logo.svg` | Emblem + wordmark (1600×520, transparent) | Source of truth for the full logo |
@@ -61,11 +63,12 @@ JS
 
 ## Renaming
 
-The title lives in `logo.svg` as two `<tspan>`s:
+The wordmark lives in `logo.svg` as a single `<text>`:
 
 ```xml
-<tspan fill="#ffb454">SOL</tspan><tspan fill="#eaf1fb"> DOMINION</tspan>
+<text ... fill="url(#wm)">ASTROMANCY</text>
 ```
 
-Change the text (and the tagline `<text>` below it), re-render, done. The emblem
-is name-independent, so it stays valid whatever you call the game.
+Change the text (and the tagline/motto `<text>`s below it), re-render, done. The
+emblem is pulled in via `<image href="emblem.png">`, so swapping the patch is a
+one-file change.

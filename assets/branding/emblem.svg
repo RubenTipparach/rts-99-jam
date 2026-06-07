@@ -1,77 +1,182 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Sol Dominion emblem">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480" font-family="'Eurostile','Michroma','Bahnschrift','Arial Narrow',sans-serif">
   <defs>
-    <radialGradient id="bg" cx="50%" cy="44%" r="62%">
-      <stop offset="0%" stop-color="#0d1730"/>
-      <stop offset="62%" stop-color="#0a1022"/>
-      <stop offset="100%" stop-color="#05080f"/>
+    <radialGradient id="space" cx="50%" cy="36%" r="78%">
+      <stop offset="0%" stop-color="#2a2060"/>
+      <stop offset="45%" stop-color="#16113b"/>
+      <stop offset="100%" stop-color="#070518"/>
     </radialGradient>
-    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#171445"/>
+      <stop offset="100%" stop-color="#090726"/>
+    </linearGradient>
+    <linearGradient id="robe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8e2b2b"/>
+      <stop offset="55%" stop-color="#561719"/>
+      <stop offset="100%" stop-color="#220809"/>
+    </linearGradient>
+    <linearGradient id="hull" x1="0" y1="-20" x2="0" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#eef2fa"/>
+      <stop offset="48%" stop-color="#aeb7c9"/>
+      <stop offset="100%" stop-color="#545d72"/>
+    </linearGradient>
+    <radialGradient id="engine" cx="50%" cy="50%" r="50%">
       <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="28%" stop-color="#ffe6a6"/>
-      <stop offset="58%" stop-color="#ff9a3c"/>
-      <stop offset="100%" stop-color="#ff6a1e"/>
+      <stop offset="35%" stop-color="#aef4ff"/>
+      <stop offset="100%" stop-color="#2bd0ff" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="corona" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#ff9a3c" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#ff6a1e" stop-opacity="0"/>
+    <linearGradient id="plume" x1="-58" y1="0" x2="-250" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#c7f8ff" stop-opacity="0.9"/>
+      <stop offset="55%" stop-color="#6fd6ff" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#6fd6ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="plume2" x1="-58" y1="0" x2="-218" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="45%" stop-color="#c0f6ff" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#c0f6ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4a4570"/>
+      <stop offset="100%" stop-color="#161028"/>
+    </linearGradient>
+    <radialGradient id="orb" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="35%" stop-color="#ffe79a"/>
+      <stop offset="70%" stop-color="#f6b13e"/>
+      <stop offset="100%" stop-color="#f6b13e" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="planetHot" cx="38%" cy="35%" r="70%">
-      <stop offset="0%" stop-color="#ffd9a8"/>
-      <stop offset="60%" stop-color="#ff8b46"/>
-      <stop offset="100%" stop-color="#b8431a"/>
-    </radialGradient>
-    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="6"/>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3.4"/>
     </filter>
-    <filter id="emberGlow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="3.2"/>
+    <filter id="softglow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="7"/>
     </filter>
-    <clipPath id="disc"><circle cx="256" cy="256" r="246"/></clipPath>
+    <g id="spark">
+      <path d="M0,-8 L1.7,-1.7 L8,0 L1.7,1.7 L0,8 L-1.7,1.7 L-8,0 L-1.7,-1.7 Z" fill="currentColor"/>
+    </g>
+    <clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
+    <clipPath id="world"><circle cx="240" cy="575" r="230"/></clipPath>
+    <path id="arcTop"    d="M 39,240 A 201,201 0 0 1 441,240"/>
+    <path id="arcBottom" d="M 23,240 A 217,217 0 0 0 457,240"/>
   </defs>
 
-  <!-- field -->
-  <circle cx="256" cy="256" r="246" fill="url(#bg)"/>
+  <circle cx="240" cy="240" r="232" fill="url(#band)" stroke="#e9cd84" stroke-width="3"/>
+  <circle cx="240" cy="240" r="227" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.45"/>
 
-  <g clip-path="url(#disc)">
-    <!-- faction tints, split along the y=x fault line -->
-    <polygon points="0,0 512,0 512,512" fill="#ff5a2c" opacity="0.07"/>
-    <polygon points="0,0 0,512 512,512" fill="#2f74da" opacity="0.07"/>
+  <g clip-path="url(#scene)">
+    <circle cx="240" cy="240" r="188" fill="url(#space)"/>
 
-    <!-- orbital rings -->
-    <g fill="none" stroke="#5b81b3">
-      <ellipse cx="256" cy="256" rx="200" ry="66" stroke-opacity="0.32" stroke-width="1.6"/>
-      <ellipse cx="256" cy="256" rx="150" ry="50" stroke-opacity="0.44" stroke-width="1.6"/>
-      <ellipse cx="256" cy="256" rx="104" ry="35" stroke-opacity="0.58" stroke-width="1.6"/>
+    <!-- arcane sigil behind the wizard: heptagram + runic ring -->
+    <g stroke="#b69cff" fill="none" opacity="0.32">
+      <circle cx="240" cy="226" r="116" stroke-width="1" stroke-dasharray="2 9"/>
+      <circle cx="240" cy="226" r="104" stroke-width="1" stroke-dasharray="1 14"/>
+      <path stroke="#caa6ff" stroke-width="1.3"
+            d="M240,122 L285,320 L159,161 L341,249 L139,249 L321,161 L195,320 Z"/>
     </g>
 
-    <!-- planets on their orbits -->
-    <circle cx="75"  cy="228" r="6" fill="#84b6ec"/>
-    <circle cx="166" cy="274" r="5" fill="#6fa3da"/>
-    <circle cx="444" cy="279" r="4.5" fill="#5d86bb" opacity="0.85"/>
-    <circle cx="386" cy="281" r="9" fill="url(#planetHot)"/>
-    <circle cx="386" cy="281" r="11.5" fill="none" stroke="#ff7a3c" stroke-opacity="0.5" stroke-width="1.4"/>
+    <!-- background worlds (the planets the magus stands over) -->
+    <g>
+      <circle cx="116" cy="120" r="15" fill="#7fa0c8"/>
+      <ellipse cx="116" cy="120" rx="26" ry="7" fill="none" stroke="#cfe0f4" stroke-width="2" opacity="0.7" transform="rotate(-20 116 120)"/>
+      <circle cx="362" cy="126" r="12" fill="#c98f5e"/>
+      <circle cx="357" cy="122" r="3" fill="#9c6b3f"/>
+      <circle cx="366" cy="130" r="2" fill="#9c6b3f"/>
+    </g>
 
-    <!-- the sun -->
-    <circle cx="256" cy="256" r="64" fill="url(#corona)" filter="url(#soft)"/>
-    <circle cx="256" cy="256" r="25" fill="url(#sun)"/>
-    <circle cx="256" cy="256" r="9" fill="#ffffff"/>
+    <!-- starfield -->
+    <g fill="#ffffff">
+      <circle cx="300" cy="92" r="1.4" opacity="0.8"/>
+      <circle cx="352" cy="150" r="1.0" opacity="0.6"/>
+      <circle cx="392" cy="210" r="1.2" opacity="0.7"/>
+      <circle cx="150" cy="170" r="1.0" opacity="0.6"/>
+      <circle cx="92" cy="210" r="1.1" opacity="0.6"/>
+      <circle cx="210" cy="120" r="0.9" opacity="0.6"/>
+      <circle cx="408" cy="270" r="1.0" opacity="0.5"/>
+      <circle cx="86" cy="280" r="0.9" opacity="0.5"/>
+    </g>
 
-    <!-- the fault line: a divided Sol -->
-    <line x1="81" y1="81" x2="431" y2="431" stroke="#ff7a3c" stroke-width="6" stroke-opacity="0.35" filter="url(#emberGlow)"/>
-    <line x1="81" y1="81" x2="431" y2="431" stroke="#ff5a2c" stroke-width="2.4"/>
-    <circle cx="256" cy="256" r="3.5" fill="#ffd98a"/>
+    <!-- the planet the wizard stands on -->
+    <g clip-path="url(#world)">
+      <circle cx="240" cy="575" r="230" fill="url(#ground)"/>
+      <ellipse cx="190" cy="372" rx="22" ry="6" fill="#0c0a1c" opacity="0.5"/>
+      <ellipse cx="300" cy="388" rx="28" ry="7" fill="#0c0a1c" opacity="0.5"/>
+      <ellipse cx="240" cy="410" rx="20" ry="5" fill="#0c0a1c" opacity="0.4"/>
+    </g>
+    <path d="M40,358 A 230,230 0 0 1 440,358" fill="none" stroke="#9ad7ff" stroke-width="2" opacity="0.5"/>
+
+    <!-- ============ the magus (centered, presenting the rocket) ============ -->
+    <!-- robe + hood silhouette -->
+    <path fill="url(#robe)" stroke="#e0916a" stroke-width="1.4" stroke-opacity="0.55" stroke-linejoin="round"
+          d="M240,100 C261,104 271,130 263,154 C281,168 289,192 291,206
+             C300,262 306,320 320,362 C300,374 256,376 240,376
+             C224,376 180,374 160,362 C174,320 180,262 189,206
+             C191,192 199,168 217,154 C209,130 219,104 240,100 Z"/>
+
+    <!-- shadowed hood opening + glowing eyes peering above the rocket -->
+    <path d="M230,113 C235,106 245,106 250,113 C248,135 244,146 240,146 C236,146 232,135 230,113 Z" fill="#040309"/>
+    <path d="M229,114 C235,106 245,106 251,114" fill="none" stroke="#d99a6a" stroke-width="1.4" opacity="0.6"/>
+    <circle cx="234" cy="124" r="2.0" fill="#ffd24a" filter="url(#glow)"/>
+    <circle cx="246" cy="124" r="2.0" fill="#ffd24a" filter="url(#glow)"/>
+
+    <!-- the conjured rocket: dead-center on the magus, aimed straight up -->
+    <g transform="translate(240,215) rotate(-90) scale(0.76)">
+      <!-- BIG plume: wide soft cone + bright core -->
+      <path d="M-56,-16 L-246,-66 L-246,66 L-56,16 Z" fill="url(#plume)"
+            filter="url(#softglow)" opacity="0.95"/>
+      <path d="M-58,-8 L-216,-30 L-216,30 L-58,8 Z" fill="url(#plume2)"
+            filter="url(#softglow)" opacity="0.9"/>
+      <ellipse cx="-64" cy="0" rx="16" ry="18" fill="#ffffff" filter="url(#softglow)" opacity="0.85"/>
+      <!-- sparkle fan -->
+      <g>
+        <use href="#spark" transform="translate(-90,1) scale(2.4)"    color="#ffffff" opacity="1"/>
+        <use href="#spark" transform="translate(-112,-14) scale(1.7)" color="#aef6ff" opacity="0.95"/>
+        <use href="#spark" transform="translate(-122,16) scale(1.6)"  color="#d6b4ff" opacity="0.92"/>
+        <use href="#spark" transform="translate(-144,-6) scale(1.9)"  color="#ffffff" opacity="0.9"/>
+        <use href="#spark" transform="translate(-156,24) scale(1.2)"  color="#7fe6ff" opacity="0.82"/>
+        <use href="#spark" transform="translate(-166,-22) scale(1.3)" color="#e0c8ff" opacity="0.78"/>
+        <use href="#spark" transform="translate(-184,10) scale(1.45)" color="#ffffff" opacity="0.72"/>
+        <use href="#spark" transform="translate(-202,-12) scale(1.1)" color="#9af0ff" opacity="0.6"/>
+        <use href="#spark" transform="translate(-216,20) scale(1.0)"  color="#d6b4ff" opacity="0.5"/>
+        <use href="#spark" transform="translate(-232,-6) scale(0.9)"  color="#ffffff" opacity="0.42"/>
+        <g fill="#eaffff">
+          <circle cx="-102" cy="9" r="2.0" opacity="0.9"/>
+          <circle cx="-130" cy="-11" r="1.8" opacity="0.8"/>
+          <circle cx="-150" cy="11" r="1.6" opacity="0.72"/>
+          <circle cx="-176" cy="-8" r="1.5" opacity="0.6"/>
+          <circle cx="-200" cy="6" r="1.3" opacity="0.45"/>
+        </g>
+      </g>
+      <ellipse cx="-78" cy="-8" rx="18" ry="8" fill="url(#engine)" filter="url(#glow)"/>
+      <ellipse cx="-78" cy="8"  rx="18" ry="8" fill="url(#engine)" filter="url(#glow)"/>
+      <path d="M2,-15 L-16,-32 L-30,-29 L-18,-14 Z" fill="#6b7488"/>
+      <path d="M2,15  L-16,32  L-30,29  L-18,14  Z" fill="#566073"/>
+      <path d="M-58,-14 L-80,-12 L-80,-4 L-58,-6 Z" fill="#525c70"/>
+      <path d="M-58,14  L-80,12  L-80,4  L-58,6  Z" fill="#424b5e"/>
+      <path d="M86,0 L52,-14 L-44,-17 L-66,-9 L-68,0 L-66,9 L-44,17 L52,14 Z"
+            fill="url(#hull)" stroke="#1c2436" stroke-width="1.3"/>
+      <g stroke="#39435a" stroke-width="1" fill="none" opacity="0.7">
+        <path d="M50,-10 L-42,-13"/><path d="M50,10 L-42,13"/><path d="M-30,-16 L-30,16"/>
+      </g>
+      <path d="M54,-11 L-44,-14 L-44,-10 L54,-7 Z" fill="#f0cf86" opacity="0.95"/>
+      <path d="M44,-6 L66,0 L46,5 L30,-1 Z" fill="#6cebff" stroke="#cffaff" stroke-width="1"/>
+      <path d="M86,0 L64,-5 L64,5 Z" fill="#f6f9fd"/>
+    </g>
+
+    <!-- symmetric ambient runes -->
+    <use href="#spark" transform="translate(150,150) scale(0.5)" color="#cdbcff" opacity="0.85"/>
+    <use href="#spark" transform="translate(330,150) scale(0.5)" color="#cdbcff" opacity="0.85"/>
+    <use href="#spark" transform="translate(122,252) scale(0.45)" color="#ffe79a" opacity="0.8"/>
+    <use href="#spark" transform="translate(358,252) scale(0.45)" color="#ffe79a" opacity="0.8"/>
   </g>
 
-  <!-- navigation / reticle rings -->
-  <circle cx="256" cy="256" r="232" fill="none" stroke="#3f5f8a" stroke-width="2" stroke-dasharray="1.5 9" stroke-opacity="0.9"/>
-  <circle cx="256" cy="256" r="224" fill="none" stroke="#33507a" stroke-width="1" stroke-opacity="0.6"/>
-  <circle cx="256" cy="256" r="246" fill="none" stroke="#6f93c4" stroke-width="2"/>
+  <circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
+  <circle cx="240" cy="240" r="184" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.4"/>
 
-  <!-- cardinal ticks -->
-  <g stroke="#9bbce6" stroke-width="2.4">
-    <line x1="256" y1="14" x2="256" y2="30"/>
-    <line x1="256" y1="482" x2="256" y2="498"/>
-    <line x1="14" y1="256" x2="30" y2="256"/>
-    <line x1="482" y1="256" x2="498" y2="256"/>
-  </g>
+  <text fill="#f3d98f" font-size="27" font-weight="700" letter-spacing="4">
+    <textPath href="#arcTop" startOffset="50%" text-anchor="middle">PHILOSOPHIA</textPath>
+  </text>
+  <text fill="#cfe9ff" font-size="16" font-weight="600" letter-spacing="3">
+    <textPath href="#arcBottom" startOffset="50%" text-anchor="middle">SCIENTIA EST MAGIA</textPath>
+  </text>
+  <use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#f3d98f"/>
+  <use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#f3d98f"/>
 </svg>

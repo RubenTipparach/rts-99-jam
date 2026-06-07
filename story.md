@@ -11,10 +11,11 @@
 
 ---
 
-## Title candidates
+## Title — **ASTROMANCY**
 
-Working project name today is "Sol Dominion." Candidates that fit the new
-theme (see the chat for rationale; **★** = current favorites):
+The game's name is **Astromancy** ("star-magic"). The mission-patch logo lives
+in [`assets/branding/`](assets/branding/). Earlier candidates, kept for
+posterity (**★** = were favorites):
 
 - **★ Sol Arcanum** — "the secret of the sun." *Arcanum* is both "hidden
   secret" and an alchemical term of art. Clean, brandable, magic + space.

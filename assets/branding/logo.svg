@@ -1,71 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 520" width="1600" height="520" role="img" aria-label="Sol Dominion logo">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     viewBox="0 0 1600 520" width="1600" height="520" role="img" aria-label="Astromancy logo"
+     font-family="'Eurostile','Bahnschrift','DejaVu Sans','Arial Narrow',sans-serif">
   <defs>
-    <radialGradient id="bg" cx="50%" cy="44%" r="62%">
-      <stop offset="0%" stop-color="#0d1730"/>
-      <stop offset="62%" stop-color="#0a1022"/>
-      <stop offset="100%" stop-color="#05080f"/>
-    </radialGradient>
-    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="28%" stop-color="#ffe6a6"/>
-      <stop offset="58%" stop-color="#ff9a3c"/>
-      <stop offset="100%" stop-color="#ff6a1e"/>
-    </radialGradient>
-    <radialGradient id="corona" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#ff9a3c" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#ff6a1e" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="planetHot" cx="38%" cy="35%" r="70%">
-      <stop offset="0%" stop-color="#ffd9a8"/>
-      <stop offset="60%" stop-color="#ff8b46"/>
-      <stop offset="100%" stop-color="#b8431a"/>
-    </radialGradient>
-    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="6"/></filter>
-    <filter id="emberGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3.2"/></filter>
-    <clipPath id="disc"><circle cx="256" cy="256" r="246"/></clipPath>
+    <linearGradient id="wm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffe9b0"/>
+      <stop offset="55%" stop-color="#f3c46a"/>
+      <stop offset="100%" stop-color="#e0992f"/>
+    </linearGradient>
   </defs>
 
-  <!-- ===== emblem (left) ===== -->
-  <g transform="translate(40,46) scale(0.84)">
-    <circle cx="256" cy="256" r="246" fill="url(#bg)"/>
-    <g clip-path="url(#disc)">
-      <polygon points="0,0 512,0 512,512" fill="#ff5a2c" opacity="0.07"/>
-      <polygon points="0,0 0,512 512,512" fill="#2f74da" opacity="0.07"/>
-      <g fill="none" stroke="#5b81b3">
-        <ellipse cx="256" cy="256" rx="200" ry="66" stroke-opacity="0.32" stroke-width="1.6"/>
-        <ellipse cx="256" cy="256" rx="150" ry="50" stroke-opacity="0.44" stroke-width="1.6"/>
-        <ellipse cx="256" cy="256" rx="104" ry="35" stroke-opacity="0.58" stroke-width="1.6"/>
-      </g>
-      <circle cx="75"  cy="228" r="6" fill="#84b6ec"/>
-      <circle cx="166" cy="274" r="5" fill="#6fa3da"/>
-      <circle cx="444" cy="279" r="4.5" fill="#5d86bb" opacity="0.85"/>
-      <circle cx="386" cy="281" r="9" fill="url(#planetHot)"/>
-      <circle cx="386" cy="281" r="11.5" fill="none" stroke="#ff7a3c" stroke-opacity="0.5" stroke-width="1.4"/>
-      <circle cx="256" cy="256" r="64" fill="url(#corona)" filter="url(#soft)"/>
-      <circle cx="256" cy="256" r="25" fill="url(#sun)"/>
-      <circle cx="256" cy="256" r="9" fill="#ffffff"/>
-      <line x1="81" y1="81" x2="431" y2="431" stroke="#ff7a3c" stroke-width="6" stroke-opacity="0.35" filter="url(#emberGlow)"/>
-      <line x1="81" y1="81" x2="431" y2="431" stroke="#ff5a2c" stroke-width="2.4"/>
-      <circle cx="256" cy="256" r="3.5" fill="#ffd98a"/>
-    </g>
-    <circle cx="256" cy="256" r="232" fill="none" stroke="#3f5f8a" stroke-width="2" stroke-dasharray="1.5 9" stroke-opacity="0.9"/>
-    <circle cx="256" cy="256" r="224" fill="none" stroke="#33507a" stroke-width="1" stroke-opacity="0.6"/>
-    <circle cx="256" cy="256" r="246" fill="none" stroke="#6f93c4" stroke-width="2"/>
-    <g stroke="#9bbce6" stroke-width="2.4">
-      <line x1="256" y1="14" x2="256" y2="30"/>
-      <line x1="256" y1="482" x2="256" y2="498"/>
-      <line x1="14" y1="256" x2="30" y2="256"/>
-      <line x1="482" y1="256" x2="498" y2="256"/>
-    </g>
-  </g>
+  <!-- emblem: the Astromancy (Philosophia) mission patch -->
+  <image xlink:href="emblem.png" href="emblem.png" x="22" y="26" width="470" height="470"/>
 
-  <!-- ===== wordmark (right) ===== -->
-  <g font-family="'DejaVu Sans','Arial',sans-serif">
-    <text x="548" y="196" fill="#6f8cb8" font-size="26" letter-spacing="9" font-weight="700">A HARD-SF REAL-TIME STRATEGY</text>
-    <text x="546" y="312" font-size="116" font-weight="700" letter-spacing="4">
-      <tspan fill="#ffb454">SOL</tspan><tspan fill="#eaf1fb"> DOMINION</tspan>
-    </text>
-    <line x1="550" y1="352" x2="1170" y2="352" stroke="#ff5a2c" stroke-width="2" stroke-opacity="0.8"/>
-    <text x="552" y="404" fill="#8aa3cc" font-size="33" letter-spacing="12" font-weight="700">WARS OF THE NATION-CORPS</text>
-  </g>
+  <!-- wordmark -->
+  <text x="536" y="286" font-size="112" font-weight="800" letter-spacing="4" fill="url(#wm)">ASTROMANCY</text>
+  <text x="540" y="342" font-size="32" font-weight="600" letter-spacing="6" fill="#8aa3cc">SPACE · MAGIC · DETERMINISTIC RTS</text>
+  <line x1="542" y1="370" x2="1430" y2="370" stroke="#33507a" stroke-width="2" opacity="0.7"/>
+  <text x="542" y="412" font-size="26" font-weight="500" letter-spacing="4" fill="#6f86ad">EX CINERE AD ASTRA — FROM THE ASHES, TO THE STARS</text>
 </svg>

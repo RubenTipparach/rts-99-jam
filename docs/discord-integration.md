@@ -14,9 +14,10 @@ There are two levels of setup:
 - **Notifications only (minimal):** just a bot token (DMs) or a channel webhook,
   with no login.
 
-> Flavor note for the portal/app description: this is *Sol Dominion* — a hard-SF
-> RTS where rival **nation-corps** fight for control of the solar system. Use that
-> as the Discord application name/description so the consent screen reads on-brand.
+> Flavor note for the portal/app description: this is *Astromancy* — a
+> deterministic RTS of **space and magic**, where the wizard nation of Philosophia
+> and the tech-driven magicless fight across the solar system. Use that as the
+> Discord application name/description so the consent screen reads on-brand.
 
 ---
 
@@ -24,7 +25,7 @@ There are two levels of setup:
 
 In the [Discord Developer Portal](https://discord.com/developers/applications):
 
-1. **New Application** → name it (e.g. `Sol Dominion`). The name + icon here are
+1. **New Application** → name it (e.g. `Astromancy`). The name + icon here are
    what players see on the OAuth consent screen, so upload the game emblem
    (`assets/branding/emblem.png`).
 2. **Bot** (left nav) → **Add Bot**.
