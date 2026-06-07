@@ -1,7 +1,7 @@
 # Architecture - Deterministic Lockstep RTS (Rust + wgpu)
 
 > A StarCraft-class real-time strategy engine: deterministic lockstep simulation,
-> 100s–1000s of units, 120–160 FPS rendering, large (flat **or** spherical) maps,
+> 100s-1000s of units, 120-160 FPS rendering, large (flat **or** spherical) maps,
 > procedural generation, and first-class AI bots - built on **Rust** and **wgpu**
 > (no Bevy).
 
@@ -25,7 +25,7 @@ separated by a hard wall.
 |---|---|---|
 | **Purpose** | Game truth (what *is*) | Game appearance (what you *see*) |
 | **Numbers** | Fixed-point integers only | `f32` / `f64`, freely |
-| **Clock** | Fixed timestep, ~20–30 Hz | Display rate, 120–160 Hz |
+| **Clock** | Fixed timestep, ~20-30 Hz | Display rate, 120-160 Hz |
 | **Determinism** | Bit-identical on every machine | Irrelevant; may differ per machine |
 | **Inputs** | Commands only | Reads a snapshot of the sim |
 | **Examples** | unit position, HP, pathing, RNG, AI decisions | camera, interpolation, particles, animation blending, screen-shake, sound |
@@ -191,7 +191,7 @@ loop {
     }
 
     let alpha = (accumulator / TICK_DT.to_f64()) as f32;
-    renderer.draw(&prev, sim.current(), alpha);  // interpolated, 120–160 FPS
+    renderer.draw(&prev, sim.current(), alpha);  // interpolated, 120-160 FPS
 }
 ```
 
@@ -239,7 +239,7 @@ core of "AI is a player." See [AI Bots](architecture/09-ai-bots.md).
 |---|---------|--------------------------|
 | 00 | [Overview](architecture/00-overview.md) | Vision, glossary, references, reading order |
 | 01 | [Determinism](architecture/01-determinism.md) | The foundation: fixed-point, RNG, ordering, checksums, pitfalls |
-| 02 | [Simulation & data model](architecture/02-simulation.md) | "Lots of units 100s–1000s", ECS/SoA, scheduling |
+| 02 | [Simulation & data model](architecture/02-simulation.md) | "Lots of units 100s-1000s", ECS/SoA, scheduling |
 | 03 | [Networking & lockstep](architecture/03-networking-lockstep.md) | "Multiplayer (WebRTC/WS, P2P + server assist)", replays |
 | 04 | [Rendering (wgpu)](architecture/04-rendering-wgpu.md) | "3D model, shaders", "vertex lighting", high frame rate, scale |
 | 05 | [Animation](architecture/05-animation.md) | "Animations" at crowd scale |

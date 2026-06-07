@@ -2,8 +2,8 @@
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Networking](03-networking-lockstep.md) · [Next: Animation](05-animation.md)
 
-> Brief: *3D models, shaders, lots of vertex lighting, 100s–1000s of units,
-> 120–160 FPS.* The renderer is pure **presentation** ([ARCHITECTURE.md §1](../ARCHITECTURE.md)):
+> Brief: *3D models, shaders, lots of vertex lighting, 100s-1000s of units,
+> 120-160 FPS.* The renderer is pure **presentation** ([ARCHITECTURE.md §1](../ARCHITECTURE.md)):
 > it reads interpolated snapshots from the sim, uses `f32`/`glam` freely, and
 > never writes back. wgpu gives us Vulkan/Metal/DX12/WebGPU from one WGSL codebase.
 
@@ -95,7 +95,7 @@ O(objects × lights); we use **clustered forward+**:
 - Divide the view frustum into a 3D grid of **clusters** ("froxels").
 - A **compute shader** assigns each light to the clusters it touches (per frame).
 - When shading a vertex/fragment, look up only the lights in *its* cluster - cost
-  scales with *local* light density, not total light count. Hundreds–thousands of
+  scales with *local* light density, not total light count. Hundreds-thousands of
   dynamic lights become affordable.
 
 ```mermaid
@@ -114,7 +114,7 @@ at high FPS, so **clustered forward is the recommended default**.
 ### Shadows
 
 - **Cascaded Shadow Maps (CSM)** for the single sun/directional light (the one
-  shadow that reads as "real" in a top-down RTS). 2–4 cascades.
+  shadow that reads as "real" in a top-down RTS). 2-4 cascades.
 - Point/spot dynamic lights are **unshadowed** by default (shadow-mapping hundreds
   of them is unaffordable and barely visible in motion). A few "important" lights
   can opt into shadows if needed.
@@ -153,7 +153,7 @@ fn vs_main(v: VertexIn, @builtin(instance_index) i: u32) -> VsOut {
 }
 ```
 
-## 6. Hitting 120–160 FPS at scale - the toolbox
+## 6. Hitting 120-160 FPS at scale - the toolbox
 
 - **GPU instancing + indirect draws + GPU culling** (§1) - the headline.
 - **LOD**: instances pick a mesh LOD by distance in the cull compute pass; far

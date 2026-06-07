@@ -60,7 +60,7 @@ sequenceDiagram
     R-->>A: hashes match ✔ (else flag desync)
 ```
 
-- **INPUT_DELAY** (e.g. 2–4 ticks) is the cushion that lets remote commands
+- **INPUT_DELAY** (e.g. 2-4 ticks) is the cushion that lets remote commands
   arrive before they're needed. Bigger delay = more lag tolerance but more
   perceived input lag.
 - **Adaptive latency** (StarCraft-style): measure RTT and grow/shrink the delay

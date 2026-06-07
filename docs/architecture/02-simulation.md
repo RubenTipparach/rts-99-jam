@@ -1,4 +1,4 @@
-# 02 - Simulation & Data Model (100s–1000s of units)
+# 02 - Simulation & Data Model (100s-1000s of units)
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Determinism](01-determinism.md) · [Next: Networking](03-networking-lockstep.md)
 

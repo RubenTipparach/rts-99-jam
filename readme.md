@@ -10,7 +10,7 @@ A deterministic, lockstep real-time strategy game of **space and magic**, in the
 lineage of *StarCraft* and *Planetary Annihilation* - built in **Rust** with a
 **wgpu** renderer (no Bevy). *(Repo: `rts-99-jam`.)*
 
-Targets: 100s–1000s of units, **120–160 FPS**, large flat **or** spherical maps,
+Targets: 100s-1000s of units, **120-160 FPS**, large flat **or** spherical maps,
 procedural generation, peer-to-peer multiplayer with server assist, and
 first-class AI bots.
 
@@ -41,7 +41,7 @@ The design is documented in full:
 Only **commands** cross the network; every machine runs a **bit-identical
 deterministic simulation** (fixed-point math, no floats) so 1000s of units cost
 almost no bandwidth. The sim ticks slowly and exactly (~25 Hz) while the **wgpu**
-renderer **interpolates** between sim states at 120–160 FPS. Scale comes from GPU
+renderer **interpolates** between sim states at 120-160 FPS. Scale comes from GPU
 instancing + indirect culling (rendering) and flow-field pathing + spatial hashing
 (simulation). **AI bots emit the same commands a human does**, run deterministically
 in-sim at no network cost, and double as the automated test harness. See

@@ -76,7 +76,7 @@ animals sentience**. Most attempts fail; only the most magic-attuned take - and
 **cats** and **rats** wake into thinking peoples, the **Ninefold** and the
 **Warren**. Neither stays grateful.
 
-### The Exodus & the Race for the Planets - 2005–2050
+### The Exodus & the Race for the Planets - 2005-2050
 - **2005** - the Astromancers establish the **first Mars colony**, beating the
   Hollowmen to a second world.
 - **the following decade** - the **moons of Jupiter** are settled. Under the ice
@@ -87,7 +87,7 @@ animals sentience**. Most attempts fail; only the most magic-attuned take - and
   is being colonized. The wizards, immune to the radiation and hardened to
   hostile worlds, take the richest ground; the Hollowmen take what's left.
 
-### The Long Tension - 2050–2156
+### The Long Tension - 2050-2156
 The wars never quite stop. The Astromancers **conquer world after world**, while
 the Hollowmen cling to **space colonies, the Moon, and the asteroids**. Over
 generations the two peoples intermarry, and the hard line between "wizard" and

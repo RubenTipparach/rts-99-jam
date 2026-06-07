@@ -40,7 +40,7 @@ graph LR
 | **M2** | It's a game (local) | `Command`/`Commander` ([Ch.09 §1](09-ai-bots.md)); select + move; flow-field pathing ([Ch.07 §4](07-pathfinding-navigation.md)); **interpolated** rendering ([ARCHITECTURE.md §4](../ARCHITECTURE.md)) | Select units, right-click, they path there smoothly; sim at 25 Hz, render at 144 |
 | **M3** | Multiplayer | `net` + `relay`: loopback lockstep → 2 peers over WebRTC; input delay; desync detection ([Ch.03](03-networking-lockstep.md)) | Two clients play in sync; injecting a float trips the desync detector |
 | **M4** | AI + test harness | `BotCommander` v0; **headless bot-vs-bot** as the perf/determinism harness ([Ch.09 §6](09-ai-bots.md)) | Bots play a full match headlessly; runs feed determinism + perf CI |
-| **M5** | Scale | GPU cull + indirect draws; LOD; baked-animation atlas ([Ch.05](05-animation.md)); clustered+vertex lighting ([Ch.04 §4](04-rendering-wgpu.md)) | **1000+ animated, lit units at 120–160 FPS** |
+| **M5** | Scale | GPU cull + indirect draws; LOD; baked-animation atlas ([Ch.05](05-animation.md)); clustered+vertex lighting ([Ch.04 §4](04-rendering-wgpu.md)) | **1000+ animated, lit units at 120-160 FPS** |
 | **M6** | Juice | GPU particle system + effect library ([Ch.06](06-particles.md)); dynamic lights from FX | Explosions/muzzle flashes/smoke at scale, within frame budget |
 | **M7** | Worlds | Deterministic worldgen, flat then spherical ([Ch.08](08-procedural-generation.md)); `map_hash` handshake | Seed → identical playable map on all peers; spherical `Topology` works |
 | **M8** | Smart & smooth | ORCA avoidance + formations ([Ch.07 §5](07-pathfinding-navigation.md)); AI operational + strategic layers + influence maps ([Ch.09 §4](09-ai-bots.md)) | Crowds don't clump; bots macro, expand, and attack competently |
@@ -122,7 +122,7 @@ fairness sweeps.
 |---|---|
 | Hidden float / non-determinism creeps into sim | No-float lint + replay-hash CI from M0; desync inspector ([Ch.01](01-determinism.md)) |
 | Pathfinding can't hit 1000s of units | Flow fields + HPA* + grid from the start ([Ch.07](07-pathfinding-navigation.md)); perf benches gate it |
-| Render can't hit 120–160 FPS at scale | GPU instancing/cull + baked anim + clustered/vertex lighting designed in, not bolted on ([Ch.04](04-rendering-wgpu.md)) |
+| Render can't hit 120-160 FPS at scale | GPU instancing/cull + baked anim + clustered/vertex lighting designed in, not bolted on ([Ch.04](04-rendering-wgpu.md)) |
 | WebRTC NAT/connectivity pain | Relay + TURN fallback ([Ch.03 §5](03-networking-lockstep.md)); WS fallback |
 | Spherical scope creep | `Topology` trait isolates it; flat ships first ([Ch.07 §2](07-pathfinding-navigation.md)) |
 | WASM feature gaps (wgpu/WebRTC) | Treat web as a target in CI from M0; keep to the WebGPU subset ([Ch.04](04-rendering-wgpu.md)) |
@@ -133,7 +133,7 @@ fairness sweeps.
 The engine realizes this architecture when:
 
 - the cross-platform **replay-hash test is green** ([Ch.01](01-determinism.md));
-- **1000+ animated, lit units** run at **120–160 FPS** ([Ch.04](04-rendering-wgpu.md), [Ch.05](05-animation.md));
+- **1000+ animated, lit units** run at **120-160 FPS** ([Ch.04](04-rendering-wgpu.md), [Ch.05](05-animation.md));
 - **two+ peers** play a full match in sync over WebRTC with desync detection
   ([Ch.03](03-networking-lockstep.md));
 - **bots** play competently and headlessly, powering CI ([Ch.09](09-ai-bots.md));

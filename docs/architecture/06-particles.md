@@ -32,7 +32,7 @@ flowchart LR
 
 ## 2. GPU-driven particle system
 
-To reach the "lots of particles" bar (hundreds of thousands–millions), the whole
+To reach the "lots of particles" bar (hundreds of thousands-millions), the whole
 lifecycle lives on the GPU:
 
 - **State in storage buffers**: position, velocity, life, size, color per particle
@@ -93,7 +93,7 @@ This keeps VFX in the hands of artists/designers, not code.
   ([Ch.01 §3](01-determinism.md)).
 - **Budgeted pools**: a hard cap on live particles with graceful degradation
   (oldest/lowest-priority recycled first) so a 1000-unit melee can't blow the
-  frame budget - important for the 120–160 FPS target
+  frame budget - important for the 120-160 FPS target
   ([Ch.04 §6](04-rendering-wgpu.md)).
 - **LOD by distance/importance**: distant or off-screen emitters reduce rate or
   cull entirely (reuse the GPU cull from [Ch.04](04-rendering-wgpu.md)).

@@ -11,7 +11,7 @@ render graph, the simulation, and the determinism boundary).
 
 The defining tension of the brief is this:
 
-> 1000s of units, online, at 120–160 FPS, on large maps.
+> 1000s of units, online, at 120-160 FPS, on large maps.
 
 You cannot send 1000 unit positions to every player every frame - that is
 megabytes per second per player. The only known solution at this scale is
@@ -49,7 +49,7 @@ in tests.
 
 - **Building the engine?** 01 → 02 → 03 → 07 → 04 → the rest, following the
   [roadmap](10-roadmap-testing.md).
-- **Reviewing the design?** Read this, then [ARCHITECTURE.md §1–4](../ARCHITECTURE.md),
+- **Reviewing the design?** Read this, then [ARCHITECTURE.md §1-4](../ARCHITECTURE.md),
   then the chapter for your area of concern.
 - **Just want the netcode?** [03](03-networking-lockstep.md), but read
   [01](01-determinism.md) first or none of it will make sense.

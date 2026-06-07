@@ -12,7 +12,7 @@
 
 Human input and AI are two implementations of one interface. Nothing downstream
 can tell them apart - both just emit commands into the buffer the game loop drains
-([ARCHITECTURE.md §4–5](../ARCHITECTURE.md)).
+([ARCHITECTURE.md §4-5](../ARCHITECTURE.md)).
 
 ```rust
 // crates/ai - the same seam human input uses (Ch.03 §7).

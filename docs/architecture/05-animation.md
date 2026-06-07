@@ -10,7 +10,7 @@
 ## 1. The scaling problem
 
 Classic skeletal animation does, per unit per frame: sample animation curves →
-compute ~30–80 bone matrices → skin the mesh. On the **CPU**, that's hopeless for
+compute ~30-80 bone matrices → skin the mesh. On the **CPU**, that's hopeless for
 thousands of units. So the rule is: **make per-unit animation cost independent of
 unit count** by precomputing poses and doing the work on the GPU.
 
@@ -112,4 +112,4 @@ in the shader with full blend trees. Few units → cost is fine.
 | **Baked bone texture (atlas)** | ~zero | limited | ✔ **default for the masses** |
 | Real-time GPU skinning | low, but only viable for few | full | ✔ **heroes/closeups only** |
 
-The mix in §2–§3 gives crowd scale *and* fidelity where it's seen.
+The mix in §2-§3 gives crowd scale *and* fidelity where it's seen.

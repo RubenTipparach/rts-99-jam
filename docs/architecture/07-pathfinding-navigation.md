@@ -3,7 +3,7 @@
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Particles](06-particles.md) · [Next: Worldgen](08-procedural-generation.md)
 
 > Brief: *advanced spherical A*, navmesh navigation, or some way to navigate
-> terrain; collision avoidance - for 100s–1000s of units.* This is pure
+> terrain; collision avoidance - for 100s-1000s of units.* This is pure
 > **simulation**, so everything here is **fixed-point and deterministic**
 > ([Ch.01](01-determinism.md)). The headline: **don't run A* per unit.** Use a
 > layered system where the expensive search is shared by whole groups.

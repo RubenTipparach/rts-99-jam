@@ -11,6 +11,8 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
   comments, strings, commit messages, or assets. Use a comma, a colon,
   parentheses, or a spaced hyphen (` - `) instead, always with a plain ASCII
   hyphen `-`.
+- **Numeric ranges use a plain hyphen,** e.g. `120-160 FPS`, `100s-1000s`,
+  `2005-2050`: never an en-dash (Unicode U+2013).
 
 ## Workspace layout
 
