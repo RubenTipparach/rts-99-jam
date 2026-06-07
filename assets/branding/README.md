@@ -17,11 +17,14 @@ to banner. (Sibling patches — the kraken-and-ship **Astromancy** badge and
 
 | File | What it is | Use for |
 |---|---|---|
-| `emblem.svg` | The icon mark (480², transparent field) | Source of truth for the icon |
-| `emblem.png` | Rendered icon, 1024², transparent corners | **Discord app icon**, app/store icon, favicon |
-| `emblem-preview.png` | Icon on a dark disc | Quick preview |
-| `logo.svg` | Emblem + wordmark (1600×520, transparent) | Source of truth for the full logo |
-| `logo.png` | Rendered logo on dark, 2000px wide | README header, title screen, store page |
+| `emblem.svg` / `.png` | The mission patch alone (480² / 1024²) | **Default logo** — README header, favicon, Discord/app icon |
+| `logo-square.svg` / `.png` | Patch + ASTROMANCY wordmark, 1:1 (1024²) | Avatar, app/store icon, square social posts |
+| `social-card.svg` / `.png` | Share card, 1200×630 | Link previews (Open Graph) + GitHub **Social Preview** |
+| `logo.svg` / `.png` | Patch + wordmark, wide (1600×520 / 2000px) | Wide banner / title-screen header |
+| `emblem-preview.png` | Patch on a dark disc | Quick preview |
+
+The wide/square/card SVGs pull the patch in via `<image href="emblem.png">`, so
+re-render `emblem.png` first, then the rest.
 
 The PNGs are generated from the SVGs — edit the SVGs, then re-render (below).
 
@@ -51,8 +54,10 @@ const out = (svg, png, width, bg) => {
   if (bg) opts.background = bg;
   fs.writeFileSync(png, new Resvg(fs.readFileSync(svg), opts).render().asPng());
 };
-out('emblem.svg', 'emblem.png', 1024);
-out('logo.svg',   'logo.png',   2000, '#070b14');
+out('emblem.svg',      'emblem.png',      1024);          // render first — the rest embed it
+out('logo.svg',        'logo.png',        2000, '#070b14');
+out('logo-square.svg', 'logo-square.png', 1024);
+out('social-card.svg', 'social-card.png', 1200);
 JS
 ```
 

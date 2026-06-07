@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/logo.png" alt="Astromancy" width="720">
+  <img src="assets/branding/emblem.png" alt="Astromancy" width="300">
 </p>
 
 <p align="center"><em>Space · Magic · Real-Time Strategy — branding in <a href="assets/branding/">assets/branding/</a></em></p>
