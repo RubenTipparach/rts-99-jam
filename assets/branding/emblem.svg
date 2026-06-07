@@ -171,8 +171,8 @@
   <circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
   <circle cx="240" cy="240" r="184" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.4"/>
 
-  <text fill="#f3d98f" font-size="26" font-weight="700" letter-spacing="3">
-    <textPath href="#arcTop" startOffset="50%" text-anchor="middle">ASTROMANCERS</textPath>
+  <text fill="#f3d98f" font-size="27" font-weight="700" letter-spacing="4">
+    <textPath href="#arcTop" startOffset="50%" text-anchor="middle">PHILOSOPHIA</textPath>
   </text>
   <text fill="#cfe9ff" font-size="16" font-weight="600" letter-spacing="3">
     <textPath href="#arcBottom" startOffset="50%" text-anchor="middle">SCIENTIA EST MAGIA</textPath>

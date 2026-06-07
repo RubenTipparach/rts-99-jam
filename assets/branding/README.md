@@ -9,7 +9,8 @@
 A deterministic RTS of **space and magic**. The emblem is the **Astromancers
 mission patch** (NRO/NASA style): a hooded Astromancer magus standing over a
 world, conjuring a starship that rises straight up on a plume of arcane sparkles,
-ringed by the motto *SCIENTIA EST MAGIA*. Pure vector, so it scales from favicon
+crested **PHILOSOPHIA** (the wizards' founding order — intentionally kept on the
+patch, though the wordmark/name is *Astromancers*) over the motto *SCIENTIA EST MAGIA*. Pure vector, so it scales from favicon
 to banner. (Sibling patches — the kraken-and-ship **Astromancers** badge and
 **Draco** — live one level up in [`../`](../) as `logo*.svg`.)
 
