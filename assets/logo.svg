@@ -30,10 +30,15 @@
       <stop offset="48%" stop-color="#aeb7c9"/>
       <stop offset="100%" stop-color="#545d72"/>
     </linearGradient>
-    <linearGradient id="plume" x1="-66" y1="0" x2="-190" y2="0" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#c7f8ff" stop-opacity="0.85"/>
-      <stop offset="55%" stop-color="#6fd6ff" stop-opacity="0.35"/>
+    <linearGradient id="plume" x1="-58" y1="0" x2="-250" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#c7f8ff" stop-opacity="0.9"/>
+      <stop offset="55%" stop-color="#6fd6ff" stop-opacity="0.4"/>
       <stop offset="100%" stop-color="#6fd6ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="plume2" x1="-58" y1="0" x2="-218" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="45%" stop-color="#c0f6ff" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#c0f6ff" stop-opacity="0"/>
     </linearGradient>
     <radialGradient id="engine" cx="50%" cy="50%" r="50%">
       <stop offset="0%" stop-color="#ffffff"/>
@@ -191,29 +196,34 @@
 
     <!-- ============ the ship ============ -->
     <g transform="translate(262,214) rotate(-24)">
-      <!-- soft magical plume behind the engines -->
-      <path d="M-64,-12 L-188,-34 L-188,34 L-64,12 Z" fill="url(#plume)"
-            filter="url(#softglow)" opacity="0.85"/>
+      <!-- BIG magical plume behind the engines: wide soft cone + bright core -->
+      <path d="M-56,-16 L-246,-66 L-246,66 L-56,16 Z" fill="url(#plume)"
+            filter="url(#softglow)" opacity="0.95"/>
+      <path d="M-58,-8 L-216,-30 L-216,30 L-58,8 Z" fill="url(#plume2)"
+            filter="url(#softglow)" opacity="0.9"/>
+      <ellipse cx="-64" cy="0" rx="16" ry="18" fill="#ffffff"
+               filter="url(#softglow)" opacity="0.85"/>
 
-      <!-- arcane sparkle trail (the hero effect: streams back from engines) -->
+      <!-- arcane sparkle trail (hero effect: a big fan streaming off the engines) -->
       <g>
-        <use href="#spark" transform="translate(-86,1) scale(1.6)"    color="#ffffff" opacity="1"/>
-        <use href="#spark" transform="translate(-104,-9) scale(1.2)"  color="#aef6ff" opacity="0.95"/>
-        <use href="#spark" transform="translate(-112,11) scale(1.05)" color="#d6b4ff" opacity="0.9"/>
-        <use href="#spark" transform="translate(-130,-3) scale(1.25)" color="#ffffff" opacity="0.9"/>
-        <use href="#spark" transform="translate(-140,15) scale(0.85)" color="#7fe6ff" opacity="0.75"/>
-        <use href="#spark" transform="translate(-150,-13) scale(0.8)" color="#e0c8ff" opacity="0.7"/>
-        <use href="#spark" transform="translate(-166,5) scale(0.95)"  color="#ffffff" opacity="0.65"/>
-        <use href="#spark" transform="translate(-182,-7) scale(0.7)"  color="#9af0ff" opacity="0.5"/>
-        <use href="#spark" transform="translate(-196,12) scale(0.62)" color="#d6b4ff" opacity="0.4"/>
-        <use href="#spark" transform="translate(-210,-3) scale(0.5)"  color="#ffffff" opacity="0.3"/>
+        <use href="#spark" transform="translate(-90,1) scale(2.4)"    color="#ffffff" opacity="1"/>
+        <use href="#spark" transform="translate(-112,-14) scale(1.7)" color="#aef6ff" opacity="0.95"/>
+        <use href="#spark" transform="translate(-122,16) scale(1.6)"  color="#d6b4ff" opacity="0.92"/>
+        <use href="#spark" transform="translate(-144,-6) scale(1.9)"  color="#ffffff" opacity="0.9"/>
+        <use href="#spark" transform="translate(-156,24) scale(1.2)"  color="#7fe6ff" opacity="0.82"/>
+        <use href="#spark" transform="translate(-166,-22) scale(1.3)" color="#e0c8ff" opacity="0.78"/>
+        <use href="#spark" transform="translate(-184,10) scale(1.45)" color="#ffffff" opacity="0.72"/>
+        <use href="#spark" transform="translate(-202,-12) scale(1.1)" color="#9af0ff" opacity="0.6"/>
+        <use href="#spark" transform="translate(-216,20) scale(1.0)"  color="#d6b4ff" opacity="0.5"/>
+        <use href="#spark" transform="translate(-232,-6) scale(0.9)"  color="#ffffff" opacity="0.42"/>
+        <use href="#spark" transform="translate(-246,12) scale(0.75)" color="#aef6ff" opacity="0.32"/>
         <g fill="#eaffff">
-          <circle cx="-96" cy="6" r="1.6" opacity="0.9"/>
-          <circle cx="-120" cy="-8" r="1.4" opacity="0.8"/>
-          <circle cx="-138" cy="7" r="1.3" opacity="0.7"/>
-          <circle cx="-158" cy="-6" r="1.2" opacity="0.6"/>
-          <circle cx="-178" cy="4" r="1.1" opacity="0.45"/>
-          <circle cx="-200" cy="-2" r="1.0" opacity="0.3"/>
+          <circle cx="-102" cy="9" r="2.0" opacity="0.9"/>
+          <circle cx="-130" cy="-11" r="1.8" opacity="0.8"/>
+          <circle cx="-150" cy="11" r="1.6" opacity="0.72"/>
+          <circle cx="-176" cy="-8" r="1.5" opacity="0.6"/>
+          <circle cx="-200" cy="6" r="1.3" opacity="0.45"/>
+          <circle cx="-228" cy="-3" r="1.1" opacity="0.32"/>
         </g>
       </g>
 

@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480" font-family="'Eurostile','Michroma','Bahnschrift','Arial Narrow',sans-serif">
+  <defs>
+    <radialGradient id="space" cx="50%" cy="36%" r="78%">
+      <stop offset="0%" stop-color="#2a2060"/>
+      <stop offset="45%" stop-color="#16113b"/>
+      <stop offset="100%" stop-color="#070518"/>
+    </radialGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#171445"/>
+      <stop offset="100%" stop-color="#090726"/>
+    </linearGradient>
+    <linearGradient id="robe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a2552"/>
+      <stop offset="55%" stop-color="#161232"/>
+      <stop offset="100%" stop-color="#080616"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4a4570"/>
+      <stop offset="100%" stop-color="#161028"/>
+    </linearGradient>
+    <radialGradient id="orb" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="35%" stop-color="#ffe79a"/>
+      <stop offset="70%" stop-color="#f6b13e"/>
+      <stop offset="100%" stop-color="#f6b13e" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3.4"/>
+    </filter>
+    <filter id="softglow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <g id="spark">
+      <path d="M0,-8 L1.7,-1.7 L8,0 L1.7,1.7 L0,8 L-1.7,1.7 L-8,0 L-1.7,-1.7 Z" fill="currentColor"/>
+    </g>
+    <clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
+    <clipPath id="world"><circle cx="240" cy="575" r="230"/></clipPath>
+    <path id="arcTop"    d="M 32,240 A 208,208 0 0 1 448,240"/>
+    <path id="arcBottom" d="M 40,240 A 200,200 0 0 0 440,240"/>
+  </defs>
+
+  <circle cx="240" cy="240" r="232" fill="url(#band)" stroke="#e9cd84" stroke-width="3"/>
+  <circle cx="240" cy="240" r="227" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.45"/>
+
+  <g clip-path="url(#scene)">
+    <circle cx="240" cy="240" r="188" fill="url(#space)"/>
+
+    <!-- arcane sigil behind the wizard: heptagram + runic ring -->
+    <g stroke="#b69cff" fill="none" opacity="0.32">
+      <circle cx="240" cy="226" r="116" stroke-width="1" stroke-dasharray="2 9"/>
+      <circle cx="240" cy="226" r="104" stroke-width="1" stroke-dasharray="1 14"/>
+      <path stroke="#caa6ff" stroke-width="1.3"
+            d="M240,122 L285,320 L159,161 L341,249 L139,249 L321,161 L195,320 Z"/>
+    </g>
+
+    <!-- background worlds (the planets the magus stands over) -->
+    <g>
+      <circle cx="116" cy="120" r="15" fill="#7fa0c8"/>
+      <ellipse cx="116" cy="120" rx="26" ry="7" fill="none" stroke="#cfe0f4" stroke-width="2" opacity="0.7" transform="rotate(-20 116 120)"/>
+      <circle cx="362" cy="126" r="12" fill="#c98f5e"/>
+      <circle cx="357" cy="122" r="3" fill="#9c6b3f"/>
+      <circle cx="366" cy="130" r="2" fill="#9c6b3f"/>
+    </g>
+
+    <!-- starfield -->
+    <g fill="#ffffff">
+      <circle cx="300" cy="92" r="1.4" opacity="0.8"/>
+      <circle cx="352" cy="150" r="1.0" opacity="0.6"/>
+      <circle cx="392" cy="210" r="1.2" opacity="0.7"/>
+      <circle cx="150" cy="170" r="1.0" opacity="0.6"/>
+      <circle cx="92" cy="210" r="1.1" opacity="0.6"/>
+      <circle cx="210" cy="120" r="0.9" opacity="0.6"/>
+      <circle cx="408" cy="270" r="1.0" opacity="0.5"/>
+      <circle cx="86" cy="280" r="0.9" opacity="0.5"/>
+    </g>
+
+    <!-- the planet the wizard stands on -->
+    <g clip-path="url(#world)">
+      <circle cx="240" cy="575" r="230" fill="url(#ground)"/>
+      <ellipse cx="190" cy="372" rx="22" ry="6" fill="#0c0a1c" opacity="0.5"/>
+      <ellipse cx="300" cy="388" rx="28" ry="7" fill="#0c0a1c" opacity="0.5"/>
+      <ellipse cx="240" cy="410" rx="20" ry="5" fill="#0c0a1c" opacity="0.4"/>
+    </g>
+    <path d="M40,358 A 230,230 0 0 1 440,358" fill="none" stroke="#9ad7ff" stroke-width="2" opacity="0.5"/>
+
+    <!-- ============ the magus ============ -->
+    <!-- raised hand's spell-burst (behind robe edge) -->
+    <g>
+      <circle cx="156" cy="178" r="14" fill="url(#orb)" filter="url(#glow)" opacity="0.9"/>
+      <g stroke="#ffe79a" stroke-width="1.4" opacity="0.7">
+        <path d="M156,178 L140,150"/><path d="M156,178 L130,176"/>
+        <path d="M156,178 L142,202"/><path d="M156,178 L176,158"/>
+      </g>
+      <use href="#spark" transform="translate(140,150) scale(0.8)" color="#fff3cf"/>
+      <use href="#spark" transform="translate(128,182) scale(0.6)" color="#ffe79a"/>
+      <use href="#spark" transform="translate(150,206) scale(0.5)" color="#ffffff"/>
+    </g>
+
+    <!-- robe + hood silhouette -->
+    <path fill="url(#robe)" stroke="#5b4fa0" stroke-width="1.4" stroke-opacity="0.55" stroke-linejoin="round"
+          d="M240,112 C258,114 268,134 263,154 C281,168 289,192 291,206
+             C300,262 306,320 320,362 C300,374 256,376 240,376
+             C224,376 180,374 160,362 C174,320 180,262 189,206
+             C191,192 199,168 217,154 C212,134 222,114 240,112 Z"/>
+
+    <!-- raised left sleeve/arm -->
+    <path fill="url(#robe)" stroke="#5b4fa0" stroke-width="1.4" stroke-opacity="0.55" stroke-linejoin="round"
+          d="M196,210 C180,196 166,184 158,176 C166,170 176,170 184,176
+             C198,188 206,200 214,214 Z"/>
+
+    <!-- shadowed hood opening + small glowing eyes -->
+    <path d="M227,140 C233,132 247,132 253,140 C249,170 244,182 240,182 C236,182 231,170 227,140 Z" fill="#040309"/>
+    <path d="M226,141 C233,132 247,132 254,141" fill="none" stroke="#6a5ca8" stroke-width="1.5" opacity="0.6"/>
+    <circle cx="234" cy="151" r="2.0" fill="#ffd24a" filter="url(#glow)"/>
+    <circle cx="246" cy="151" r="2.0" fill="#ffd24a" filter="url(#glow)"/>
+
+    <!-- robe trim + clasp -->
+    <path d="M240,180 L228,360 M240,180 L252,360" stroke="#3a3168" stroke-width="1.2" fill="none" opacity="0.8"/>
+    <circle cx="240" cy="196" r="4" fill="#f6b13e"/>
+
+    <!-- staff + glowing orb -->
+    <path d="M300,300 L322,138" stroke="#6e5a34" stroke-width="5" stroke-linecap="round"/>
+    <path d="M300,300 L322,138" stroke="#c8a86a" stroke-width="1.6" stroke-linecap="round" opacity="0.8"/>
+    <ellipse cx="300" cy="296" rx="9" ry="7" fill="url(#robe)" stroke="#5b4fa0" stroke-opacity="0.6"/>
+    <circle cx="324" cy="132" r="26" fill="url(#orb)" filter="url(#softglow)"/>
+    <circle cx="324" cy="132" r="9" fill="#fff7e0"/>
+    <use href="#spark" transform="translate(324,132) scale(1.1)" color="#fff7e0"/>
+
+    <!-- floating runes / sparkles -->
+    <use href="#spark" transform="translate(300,176) scale(0.55)" color="#ffe79a" opacity="0.9"/>
+    <use href="#spark" transform="translate(196,150) scale(0.5)" color="#cdbcff" opacity="0.85"/>
+    <use href="#spark" transform="translate(344,210) scale(0.45)" color="#ffffff" opacity="0.8"/>
+    <use href="#spark" transform="translate(150,250) scale(0.5)" color="#ffe79a" opacity="0.8"/>
+  </g>
+
+  <circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
+  <circle cx="240" cy="240" r="184" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.4"/>
+
+  <text fill="#f3d98f" font-size="30" font-weight="700" letter-spacing="6">
+    <textPath href="#arcTop" startOffset="50%" text-anchor="middle">PHILOSOPHIA</textPath>
+  </text>
+  <text fill="#cfe9ff" font-size="18" font-weight="600" letter-spacing="4">
+    <textPath href="#arcBottom" startOffset="50%" text-anchor="middle">SCIENTIA EST MAGIA</textPath>
+  </text>
+  <use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#f3d98f"/>
+  <use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#f3d98f"/>
+</svg>
