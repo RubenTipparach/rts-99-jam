@@ -1,0 +1,209 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480" font-family="'Eurostile','Michroma','Bahnschrift','Arial Narrow',sans-serif">
+  <defs>
+    <!-- space background -->
+    <radialGradient id="space" cx="42%" cy="38%" r="75%">
+      <stop offset="0%" stop-color="#2a2060"/>
+      <stop offset="45%" stop-color="#16113b"/>
+      <stop offset="100%" stop-color="#070518"/>
+    </radialGradient>
+    <!-- outer text band -->
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#171445"/>
+      <stop offset="100%" stop-color="#090726"/>
+    </linearGradient>
+    <!-- gas giant body (banded) -->
+    <linearGradient id="giant" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#f3bd76"/>
+      <stop offset="22%" stop-color="#d98a3d"/>
+      <stop offset="40%" stop-color="#e7a85a"/>
+      <stop offset="58%" stop-color="#c2762f"/>
+      <stop offset="76%" stop-color="#e0a256"/>
+      <stop offset="100%" stop-color="#a85f22"/>
+    </linearGradient>
+    <radialGradient id="limb" cx="38%" cy="34%" r="72%">
+      <stop offset="55%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#180a02" stop-opacity="0.78"/>
+    </radialGradient>
+    <!-- ship hull -->
+    <linearGradient id="hull" x1="0" y1="-20" x2="0" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#eef2fa"/>
+      <stop offset="48%" stop-color="#aeb7c9"/>
+      <stop offset="100%" stop-color="#545d72"/>
+    </linearGradient>
+    <linearGradient id="plume" x1="-66" y1="0" x2="-190" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#c7f8ff" stop-opacity="0.85"/>
+      <stop offset="55%" stop-color="#6fd6ff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#6fd6ff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="engine" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="35%" stop-color="#aef4ff"/>
+      <stop offset="100%" stop-color="#2bd0ff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="3.2"/>
+    </filter>
+    <filter id="softglow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+
+    <!-- a 4-point twinkle; recolor via the `color` attr on <use> -->
+    <g id="spark">
+      <path d="M0,-8 L1.7,-1.7 L8,0 L1.7,1.7 L0,8 L-1.7,1.7 L-8,0 L-1.7,-1.7 Z" fill="currentColor"/>
+    </g>
+
+    <clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
+    <clipPath id="planet"><circle cx="96" cy="356" r="104"/></clipPath>
+
+    <!-- arc text baselines (top: sweep 1, bottom: sweep 0) -->
+    <path id="arcTop"    d="M 32,240 A 208,208 0 0 1 448,240"/>
+    <path id="arcBottom" d="M 40,240 A 200,200 0 0 0 440,240"/>
+  </defs>
+
+  <!-- badge base + outer band -->
+  <circle cx="240" cy="240" r="232" fill="url(#band)" stroke="#e9cd84" stroke-width="3"/>
+  <circle cx="240" cy="240" r="227" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.45"/>
+
+  <!-- ============ inner scene ============ -->
+  <g clip-path="url(#scene)">
+    <circle cx="240" cy="240" r="188" fill="url(#space)"/>
+
+    <!-- faint arcane sigil ring (the "weird/occult" NRO touch) -->
+    <circle cx="240" cy="240" r="160" fill="none" stroke="#5fd8ff" stroke-width="1"
+            stroke-dasharray="2 10" opacity="0.22"/>
+    <circle cx="240" cy="240" r="150" fill="none" stroke="#b69cff" stroke-width="1"
+            stroke-dasharray="1 16" opacity="0.18"/>
+
+    <!-- orbital path -->
+    <ellipse cx="240" cy="240" rx="172" ry="78" fill="none" stroke="#46d9ff"
+             stroke-width="1.2" stroke-dasharray="5 7" opacity="0.30"
+             transform="rotate(-24 240 240)"/>
+
+    <!-- starfield -->
+    <g fill="#ffffff">
+      <circle cx="300" cy="92"  r="1.6" opacity="0.9"/>
+      <circle cx="350" cy="140" r="1.1" opacity="0.7"/>
+      <circle cx="388" cy="210" r="1.4" opacity="0.8"/>
+      <circle cx="360" cy="300" r="1.0" opacity="0.6"/>
+      <circle cx="150" cy="300" r="1.3" opacity="0.7"/>
+      <circle cx="110" cy="170" r="1.1" opacity="0.7"/>
+      <circle cx="200" cy="120" r="0.9" opacity="0.6"/>
+      <circle cx="250" cy="160" r="1.0" opacity="0.6"/>
+      <circle cx="330" cy="360" r="1.2" opacity="0.6"/>
+      <circle cx="410" cy="260" r="1.0" opacity="0.6"/>
+      <circle cx="170" cy="360" r="1.0" opacity="0.5"/>
+      <circle cx="280" cy="330" r="0.8" opacity="0.5"/>
+      <circle cx="130" cy="240" r="0.8" opacity="0.5"/>
+      <circle cx="395" cy="170" r="0.8" opacity="0.5"/>
+    </g>
+    <use href="#spark" x="0" y="0" transform="translate(356,118) scale(0.7)" color="#bfefff" opacity="0.9"/>
+    <use href="#spark" x="0" y="0" transform="translate(402,232) scale(0.55)" color="#ffffff" opacity="0.8"/>
+    <use href="#spark" x="0" y="0" transform="translate(150,150) scale(0.5)" color="#d9c6ff" opacity="0.8"/>
+
+    <!-- constellation, upper-left, faintly forming a sigil -->
+    <g stroke="#7fe4ff" stroke-width="1" opacity="0.5" fill="none">
+      <path d="M118,128 L150,104 L188,134 L168,176 L210,162 L150,104"/>
+    </g>
+    <g fill="#eaffff">
+      <circle cx="118" cy="128" r="2.1"/>
+      <circle cx="150" cy="104" r="2.6"/>
+      <circle cx="188" cy="134" r="2.1"/>
+      <circle cx="168" cy="176" r="1.8"/>
+      <circle cx="210" cy="162" r="2.0"/>
+    </g>
+
+    <!-- ringed gas giant, lower-left -->
+    <g>
+      <!-- back of ring -->
+      <ellipse cx="96" cy="356" rx="168" ry="40" fill="none" stroke="#e7b873"
+               stroke-width="6" opacity="0.55" transform="rotate(-22 96 356)"/>
+      <g clip-path="url(#planet)">
+        <circle cx="96" cy="356" r="104" fill="url(#giant)"/>
+        <ellipse cx="96" cy="318" rx="120" ry="9"  fill="#b86c28" opacity="0.45"/>
+        <ellipse cx="96" cy="356" rx="120" ry="7"  fill="#f6cd8a" opacity="0.40"/>
+        <ellipse cx="96" cy="392" rx="120" ry="11" fill="#9c5a1f" opacity="0.45"/>
+        <circle cx="96" cy="356" r="104" fill="url(#limb)"/>
+      </g>
+      <!-- front of ring -->
+      <path d="M -36,392 A 168,40 0 0 0 228,320" fill="none" stroke="#f3c982"
+            stroke-width="6" opacity="0.9" transform="rotate(-22 96 356)"/>
+    </g>
+
+    <!-- ============ the ship ============ -->
+    <g transform="translate(262,214) rotate(-24)">
+      <!-- soft magical plume behind the engines -->
+      <path d="M-64,-12 L-188,-34 L-188,34 L-64,12 Z" fill="url(#plume)"
+            filter="url(#softglow)" opacity="0.85"/>
+
+      <!-- arcane sparkle trail (the hero effect: streams back from engines) -->
+      <g>
+        <use href="#spark" transform="translate(-86,1) scale(1.6)"    color="#ffffff" opacity="1"/>
+        <use href="#spark" transform="translate(-104,-9) scale(1.2)"  color="#aef6ff" opacity="0.95"/>
+        <use href="#spark" transform="translate(-112,11) scale(1.05)" color="#d6b4ff" opacity="0.9"/>
+        <use href="#spark" transform="translate(-130,-3) scale(1.25)" color="#ffffff" opacity="0.9"/>
+        <use href="#spark" transform="translate(-140,15) scale(0.85)" color="#7fe6ff" opacity="0.75"/>
+        <use href="#spark" transform="translate(-150,-13) scale(0.8)" color="#e0c8ff" opacity="0.7"/>
+        <use href="#spark" transform="translate(-166,5) scale(0.95)"  color="#ffffff" opacity="0.65"/>
+        <use href="#spark" transform="translate(-182,-7) scale(0.7)"  color="#9af0ff" opacity="0.5"/>
+        <use href="#spark" transform="translate(-196,12) scale(0.62)" color="#d6b4ff" opacity="0.4"/>
+        <use href="#spark" transform="translate(-210,-3) scale(0.5)"  color="#ffffff" opacity="0.3"/>
+        <g fill="#eaffff">
+          <circle cx="-96" cy="6" r="1.6" opacity="0.9"/>
+          <circle cx="-120" cy="-8" r="1.4" opacity="0.8"/>
+          <circle cx="-138" cy="7" r="1.3" opacity="0.7"/>
+          <circle cx="-158" cy="-6" r="1.2" opacity="0.6"/>
+          <circle cx="-178" cy="4" r="1.1" opacity="0.45"/>
+          <circle cx="-200" cy="-2" r="1.0" opacity="0.3"/>
+        </g>
+      </g>
+
+      <!-- engine glow cores -->
+      <ellipse cx="-78" cy="-8" rx="18" ry="8" fill="url(#engine)" filter="url(#glow)"/>
+      <ellipse cx="-78" cy="8"  rx="18" ry="8" fill="url(#engine)" filter="url(#glow)"/>
+
+      <!-- swept fins (smaller, mid-tone, clean silhouette) -->
+      <path d="M2,-15 L-16,-32 L-30,-29 L-18,-14 Z" fill="#6b7488"/>
+      <path d="M2,15  L-16,32  L-30,29  L-18,14  Z" fill="#566073"/>
+
+      <!-- engine nacelles -->
+      <path d="M-58,-14 L-80,-12 L-80,-4 L-58,-6 Z" fill="#525c70"/>
+      <path d="M-58,14  L-80,12  L-80,4  L-58,6  Z" fill="#424b5e"/>
+
+      <!-- main hull -->
+      <path d="M86,0 L52,-14 L-44,-17 L-66,-9 L-68,0 L-66,9 L-44,17 L52,14 Z"
+            fill="url(#hull)" stroke="#1c2436" stroke-width="1.3"/>
+
+      <!-- panel detail -->
+      <g stroke="#39435a" stroke-width="1" fill="none" opacity="0.7">
+        <path d="M50,-10 L-42,-13"/>
+        <path d="M50,10 L-42,13"/>
+        <path d="M-30,-16 L-30,16"/>
+      </g>
+
+      <!-- gold accent stripe -->
+      <path d="M54,-11 L-44,-14 L-44,-10 L54,-7 Z" fill="#f0cf86" opacity="0.95"/>
+
+      <!-- cockpit canopy -->
+      <path d="M44,-6 L66,0 L46,5 L30,-1 Z" fill="#6cebff" stroke="#cffaff" stroke-width="1"/>
+
+      <!-- nose tip -->
+      <path d="M86,0 L64,-5 L64,5 Z" fill="#f6f9fd"/>
+    </g>
+  </g>
+
+  <!-- inner rims over the scene edge -->
+  <circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
+  <circle cx="240" cy="240" r="184" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.4"/>
+
+  <!-- ============ patch text ============ -->
+  <text fill="#f3d98f" font-size="33" font-weight="700" letter-spacing="9">
+    <textPath href="#arcTop" startOffset="50%" text-anchor="middle">ASTROMANCY</textPath>
+  </text>
+  <text fill="#cfe9ff" font-size="19" font-weight="600" letter-spacing="5">
+    <textPath href="#arcBottom" startOffset="50%" text-anchor="middle">EX CINERE AD ASTRA</textPath>
+  </text>
+
+  <!-- side stars separating the text -->
+  <use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#f3d98f"/>
+  <use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#f3d98f"/>
+</svg>
