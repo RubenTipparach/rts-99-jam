@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 480" width="480" height="480" font-family="'Eurostile','Michroma','Bahnschrift','Arial Narrow',sans-serif">
+  <defs>
+    <radialGradient id="space" cx="50%" cy="36%" r="78%">
+      <stop offset="0%" stop-color="#2a2060"/>
+      <stop offset="45%" stop-color="#16113b"/>
+      <stop offset="100%" stop-color="#070518"/>
+    </radialGradient>
+    <linearGradient id="band" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#171445"/>
+      <stop offset="100%" stop-color="#090726"/>
+    </linearGradient>
+    <linearGradient id="giant" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#6fb6c9"/>
+      <stop offset="30%" stop-color="#3a7e98"/>
+      <stop offset="55%" stop-color="#52a0b4"/>
+      <stop offset="80%" stop-color="#2f6f88"/>
+      <stop offset="100%" stop-color="#1d4c63"/>
+    </linearGradient>
+    <radialGradient id="limb" cx="40%" cy="34%" r="72%">
+      <stop offset="55%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#021018" stop-opacity="0.7"/>
+    </radialGradient>
+    <linearGradient id="flame" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#ff5a1e"/>
+      <stop offset="55%" stop-color="#ffae34"/>
+      <stop offset="100%" stop-color="#fff3b0"/>
+    </linearGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="3.2"/>
+    </filter>
+    <filter id="softglow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <g id="spark">
+      <path d="M0,-8 L1.7,-1.7 L8,0 L1.7,1.7 L0,8 L-1.7,1.7 L-8,0 L-1.7,-1.7 Z" fill="currentColor"/>
+    </g>
+    <clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
+    <clipPath id="giantclip"><circle cx="232" cy="252" r="80"/></clipPath>
+    <path id="arcTop"    d="M 39,240 A 201,201 0 0 1 441,240"/>
+    <path id="arcBottom" d="M 23,240 A 217,217 0 0 0 457,240"/>
+  </defs>
+
+  <circle cx="240" cy="240" r="232" fill="url(#band)" stroke="#e9cd84" stroke-width="3"/>
+  <circle cx="240" cy="240" r="227" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.45"/>
+
+  <g clip-path="url(#scene)">
+    <circle cx="240" cy="240" r="188" fill="url(#space)"/>
+
+    <!-- faint sigil + stars -->
+    <circle cx="240" cy="240" r="158" fill="none" stroke="#5fd8ff" stroke-width="1"
+            stroke-dasharray="2 11" opacity="0.18"/>
+    <g fill="#ffffff">
+      <circle cx="120" cy="120" r="1.4" opacity="0.8"/><circle cx="360" cy="120" r="1.2" opacity="0.7"/>
+      <circle cx="96" cy="240" r="1.1" opacity="0.6"/><circle cx="392" cy="250" r="1.2" opacity="0.7"/>
+      <circle cx="150" cy="350" r="1.0" opacity="0.6"/><circle cx="330" cy="360" r="1.0" opacity="0.6"/>
+      <circle cx="250" cy="96" r="1.0" opacity="0.6"/>
+    </g>
+
+    <!-- wings + the body segment that passes BEHIND the planet -->
+    <g>
+      <path d="M250,196 C190,150 150,140 120,150 C150,168 150,196 176,214 C158,214 150,232 150,232
+               C190,236 226,224 250,206 Z" fill="#3a0f12" stroke="#7e2a22" stroke-width="1.2" opacity="0.95"/>
+      <path d="M250,196 C300,150 340,138 372,150 C342,166 344,196 320,212 C338,214 344,230 344,230
+               C306,236 272,222 250,206 Z" fill="#4a141554" stroke="#7e2a22" stroke-width="1.2" opacity="0.85"/>
+      <!-- neck/body behind planet (right side) -->
+      <path d="M314,176 C336,216 332,288 300,330" fill="none" stroke="#2a0a0a" stroke-width="32" stroke-linecap="round"/>
+      <path d="M314,176 C336,216 332,288 300,330" fill="none" stroke="#7e2222" stroke-width="27" stroke-linecap="round"/>
+    </g>
+
+    <!-- the gas giant -->
+    <g clip-path="url(#giantclip)">
+      <circle cx="232" cy="252" r="80" fill="url(#giant)"/>
+      <ellipse cx="232" cy="224" rx="95" ry="7" fill="#22576c" opacity="0.5"/>
+      <ellipse cx="232" cy="256" rx="95" ry="6" fill="#7cc0d2" opacity="0.4"/>
+      <ellipse cx="232" cy="288" rx="95" ry="9" fill="#1c4a60" opacity="0.5"/>
+      <circle cx="232" cy="252" r="80" fill="url(#limb)"/>
+    </g>
+
+    <!-- ============ dragon body in FRONT of the planet ============ -->
+    <g stroke-linecap="round" stroke-linejoin="round">
+      <!-- coiling body -->
+      <path d="M300,330 C258,360 196,356 166,306 C146,276 152,226 180,196 C196,180 216,178 228,188"
+            fill="none" stroke="#2a0a0a" stroke-width="32"/>
+      <path d="M300,330 C258,360 196,356 166,306 C146,276 152,226 180,196 C196,180 216,178 228,188"
+            fill="none" stroke="#7e2222" stroke-width="27"/>
+      <path d="M300,330 C258,360 196,356 166,306 C146,276 152,226 180,196 C196,180 216,178 228,188"
+            fill="none" stroke="#b0432b" stroke-width="10" opacity="0.7"/>
+
+      <!-- belly scutes -->
+      <g stroke="#e7b15a" stroke-width="3" opacity="0.8" fill="none">
+        <path d="M214,346 q14,8 28,2"/><path d="M186,338 q12,9 26,5"/>
+        <path d="M170,300 q-9,-12 -3,-26"/><path d="M168,262 q-6,-13 4,-26"/>
+      </g>
+
+      <!-- dorsal spines -->
+      <g fill="#e7b15a" stroke="#7e2a22" stroke-width="0.8">
+        <path d="M286,318 l6,-16 l10,12 Z"/><path d="M250,344 l3,-17 l13,9 Z"/>
+        <path d="M214,348 l0,-18 l14,6 Z"/><path d="M182,330 l-6,-16 l15,2 Z"/>
+        <path d="M160,292 l-15,-7 l13,-9 Z"/><path d="M162,250 l-16,-2 l11,-12 Z"/>
+      </g>
+
+      <!-- foreleg gripping the planet -->
+      <path d="M236,300 C250,312 256,330 252,344 C260,338 268,340 274,348
+               C272,332 268,314 256,300 Z" fill="#7e2222" stroke="#2a0a0a" stroke-width="1.4"/>
+      <g stroke="#f3d98f" stroke-width="2.4" stroke-linecap="round">
+        <path d="M252,344 l6,10"/><path d="M262,344 l5,11"/><path d="M271,346 l4,10"/>
+      </g>
+
+      <!-- tail spade -->
+      <path d="M228,188 l22,-6 l-12,18 Z" fill="#7e2222" stroke="#2a0a0a" stroke-width="1.2"/>
+    </g>
+
+    <!-- ============ fire breath (up-right) ============ -->
+    <g filter="url(#glow)">
+      <path d="M330,150 C372,128 392,96 398,64 C384,92 360,104 346,120
+               C360,96 360,74 352,58 C344,86 322,108 314,134 Z" fill="#ff5a1e" opacity="0.95"/>
+      <path d="M332,148 C366,128 382,102 386,76 C374,98 356,108 344,122
+               C354,102 354,86 348,72 C340,96 324,110 318,132 Z" fill="#ffae34"/>
+      <path d="M334,144 C358,128 370,108 372,90 C364,104 352,112 342,122
+               C348,108 348,96 344,86 C338,102 328,112 324,128 Z" fill="#fff3b0"/>
+    </g>
+    <g fill="#ffd27a">
+      <circle cx="392" cy="70" r="2.2" opacity="0.9"/><circle cx="372" cy="58" r="1.6" opacity="0.8"/>
+      <circle cx="404" cy="92" r="1.8" opacity="0.7"/><circle cx="360" cy="74" r="1.4" opacity="0.7"/>
+    </g>
+
+    <!-- ============ dragon head ============ -->
+    <g stroke="#2a0a0a" stroke-width="1.6" stroke-linejoin="round">
+      <!-- horns -->
+      <path d="M312,150 C306,128 308,110 318,96 C316,116 320,134 326,148 Z" fill="#caa15a"/>
+      <path d="M322,150 C320,130 326,114 338,104 C332,122 334,140 336,150 Z" fill="#b58c46"/>
+      <!-- skull / upper jaw -->
+      <path d="M300,168 C300,150 312,140 330,142 C352,144 368,152 372,160
+               C360,164 344,164 332,170 C322,174 308,176 300,168 Z" fill="#7e2222"/>
+      <!-- lower jaw -->
+      <path d="M312,172 C326,178 348,176 366,166 C356,180 336,186 320,182 C314,180 311,176 312,172 Z" fill="#601717"/>
+      <!-- teeth -->
+      <g fill="#fbe9c2" stroke="none">
+        <path d="M338,166 l3,7 l3,-7 Z"/><path d="M348,166 l3,7 l3,-7 Z"/><path d="M358,163 l3,7 l3,-7 Z"/>
+      </g>
+      <!-- brow + eye -->
+      <path d="M306,156 C312,150 322,150 328,154" fill="none" stroke="#2a0a0a" stroke-width="3"/>
+      <circle cx="318" cy="159" r="3.4" fill="#ffd24a" filter="url(#glow)"/>
+      <ellipse cx="318" cy="159" rx="1.1" ry="3" fill="#2a0a0a"/>
+      <!-- whisker -->
+      <path d="M372,160 C392,160 404,150 410,138" fill="none" stroke="#caa15a" stroke-width="1.6"/>
+    </g>
+  </g>
+
+  <circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
+  <circle cx="240" cy="240" r="184" fill="none" stroke="#41e7ff" stroke-width="1" opacity="0.4"/>
+
+  <text fill="#f3d98f" font-size="34" font-weight="700" letter-spacing="11">
+    <textPath href="#arcTop" startOffset="50%" text-anchor="middle">DRACO</textPath>
+  </text>
+  <text fill="#cfe9ff" font-size="17" font-weight="600" letter-spacing="3">
+    <textPath href="#arcBottom" startOffset="50%" text-anchor="middle">NIHIL ULTRA NOS</textPath>
+  </text>
+  <use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#f3d98f"/>
+  <use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#f3d98f"/>
+</svg>

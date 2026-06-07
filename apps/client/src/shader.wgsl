@@ -86,17 +86,59 @@ fn vs_water(@location(0) pos: vec3<f32>) -> WaterOut {
     o.clip = cam.view_proj * vec4<f32>(o.world, 1.0);
     return o;
 }
+// Animated surface normal, evaluated per fragment: large slow swells plus
+// fine fast ripples from several directions (so it isn't a visible grid). This
+// is what makes the reflection shimmer per-pixel.
+fn water_normal(p: vec2<f32>, t: f32) -> vec3<f32> {
+    var d = vec2<f32>(0.0, 0.0);
+    d += vec2<f32>(1.0, 0.0) * 0.30 * cos(p.x * 0.090 + t * 1.40);
+    d += vec2<f32>(0.0, 1.0) * 0.30 * cos(p.y * 0.085 - t * 1.20);
+    d += normalize(vec2<f32>(1.0, 0.7)) * 0.16 * cos(dot(p, vec2<f32>(0.050, 0.035)) + t * 0.90);
+    d += normalize(vec2<f32>(-0.6, 1.0)) * 0.16 * cos(dot(p, vec2<f32>(-0.035, 0.050)) - t * 1.05);
+    d += vec2<f32>(1.0, 0.0) * 0.07 * cos(p.x * 0.420 - t * 2.60);
+    d += vec2<f32>(0.0, 1.0) * 0.07 * cos(p.y * 0.390 + t * 2.40);
+    d += normalize(vec2<f32>(1.0, 1.0)) * 0.05 * cos(dot(p, vec2<f32>(0.330, 0.300)) + t * 3.10);
+    return normalize(vec3<f32>(d.x, 1.0, d.y));
+}
+
+// Cheap procedural sky the water reflects: horizon→zenith gradient plus a sun
+// disc and glow around the light direction.
+fn water_sky(dir: vec3<f32>) -> vec3<f32> {
+    let up = clamp(dir.y, 0.0, 1.0);
+    let horizon = vec3<f32>(0.62, 0.72, 0.86);
+    let zenith = vec3<f32>(0.17, 0.35, 0.62);
+    var c = mix(horizon, zenith, pow(up, 0.55));
+    let sun = max(dot(dir, normalize(cam.light_dir.xyz)), 0.0);
+    c += vec3<f32>(1.00, 0.95, 0.80) * pow(sun, 250.0) * 1.4; // disc
+    c += vec3<f32>(1.00, 0.90, 0.72) * pow(sun, 18.0) * 0.14; // glow
+    return c;
+}
+
 @fragment
 fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
     let t = cam.params.x;
-    let wx = sin(in.world.x * 0.06 + t * 1.2);
-    let wz = cos(in.world.z * 0.055 - t * 1.0);
-    let nrm = normalize(vec3<f32>(wx * 0.18, 1.0, wz * 0.18));
-    let ndl = max(dot(nrm, normalize(cam.light_dir.xyz)), 0.0);
-    let tone = 0.5 + 0.25 * (wx + wz);
-    var col = mix(vec3<f32>(0.05, 0.18, 0.32), vec3<f32>(0.12, 0.40, 0.52), tone);
-    col = (col + vec3<f32>(ndl * 0.15)) * fow(in.world);
-    return vec4<f32>(col, 0.80);
+    let n = water_normal(in.world.xz, t);
+    let view = normalize(cam.eye.xyz - in.world); // surface -> eye
+    let refl = reflect(-view, n); // reflected view ray, into the sky
+    let sky = water_sky(refl);
+
+    // Water body colour, a touch lighter where the surface tilts toward us.
+    let deep = vec3<f32>(0.02, 0.10, 0.18);
+    let shallow = vec3<f32>(0.05, 0.24, 0.36);
+    let body = mix(deep, shallow, clamp(n.y, 0.0, 1.0));
+
+    // Schlick fresnel: reflective at grazing angles, darker/transmissive
+    // looking straight down.
+    let fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, view), 0.0), 5.0);
+    var col = mix(body, sky, fres);
+
+    // Sharp sun glint riding the ripples.
+    let spec = pow(max(dot(refl, normalize(cam.light_dir.xyz)), 0.0), 120.0);
+    col += vec3<f32>(1.0, 0.96, 0.85) * spec * 0.6;
+
+    col = col * fow(in.world);
+    let alpha = clamp(0.80 + fres * 0.18, 0.0, 0.98);
+    return vec4<f32>(col, alpha);
 }
 
 // ---------------- units / buildings ----------------
@@ -129,32 +171,21 @@ fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
     return vec4<f32>(in.albedo * (0.45 + 0.7 * ndl), 1.0);
 }
 
-// ---------------- selection rings ----------------
+// ---------------- selection rings (ground decals) ----------------
+// Built CPU-side as an annulus whose vertices follow the terrain height, so the
+// ring hugs uneven ground instead of clipping through hills.
 struct RingOut {
     @builtin(position) clip: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) color: vec4<f32>,
+    @location(0) color: vec4<f32>,
 };
 @vertex
-fn vs_ring(
-    @location(0) quad: vec2<f32>,
-    @location(1) center: vec3<f32>,
-    @location(2) radius: f32,
-    @location(3) color: vec4<f32>,
-) -> RingOut {
+fn vs_ring(@location(0) pos: vec3<f32>, @location(1) color: vec4<f32>) -> RingOut {
     var o: RingOut;
-    let world = center + vec3<f32>(quad.x * radius, 0.1, quad.y * radius);
-    o.uv = quad;
     o.color = color;
-    o.clip = cam.view_proj * vec4<f32>(world, 1.0);
+    o.clip = cam.view_proj * vec4<f32>(pos, 1.0);
     return o;
 }
 @fragment
 fn fs_ring(in: RingOut) -> @location(0) vec4<f32> {
-    let r = length(in.uv);
-    let a = smoothstep(1.0, 0.92, r) * smoothstep(0.74, 0.85, r);
-    if (a < 0.02) {
-        discard;
-    }
-    return vec4<f32>(in.color.rgb, a * in.color.a);
+    return in.color;
 }

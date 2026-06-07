@@ -3,6 +3,9 @@
 
 pub const HALF: f32 = 600.0;
 pub const SEA_LEVEL: f32 = 0.0;
+/// The seabed never drops below this — shallow water (~10 m deep) instead of a
+/// bottomless bowl, so the floor reads cleanly under the surface.
+pub const SEABED: f32 = SEA_LEVEL - 10.0;
 
 fn hash(x: i32, y: i32) -> f32 {
     let mut n = (x.wrapping_mul(1619) ^ y.wrapping_mul(31337)) as u32;
@@ -44,7 +47,7 @@ pub fn height(x: f32, z: f32) -> f32 {
     let r = (x * x + z * z).sqrt();
     let edge = ((r - 520.0) / 80.0).max(0.0);
     let bowl = -edge * edge * 20.0;
-    2.5 + hills + rolling + bowl
+    (2.5 + hills + rolling + bowl).max(SEABED)
 }
 
 pub fn normal(x: f32, z: f32) -> [f32; 3] {

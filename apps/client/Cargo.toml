@@ -24,6 +24,11 @@ web-time = "1"
 pollster = "0.4"
 env_logger = "0.11"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Validate shader.wgsl on host (same naga wgpu uses) so a malformed shader
+# fails CI instead of only panicking at pipeline creation on the GPU.
+naga = { version = "29", features = ["wgsl-in"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
@@ -38,4 +43,5 @@ web-sys = { version = "0.3", features = [
     "EventTarget",
     "Event",
     "DomTokenList",
+    "ImageData",
 ] }

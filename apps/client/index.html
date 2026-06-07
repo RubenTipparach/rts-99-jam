@@ -3,7 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Sol Dominion — rts-99-jam</title>
+    <title>Astromancy</title>
+    <meta name="description" content="Astromancy — Space · Magic · Real-Time Strategy." />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Astromancy" />
+    <meta property="og:description" content="Space · Magic · Real-Time Strategy" />
+    <meta property="og:image" content="https://rubentipparach.github.io/rts-99-jam/social-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Astromancy" />
+    <meta name="twitter:description" content="Space · Magic · Real-Time Strategy" />
+    <meta name="twitter:image" content="https://rubentipparach.github.io/rts-99-jam/social-card.png" />
     <style>
       html, body { margin: 0; height: 100%; width: 100%; overflow: hidden; background: #070b14; }
       canvas { display: block; touch-action: none; }
@@ -43,6 +52,8 @@
         border: 4px solid rgba(120, 160, 210, 0.22); border-top-color: #ffb454; animation: spin 0.9s linear infinite; }
       @keyframes spin { to { transform: rotate(360deg); } }
     </style>
+    <link data-trunk rel="icon" href="favicon.png" />
+    <link data-trunk rel="copy-file" href="social-card.png" />
     <link data-trunk rel="rust" />
   </head>
   <body>
@@ -57,7 +68,7 @@
       <button id="rc-toggle" aria-label="right-click mode">RMB</button>
     </div>
     <div id="loading">
-      <div class="title">SOL DOMINION</div>
+      <div class="title">ASTROMANCY</div>
       <div class="sub">DEPLOYING FORCES…</div>
       <div class="ring"></div>
     </div>

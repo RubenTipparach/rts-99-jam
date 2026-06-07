@@ -68,7 +68,6 @@ impl Camera {
         Some((hit.x, hit.z))
     }
 
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn project(&self, world: Vec3, w: f32, h: f32) -> Option<(f32, f32)> {
         let clip = self.mat(w / h) * world.extend(1.0);
         if clip.w <= 0.0001 {
@@ -76,6 +75,14 @@ impl Camera {
         }
         let ndc = clip.xyz() / clip.w;
         Some(((ndc.x * 0.5 + 0.5) * w, (1.0 - (ndc.y * 0.5 + 0.5)) * h))
+    }
+
+    /// Recenter the camera on a world point (used by minimap clicks).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn look_at(&mut self, wx: f32, wz: f32) {
+        let lim = 560.0;
+        self.target.x = wx.clamp(-lim, lim);
+        self.target.y = wz.clamp(-lim, lim);
     }
 
     pub fn zoom(&mut self, units: f32) {

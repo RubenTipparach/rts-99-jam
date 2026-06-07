@@ -174,6 +174,9 @@ struct App {
     camera: Camera,
     input: Input,
     last_frame: Instant,
+    /// Set once a touch is seen, so edge-panning (a mouse affordance) is
+    /// disabled on touch devices — the d-pad pans there instead.
+    pointer_is_touch: bool,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     last_css: (u32, u32),
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -191,6 +194,7 @@ impl App {
             camera: Camera::default(),
             input: Input::default(),
             last_frame: Instant::now(),
+            pointer_is_touch: false,
             last_css: (0, 0),
             first_frame_done: false,
             proxy,
@@ -203,6 +207,38 @@ impl App {
             .map(|g| (g.width as f32, g.height as f32))
             .unwrap_or((1.0, 1.0))
     }
+
+    /// If a building is selected and the point is on its Train button, queue a
+    /// unit and report that the click was consumed (web HUD only).
+    #[cfg(target_arch = "wasm32")]
+    fn train_button_hit(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
+        if self.game.selected_barracks().is_none() {
+            return false;
+        }
+        let (x0, y0, x1, y1) = hud::train_button_rect(w, h);
+        if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
+            self.game.train_selected();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// If the point is on the minimap, recenter the camera there and report the
+    /// click consumed (web HUD only).
+    #[cfg(target_arch = "wasm32")]
+    fn minimap_jump(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
+        let (x0, y0, x1, y1) = hud::minimap_rect(w, h);
+        if x1 <= x0 || y1 <= y0 || cx < x0 || cx > x1 || cy < y0 || cy > y1 {
+            return false;
+        }
+        let nx = ((cx - x0) / (x1 - x0)).clamp(0.0, 1.0);
+        let nz = ((cy - y0) / (y1 - y0)).clamp(0.0, 1.0);
+        let wx = nx * 2.0 * terrain::HALF - terrain::HALF;
+        let wz = nz * 2.0 * terrain::HALF - terrain::HALF;
+        self.camera.look_at(wx, wz);
+        true
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -212,7 +248,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
         event_loop.set_control_flow(ControlFlow::Poll);
 
-        let mut attrs = Window::default_attributes().with_title("Sol Dominion");
+        let mut attrs = Window::default_attributes().with_title("Astromancy");
         #[cfg(target_arch = "wasm32")]
         {
             use winit::platform::web::WindowAttributesExtWebSys;
@@ -249,10 +285,18 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::GfxReady(gfx) => {
-                self.gfx = Some(gfx);
+            UserEvent::GfxReady(mut gfx) => {
+                // A Resized event can fire while the GPU is still initializing
+                // (gfx is None then, so it's dropped). Sync the surface to the
+                // window's real size now, or the first frames render at the
+                // stale tiny size — a single pixel stretched to full screen.
                 if let Some(w) = &self.window {
+                    let s = w.inner_size();
+                    gfx.resize(s.width, s.height);
+                    self.gfx = Some(gfx);
                     w.request_redraw();
+                } else {
+                    self.gfx = Some(gfx);
                 }
             }
         }
@@ -274,6 +318,9 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
                         KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
                         KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
+                        KeyCode::KeyT if down => self.game.train_selected(),
+                        KeyCode::Digit1 if down => self.game.toggle_fog_unexplored(),
+                        KeyCode::Digit2 if down => self.game.toggle_fog_explored(),
                         _ => {}
                     }
                 }
@@ -284,17 +331,20 @@ impl ApplicationHandler<UserEvent> for App {
                 match button {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
-                            self.input.left_press = Some((cx, cy));
+                            #[cfg(target_arch = "wasm32")]
+                            let consumed = self.train_button_hit(cx, cy, w, h)
+                                || self.minimap_jump(cx, cy, w, h);
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let consumed = false;
+                            if !consumed {
+                                self.input.left_press = Some((cx, cy));
+                            }
                         } else if let Some((px, py)) = self.input.left_press.take() {
                             if (px - cx).hypot(py - cy) < 8.0 {
-                                if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                                    self.game.select_single(wx, wz);
-                                }
-                            } else if let (Some(a), Some(b)) = (
-                                self.camera.ground_pick(px, py, w, h),
-                                self.camera.ground_pick(cx, cy, w, h),
-                            ) {
-                                self.game.select_box(a.0, a.1, b.0, b.1);
+                                self.game.select_single(&self.camera, w, h, cx, cy);
+                            } else {
+                                let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
+                                self.game.select_box_screen(&self.camera, w, h, rect);
                             }
                         }
                     }
@@ -325,14 +375,19 @@ impl ApplicationHandler<UserEvent> for App {
                 use winit::event::TouchPhase;
                 let (cx, cy) = (touch.location.x as f32, touch.location.y as f32);
                 self.input.cursor = (cx, cy);
-                self.input.cursor_in = true;
+                self.pointer_is_touch = true;
                 match touch.phase {
                     TouchPhase::Started => self.input.left_press = Some((cx, cy)),
                     TouchPhase::Moved => {}
                     TouchPhase::Cancelled => self.input.left_press = None,
                     TouchPhase::Ended => {
-                        if let Some((px, py)) = self.input.left_press.take() {
-                            let (w, h) = self.dims();
+                        let pressed = self.input.left_press.take();
+                        let (w, h) = self.dims();
+                        #[cfg(target_arch = "wasm32")]
+                        if self.train_button_hit(cx, cy, w, h) || self.minimap_jump(cx, cy, w, h) {
+                            return;
+                        }
+                        if let Some((px, py)) = pressed {
                             #[cfg(target_arch = "wasm32")]
                             let rc = mobile::snapshot().rc_mode;
                             #[cfg(not(target_arch = "wasm32"))]
@@ -342,14 +397,10 @@ impl ApplicationHandler<UserEvent> for App {
                                     self.game.order(wx, wz);
                                 }
                             } else if (px - cx).hypot(py - cy) < 8.0 {
-                                if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                                    self.game.select_single(wx, wz);
-                                }
-                            } else if let (Some(a), Some(b)) = (
-                                self.camera.ground_pick(px, py, w, h),
-                                self.camera.ground_pick(cx, cy, w, h),
-                            ) {
-                                self.game.select_box(a.0, a.1, b.0, b.1);
+                                self.game.select_single(&self.camera, w, h, cx, cy);
+                            } else {
+                                let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
+                                self.game.select_box_screen(&self.camera, w, h, rect);
                             }
                         }
                     }
@@ -368,15 +419,29 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                 }
+                // Self-heal: keep the GPU surface == winit's canvas size, in case
+                // a Resized event was missed (e.g. during async GPU startup).
+                #[cfg(target_arch = "wasm32")]
+                if let Some(win) = self.window.as_ref() {
+                    let s = win.inner_size();
+                    if s.width > 1 && s.height > 1 {
+                        if let Some(g) = self.gfx.as_mut() {
+                            if g.width != s.width || g.height != s.height {
+                                g.resize(s.width, s.height);
+                            }
+                        }
+                    }
+                }
                 let now = Instant::now();
                 let dt = (now - self.last_frame).as_secs_f32().min(0.1);
                 self.last_frame = now;
 
                 let mut fwd = (self.input.fwd as i32 - self.input.back as i32) as f32;
                 let mut right = (self.input.right as i32 - self.input.left as i32) as f32;
-                // Edge panning: scroll the camera when the cursor rests near a
-                // screen edge (only while the pointer is inside the window).
-                if self.input.cursor_in {
+                // Edge panning: scroll the camera when the mouse rests near a
+                // screen edge. Disabled on touch (the d-pad pans there) so a
+                // resting finger position can't make the camera drift forever.
+                if self.input.cursor_in && !self.pointer_is_touch {
                     let (sw, sh) = self.dims();
                     let (cx, cy) = self.input.cursor;
                     const EDGE: f32 = 28.0;
@@ -484,4 +549,22 @@ fn main() {
         let _ = console_log::init_with_level(log::Level::Info);
     }
     run();
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod shader_tests {
+    // wgpu compiles WGSL at pipeline-creation time, so a malformed shader would
+    // only blow up on the GPU. Validate it here (same naga wgpu uses) so CI
+    // catches it.
+    #[test]
+    fn wgsl_compiles_and_validates() {
+        let src = include_str!("shader.wgsl");
+        let module = naga::front::wgsl::parse_str(src).expect("shader.wgsl should parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("shader.wgsl should validate");
+    }
 }

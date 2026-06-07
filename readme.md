@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="assets/branding/logo.png" alt="Sol Dominion (working title)" width="680">
+  <img src="assets/branding/emblem.png" alt="Astromancy" width="300">
 </p>
 
-<p align="center"><em>Working title — branding in <a href="assets/branding/">assets/branding/</a></em></p>
+<p align="center"><em>Space · Magic · Real-Time Strategy — branding in <a href="assets/branding/">assets/branding/</a></em></p>
 
-# rts-99-jam
+# Astromancy
 
-A deterministic, lockstep real-time strategy engine in the lineage of *StarCraft*
-and *Planetary Annihilation* — built in **Rust** with a **wgpu** renderer (no
-Bevy).
+A deterministic, lockstep real-time strategy game of **space and magic**, in the
+lineage of *StarCraft* and *Planetary Annihilation* — built in **Rust** with a
+**wgpu** renderer (no Bevy). *(Repo: `rts-99-jam`.)*
 
 Targets: 100s–1000s of units, **120–160 FPS**, large flat **or** spherical maps,
 procedural generation, peer-to-peer multiplayer with server assist, and

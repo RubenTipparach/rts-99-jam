@@ -1,6 +1,7 @@
 //! Game glue: drives the deterministic sim, holds selection, turns input into
 //! commands, computes fog-of-war, and produces render + HUD data. Floats here.
 
+use crate::camera::Camera;
 use crate::gfx::{InstanceRaw, RingRaw, FOW_RES};
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
@@ -58,6 +59,9 @@ pub struct Game {
     pending: Vec<Command>,
     visible: Vec<bool>,
     explored: Vec<bool>,
+    /// Debug toggles: darken unexplored / explored areas (both on by default).
+    fog_unexplored: bool,
+    fog_explored: bool,
 }
 
 impl Default for Game {
@@ -115,6 +119,8 @@ impl Game {
             pending: setup,
             visible: vec![false; FOW_RES * FOW_RES],
             explored: vec![false; FOW_RES * FOW_RES],
+            fog_unexplored: true,
+            fog_explored: true,
         };
         g.step_now();
         g.prev = g.curr.clone();
@@ -127,10 +133,12 @@ impl Game {
         self.prev = self.curr.clone();
         self.world.step(&cmds);
         self.curr = self.world.snapshot();
+        // Keep any of the player's still-living entities selected (units AND
+        // buildings) — dropping buildings here deselected them every tick.
         let live: HashSet<u32> = self
             .curr
             .iter()
-            .filter(|s| s.owner == 0 && s.kind == Kind::Infantry)
+            .filter(|s| s.owner == 0)
             .map(|s| s.index)
             .collect();
         self.selected.retain(|i| live.contains(i));
@@ -199,6 +207,18 @@ impl Game {
         }
     }
 
+    pub fn toggle_fog_unexplored(&mut self) {
+        self.fog_unexplored = !self.fog_unexplored;
+    }
+    pub fn toggle_fog_explored(&mut self) {
+        self.fog_explored = !self.fog_explored;
+    }
+    /// (unexplored fog on, explored fog on) — for the debug readout.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn fog_flags(&self) -> (bool, bool) {
+        (self.fog_unexplored, self.fog_explored)
+    }
+
     pub fn recompute_fow(&mut self) {
         for v in self.visible.iter_mut() {
             *v = false;
@@ -209,11 +229,7 @@ impl Game {
             .filter(|s| s.owner == 0)
             .map(|s| {
                 let (wx, wz) = self.lerped(s);
-                let r = if s.kind == Kind::Barracks {
-                    125.0
-                } else {
-                    90.0
-                };
+                let r = if s.kind == Kind::Barracks { 62.5 } else { 45.0 };
                 (wx, wz, r)
             })
             .collect();
@@ -228,14 +244,16 @@ impl Game {
     /// (Units don't read this — they're shown/hidden outright via `revealed`.)
     pub fn fow_bytes(&self) -> Vec<u8> {
         let n = FOW_RES;
+        let explored_v = if self.fog_explored { 0.45 } else { 1.0 };
+        let unexplored_v = if self.fog_unexplored { 0.0 } else { 1.0 };
         let mut field = vec![0f32; n * n];
         for (i, v) in field.iter_mut().enumerate() {
             *v = if self.visible[i] {
                 1.0
             } else if self.explored[i] {
-                0.45
+                explored_v
             } else {
-                0.0
+                unexplored_v
             };
         }
         let r = 2i32;
@@ -258,6 +276,32 @@ impl Game {
         };
         let blurred = blur(&blur(&field, true), false);
         blurred.iter().map(|v| (v * 255.0) as u8).collect()
+    }
+
+    /// Fog brightness at normalized map coords (0..1) for the minimap: visible
+    /// bright, explored dim, unexplored dark (respecting the debug toggles).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn fog_brightness(&self, nx: f32, nz: f32) -> f32 {
+        let res = FOW_RES as i32;
+        let xc = (nx * res as f32) as i32;
+        let zc = (nz * res as f32) as i32;
+        if xc < 0 || zc < 0 || xc >= res || zc >= res {
+            return if self.fog_unexplored { 0.12 } else { 1.0 };
+        }
+        let i = (zc * res + xc) as usize;
+        if self.visible[i] {
+            1.0
+        } else if self.explored[i] {
+            if self.fog_explored {
+                0.5
+            } else {
+                1.0
+            }
+        } else if self.fog_unexplored {
+            0.12
+        } else {
+            1.0
+        }
     }
 
     fn cell_visible(&self, wx: f32, wz: f32) -> bool {
@@ -402,20 +446,6 @@ impl Game {
 
     // ---- input → selection / orders ----
 
-    fn nearest_player(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
-        let mut best: Option<(u32, f32)> = None;
-        for s in &self.curr {
-            if s.owner != 0 || s.kind != Kind::Infantry {
-                continue;
-            }
-            let d = (f(s.pos.x) - wx).hypot(f(s.pos.y) - wz);
-            if d <= r && best.is_none_or(|(_, bd)| d < bd) {
-                best = Some((s.index, d));
-            }
-        }
-        best.map(|(i, _)| i)
-    }
-
     fn nearest_enemy(&self, wx: f32, wz: f32, r: f32) -> Option<u32> {
         let mut best: Option<(u32, f32)> = None;
         for s in &self.curr {
@@ -435,24 +465,111 @@ impl Game {
         best.map(|(i, _)| i)
     }
 
-    pub fn select_single(&mut self, wx: f32, wz: f32) {
+    /// Select the player entity nearest the click, in screen space (units
+    /// first, then buildings). Screen-space picking works on slopes, where a
+    /// ground-plane pick would land past an elevated unit and miss it.
+    pub fn select_single(&mut self, cam: &Camera, w: f32, h: f32, sx: f32, sy: f32) {
         self.selected.clear();
-        if let Some(i) = self.nearest_player(wx, wz, 4.0) {
+        let mut best: Option<(u32, f32)> = None;
+
+        // Nearest infantry within a click radius.
+        let unit_r = (h * 0.03).max(18.0);
+        for s in &self.curr {
+            if s.owner != 0 || s.kind != Kind::Infantry {
+                continue;
+            }
+            let (wx, wz) = self.lerped(s);
+            let wy = terrain::height(wx, wz) + 1.4;
+            if let Some((px, py)) = cam.project(glam::Vec3::new(wx, wy, wz), w, h) {
+                let d = (px - sx).hypot(py - sy);
+                if d <= unit_r && best.is_none_or(|(_, bd)| d < bd) {
+                    best = Some((s.index, d));
+                }
+            }
+        }
+
+        // Otherwise the nearest building (larger radius — buildings are big).
+        if best.is_none() {
+            let bldg_r = (h * 0.06).max(36.0);
+            for s in &self.curr {
+                if s.owner != 0 || s.kind != Kind::Barracks {
+                    continue;
+                }
+                let (wx, wz) = self.lerped(s);
+                let wy = terrain::height(wx, wz) + 3.0;
+                if let Some((px, py)) = cam.project(glam::Vec3::new(wx, wy, wz), w, h) {
+                    let d = (px - sx).hypot(py - sy);
+                    if d <= bldg_r && best.is_none_or(|(_, bd)| d < bd) {
+                        best = Some((s.index, d));
+                    }
+                }
+            }
+        }
+
+        if let Some((i, _)) = best {
             self.selected.push(i);
         }
     }
 
-    pub fn select_box(&mut self, ax: f32, az: f32, bx: f32, bz: f32) {
-        let (x0, x1) = (ax.min(bx), ax.max(bx));
-        let (z0, z1) = (az.min(bz), az.max(bz));
+    /// The selected entity if it is exactly one of the player's buildings.
+    pub fn selected_barracks(&self) -> Option<u32> {
+        if self.selected.len() != 1 {
+            return None;
+        }
+        let i = self.selected[0];
+        self.curr
+            .iter()
+            .find(|s| s.index == i && s.owner == 0 && s.kind == Kind::Barracks)
+            .map(|s| s.index)
+    }
+
+    /// Queue a unit at the selected building.
+    pub fn train_selected(&mut self) {
+        if let Some(b) = self.selected_barracks() {
+            self.pending.push(Command::Train { building: b });
+        }
+    }
+
+    /// The local player's ore stockpile (for the HUD).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn player_ore(&self) -> f32 {
+        f(self.world.ore(0))
+    }
+
+    /// Ore cost to train one unit (for the HUD).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn train_cost(&self) -> f32 {
+        sim::TRAIN_COST as f32
+    }
+
+    /// (queued, build-progress 0..1) for the selected building, for the HUD.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn selected_production(&self) -> Option<(u32, f32)> {
+        let b = self.selected_barracks()?;
+        self.curr
+            .iter()
+            .find(|s| s.index == b)
+            .map(|s| (s.queued, f(s.build_frac)))
+    }
+
+    /// Box-select using the on-screen rectangle (pixel coordinates), matching
+    /// the drag preview exactly: each unit is projected to the screen and tested
+    /// against the rect. A world-space box would disagree with the preview under
+    /// the tilted camera (a screen rect maps to a ground trapezoid, not a box).
+    pub fn select_box_screen(&mut self, cam: &Camera, w: f32, h: f32, rect: (f32, f32, f32, f32)) {
+        let (x0, y0, x1, y1) = rect;
         self.selected.clear();
         for s in &self.curr {
             if s.owner != 0 || s.kind != Kind::Infantry {
                 continue;
             }
-            let (x, z) = (f(s.pos.x), f(s.pos.y));
-            if x >= x0 && x <= x1 && z >= z0 && z <= z1 {
-                self.selected.push(s.index);
+            let (wx, wz) = self.lerped(s);
+            // Same body point the preview projects (info().wy - 2.0).
+            let wy = terrain::height(wx, wz) + 1.4;
+            if let Some((sx, sy)) = cam.project(glam::Vec3::new(wx, wy, wz), w, h) {
+                if sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1 {
+                    self.selected.push(s.index);
+                }
             }
         }
     }
