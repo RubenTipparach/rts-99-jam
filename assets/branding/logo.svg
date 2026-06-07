@@ -14,7 +14,7 @@
 
   <!-- wordmark -->
   <text x="536" y="286" font-size="112" font-weight="800" letter-spacing="4" fill="url(#wm)">ASTROMANCY</text>
-  <text x="540" y="342" font-size="32" font-weight="600" letter-spacing="6" fill="#8aa3cc">SPACE · MAGIC · DETERMINISTIC RTS</text>
+  <text x="540" y="342" font-size="29" font-weight="600" letter-spacing="3" fill="#8aa3cc">SCIENCE FICTION · MAGIC · REAL-TIME STRATEGY</text>
   <line x1="542" y1="370" x2="1430" y2="370" stroke="#33507a" stroke-width="2" opacity="0.7"/>
   <text x="542" y="412" font-size="26" font-weight="500" letter-spacing="4" fill="#6f86ad">EX CINERE AD ASTRA — FROM THE ASHES, TO THE STARS</text>
 </svg>

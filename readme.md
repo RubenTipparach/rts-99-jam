@@ -2,7 +2,7 @@
   <img src="assets/branding/logo.png" alt="Astromancy" width="720">
 </p>
 
-<p align="center"><em>A deterministic RTS of space &amp; magic — branding in <a href="assets/branding/">assets/branding/</a></em></p>
+<p align="center"><em>Science Fiction · Magic · Real-Time Strategy — branding in <a href="assets/branding/">assets/branding/</a></em></p>
 
 # Astromancy
 
