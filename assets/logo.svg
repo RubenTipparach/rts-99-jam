@@ -40,6 +40,11 @@
       <stop offset="35%" stop-color="#aef4ff"/>
       <stop offset="100%" stop-color="#2bd0ff" stop-opacity="0"/>
     </radialGradient>
+    <radialGradient id="kraken" cx="42%" cy="30%" r="78%">
+      <stop offset="0%" stop-color="#2b4f64"/>
+      <stop offset="55%" stop-color="#153043"/>
+      <stop offset="100%" stop-color="#08111c"/>
+    </radialGradient>
     <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
       <feGaussianBlur stdDeviation="3.2"/>
     </filter>
@@ -127,6 +132,61 @@
       <!-- front of ring -->
       <path d="M -36,392 A 168,40 0 0 0 228,320" fill="none" stroke="#f3c982"
             stroke-width="6" opacity="0.9" transform="rotate(-22 96 356)"/>
+    </g>
+
+    <!-- ============ kraken strangling Saturn (NROL-39 energy) ============ -->
+    <g fill="url(#kraken)" stroke="#62d4f0" stroke-width="1.5" stroke-opacity="0.55"
+       stroke-linejoin="round">
+      <!-- back tentacles (drawn first; head/front tentacles cover their roots) -->
+      <!-- lunging up-right at the ship -->
+      <path d="M118,308 C160,287 196,247 209,208 C215,194 202,189 195,201
+               C178,242 147,277 107,296 C101,303 110,311 118,308 Z"/>
+      <!-- reaching right across toward center -->
+      <path d="M120,326 C160,330 192,322 210,305 C219,297 213,287 205,293
+               C186,308 159,315 122,314 C114,318 114,323 120,326 Z"/>
+      <!-- curling up-left -->
+      <path d="M82,316 C68,296 64,272 72,252 C76,243 85,246 84,255
+               C80,276 86,298 96,312 C94,318 88,319 82,316 Z"/>
+
+      <!-- squid-like mantle / head -->
+      <path d="M95,234 C117,238 127,270 121,300 C117,322 108,334 95,336
+               C82,334 73,322 69,300 C63,270 73,238 95,234 Z"/>
+      <!-- beak between the front tentacles -->
+      <path d="M88,332 L102,332 L95,344 Z" fill="#0a131d" stroke="none"/>
+
+      <!-- front tentacles: one wraps Saturn, two drape down the face -->
+      <path d="M120,316 C176,324 212,352 207,400 C205,423 189,432 188,416
+               C191,383 168,355 121,343 C113,337 114,321 120,316 Z"/>
+      <path d="M90,332 C80,374 89,414 112,441 C121,450 132,445 127,434
+               C106,410 101,375 112,336 C105,330 96,329 90,332 Z"/>
+      <path d="M74,332 C54,360 48,400 61,431 C67,444 79,441 75,430
+               C65,401 68,365 91,340 C85,333 79,329 74,332 Z"/>
+
+      <!-- angry brows + glowing eyes -->
+      <path d="M70,286 L93,297" fill="none" stroke="#0a131d" stroke-width="4.5"
+            stroke-linecap="round"/>
+      <path d="M122,288 L100,298" fill="none" stroke="#0a131d" stroke-width="4.5"
+            stroke-linecap="round"/>
+      <g stroke="none">
+        <circle cx="82" cy="300" r="6.5" fill="#ffcf33" filter="url(#glow)"/>
+        <circle cx="110" cy="302" r="6" fill="#ffcf33" filter="url(#glow)"/>
+        <circle cx="82" cy="300" r="5.4" fill="#ffe790"/>
+        <circle cx="110" cy="302" r="5" fill="#ffe790"/>
+        <ellipse cx="82" cy="300" rx="1.3" ry="5" fill="#160c03"/>
+        <ellipse cx="110" cy="302" rx="1.2" ry="4.6" fill="#160c03"/>
+      </g>
+
+      <!-- suckers along the visible tentacles -->
+      <g fill="#6f97ac" stroke="none">
+        <circle cx="100" cy="354" r="2.6"/><circle cx="98" cy="376" r="2.7"/>
+        <circle cx="101" cy="398" r="2.5"/><circle cx="110" cy="420" r="2.2"/>
+        <circle cx="82" cy="358" r="2.4"/><circle cx="79" cy="382" r="2.5"/>
+        <circle cx="80" cy="404" r="2.2"/>
+        <circle cx="150" cy="338" r="2.5"/><circle cx="178" cy="356" r="2.5"/>
+        <circle cx="197" cy="380" r="2.3"/><circle cx="198" cy="402" r="2.0"/>
+        <circle cx="150" cy="282" r="2.3"/><circle cx="176" cy="256" r="2.2"/>
+        <circle cx="194" cy="226" r="2.0"/>
+      </g>
     </g>
 
     <!-- ============ the ship ============ -->
