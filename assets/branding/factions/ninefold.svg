@@ -7,37 +7,35 @@
 <clipPath id="scene"><circle cx="240" cy="240" r="188"/></clipPath>
 <path id="arcTop" d="M 39,240 A 201,201 0 0 1 441,240"/>
 <path id="arcBottom" d="M 23,240 A 217,217 0 0 0 457,240"/>
-<mask id="moonmask"><rect x="0" y="0" width="480" height="480" fill="#fff"/><circle cx="338" cy="138" r="34" fill="#000"/></mask>
+
+<clipPath id="iris"><circle cx="240" cy="238" r="88"/></clipPath>
+
 </defs>
 <circle cx="240" cy="240" r="232" fill="#0c0a24" stroke="#e9cd84" stroke-width="3"/>
 <circle cx="240" cy="240" r="227" fill="none" stroke="#b69cff" stroke-width="1" opacity="0.45"/>
 <g clip-path="url(#scene)">
 <circle cx="240" cy="240" r="188" fill="url(#space)"/>
-<g fill="#ffffff"><circle cx="300" cy="92" r="1.4" opacity="0.8"/><circle cx="352" cy="150" r="1" opacity="0.6"/><circle cx="392" cy="210" r="1.2" opacity="0.7"/><circle cx="150" cy="170" r="1" opacity="0.6"/><circle cx="92" cy="210" r="1.1" opacity="0.6"/><circle cx="210" cy="118" r="0.9" opacity="0.6"/><circle cx="408" cy="270" r="1" opacity="0.5"/><circle cx="86" cy="280" r="0.9" opacity="0.5"/></g>
 
-<circle cx="320" cy="146" r="34" fill="#e7ebff" opacity="0.9" mask="url(#moonmask)"/>
-<path d="M240,278 L360,330 L322,338 L302,329 L282,340 L262,330 L240,344 L218,330 L198,340 L178,329 L158,338 L120,330 Z" fill="#0b0c14"/>
-<path d="M240,278 L360,330" stroke="#aeb9d6" stroke-width="1.6" opacity="0.7"/>
-<path d="M240,278 L120,330" stroke="#aeb9d6" stroke-width="1.6" opacity="0.7"/>
-<ellipse cx="240" cy="300" rx="44" ry="17" fill="#b69cff" opacity="0.13" filter="url(#softglow)"/>
-<path d="M214,238 C188,234 172,246 156,242 C172,250 188,250 214,250 Z" fill="#6e2733"/>
-<path d="M212,266 C214,249 266,249 268,266 L274,292 L206,292 Z" fill="#11111c"/>
-<path d="M214,232 L222,198 L240,222 L258,198 L266,232 C272,250 264,267 240,267 C216,267 208,250 214,232 Z" fill="#11111c"/>
-<rect x="208" y="235" width="64" height="14" rx="3" fill="#050509"/>
-<path d="M222,245 L235,241 L235,247 Z" fill="#b6ff5a" filter="url(#glow)"/>
-<path d="M258,245 L245,241 L245,247 Z" fill="#b6ff5a" filter="url(#glow)"/>
-<g fill="none" stroke="#cfd6ff" stroke-width="1.8" opacity="0.7" stroke-linecap="round">
-  <path d="M222,198 L240,222 L258,198"/>
-  <path d="M214,232 C214,250 224,262 240,265"/>
+
+<use href="#spark" transform="translate(129.7,202.2) scale(0.5)" color="#e6e6ff" opacity="0.95"/><use href="#spark" transform="translate(146.2,169.8) scale(0.5)" color="#e6e6ff" opacity="0.95"/><use href="#spark" transform="translate(171.8,144.2) scale(0.5)" color="#e6e6ff" opacity="0.95"/><use href="#spark" transform="translate(204.2,127.7) scale(0.5)" color="#e6e6ff" opacity="0.95"/><use href="#spark" transform="translate(240.0,122.0) scale(0.5)" color="#e6e6ff" opacity="0.95"/><use href="#spark" transform="translate(275.8,127.7) scale(0.5)" color="#e6e6ff" opacity="0.95"/><use href="#spark" transform="translate(308.2,144.2) scale(0.5)" color="#e6e6ff" opacity="0.95"/><use href="#spark" transform="translate(333.8,169.8) scale(0.5)" color="#e6e6ff" opacity="0.95"/><use href="#spark" transform="translate(350.3,202.2) scale(0.5)" color="#e6e6ff" opacity="0.95"/>
+<circle cx="240" cy="238" r="88" fill="#cbc6ee"/>
+<g clip-path="url(#iris)">
+  <circle cx="196" cy="206" r="11" fill="#9a90cc"/><circle cx="196" cy="206" r="11" fill="none" stroke="#dcd6f4" stroke-width="1.5" opacity="0.6"/><circle cx="208" cy="276" r="8" fill="#9a90cc"/><circle cx="208" cy="276" r="8" fill="none" stroke="#dcd6f4" stroke-width="1.3" opacity="0.55"/><circle cx="170" cy="244" r="6" fill="#9a90cc"/>
+  <circle cx="300" cy="252" r="88" fill="#6258a0"/>
+  <ellipse cx="200" cy="196" rx="40" ry="26" fill="#e4e0fa" opacity="0.5"/>
 </g>
-<use href="#spark" transform="translate(150,196) scale(0.42)" color="#cfd2ff" opacity="0.85"/>
-<use href="#spark" transform="translate(112,250) scale(0.36)" color="#cfd2ff" opacity="0.7"/>
+<path d="M158,210 A88,88 0 0 1 214,160" fill="none" stroke="#efeaff" stroke-width="2.5" opacity="0.6"/>
+<circle cx="240" cy="238" r="88" fill="none" stroke="#241d52" stroke-width="2"/>
+<path d="M240,150 C258,196 258,280 240,326 C222,280 222,196 240,150 Z" fill="#8ef04a" filter="url(#softglow)" opacity="0.55"/>
+<path d="M240,150 C258,196 258,280 240,326 C222,280 222,196 240,150 Z" fill="#130d24" stroke="#7be03a" stroke-width="2"/>
+<path d="M240,168 C249,200 249,276 240,308 C231,276 231,200 240,168 Z" fill="none" stroke="#b6ff6a" stroke-width="1.4" opacity="0.7"/>
+<ellipse cx="236" cy="186" rx="4" ry="9" fill="#e8ffd0" opacity="0.85"/>
 
 </g>
 <circle cx="240" cy="240" r="189" fill="none" stroke="#e9cd84" stroke-width="2.5"/>
 <circle cx="240" cy="240" r="184" fill="none" stroke="#b69cff" stroke-width="1" opacity="0.4"/>
 <text fill="#dfe0ff" font-size="27" font-weight="700" letter-spacing="4"><textPath href="#arcTop" startOffset="50%" text-anchor="middle">NINEFOLD</textPath></text>
-<text fill="#cfd2ff" font-size="11" font-weight="600" letter-spacing="2"><textPath href="#arcBottom" startOffset="50%" text-anchor="middle">MADE TO SERVE, BORN TO RULE</textPath></text>
+<text fill="#cfd2ff" font-size="11" font-weight="600" letter-spacing="1.5"><textPath href="#arcBottom" startOffset="50%" text-anchor="middle">MADE TO SERVE, BORN TO RULE</textPath></text>
 <use href="#spark" transform="translate(36,240) scale(0.7) rotate(45)" color="#b69cff"/>
 <use href="#spark" transform="translate(444,240) scale(0.7) rotate(45)" color="#b69cff"/>
 </svg>
