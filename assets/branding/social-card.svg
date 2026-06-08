@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="Astromancy"
+     viewBox="0 0 1200 630" width="1200" height="630" role="img" aria-label="Astromancers"
      font-family="'Eurostile','Bahnschrift','DejaVu Sans','Arial Narrow',sans-serif">
   <defs>
     <radialGradient id="bg" cx="50%" cy="40%" r="80%">
@@ -19,11 +19,11 @@
     <circle cx="1110" cy="300" r="1.5" opacity="0.6"/><circle cx="640" cy="520" r="1.2" opacity="0.5"/>
     <circle cx="1040" cy="470" r="1.3" opacity="0.5"/><circle cx="900" cy="560" r="1.1" opacity="0.5"/>
   </g>
-  <!-- the Astromancy mission patch -->
+  <!-- the Astromancers mission patch -->
   <image xlink:href="emblem.png" href="emblem.png" x="52" y="115" width="400" height="400"/>
   <!-- wordmark + taglines -->
-  <text x="496" y="286" font-size="76" font-weight="800" letter-spacing="3" fill="url(#wm)">ASTROMANCY</text>
+  <text x="496" y="286" font-size="66" font-weight="800" letter-spacing="2" fill="url(#wm)">ASTROMANCERS</text>
   <text x="500" y="334" font-size="23" font-weight="600" letter-spacing="3" fill="#8aa3cc">SPACE · MAGIC · REAL-TIME STRATEGY</text>
   <line x1="502" y1="360" x2="1120" y2="360" stroke="#33507a" stroke-width="2" opacity="0.7"/>
-  <text x="502" y="398" font-size="18" font-weight="500" letter-spacing="3" fill="#6f86ad">EX CINERE AD ASTRA — FROM THE ASHES, TO THE STARS</text>
+  <text x="502" y="398" font-size="18" font-weight="500" letter-spacing="3" fill="#6f86ad">EX CINERE AD ASTRA - FROM THE ASHES, TO THE STARS</text>
 </svg>

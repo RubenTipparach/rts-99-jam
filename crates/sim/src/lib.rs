@@ -7,7 +7,7 @@
 //! See `docs/architecture/01-determinism.md` and `02-simulation.md`.
 //!
 //! This models a small but real RTS slice: infantry and barracks for two
-//! factions, production, movement, and combat — enough to fight over a base.
+//! factions, production, movement, and combat - enough to fight over a base.
 
 #![forbid(unsafe_code)]
 
@@ -76,7 +76,7 @@ const MAX_QUEUE: u32 = 6;
 
 // Economy: a single resource ("ore"). Players start with a stockpile, gain a
 // trickle of income per owned building, and pay per trained unit. Nobody
-// auto-produces — every unit is queued by command.
+// auto-produces - every unit is queued by command.
 const STARTING_ORE: i32 = 200;
 pub const TRAIN_COST: i32 = 50;
 const INCOME_PER_BUILDING: Fx = Fx::from_ratio(1, 2); // per building, per tick
@@ -389,7 +389,7 @@ impl World {
             if self.prod[i] > Fx::ZERO {
                 continue;
             }
-            // Built — but hold (without consuming the queue) if at the unit cap.
+            // Built - but hold (without consuming the queue) if at the unit cap.
             if self.team_unit_count(self.owner[i]) >= TEAM_UNIT_CAP {
                 continue;
             }
@@ -740,7 +740,7 @@ mod tests {
 
     #[test]
     fn no_barracks_auto_produces() {
-        // Nobody auto-produces — an idle barracks (any owner) stays alone.
+        // Nobody auto-produces - an idle barracks (any owner) stays alone.
         for owner in [0u16, 1] {
             let mut w = World::new(7);
             w.step(&[Command::SpawnBuilding {

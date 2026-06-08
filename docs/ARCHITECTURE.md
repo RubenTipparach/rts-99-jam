@@ -1,8 +1,8 @@
-# Architecture — Deterministic Lockstep RTS (Rust + wgpu)
+# Architecture - Deterministic Lockstep RTS (Rust + wgpu)
 
 > A StarCraft-class real-time strategy engine: deterministic lockstep simulation,
-> 100s–1000s of units, 120–160 FPS rendering, large (flat **or** spherical) maps,
-> procedural generation, and first-class AI bots — built on **Rust** and **wgpu**
+> 100s-1000s of units, 120-160 FPS rendering, large (flat **or** spherical) maps,
+> procedural generation, and first-class AI bots - built on **Rust** and **wgpu**
 > (no Bevy).
 
 This is the top-level map. Each requirement from the brief has a dedicated chapter
@@ -16,7 +16,7 @@ establishes the two invariants that every other chapter depends on.
 Everything in this design follows from two rules. If you remember nothing else,
 remember these.
 
-### Invariant A — Two worlds, one wall
+### Invariant A - Two worlds, one wall
 
 The codebase is split into a **Simulation world** and a **Presentation world**,
 separated by a hard wall.
@@ -25,7 +25,7 @@ separated by a hard wall.
 |---|---|---|
 | **Purpose** | Game truth (what *is*) | Game appearance (what you *see*) |
 | **Numbers** | Fixed-point integers only | `f32` / `f64`, freely |
-| **Clock** | Fixed timestep, ~20–30 Hz | Display rate, 120–160 Hz |
+| **Clock** | Fixed timestep, ~20-30 Hz | Display rate, 120-160 Hz |
 | **Determinism** | Bit-identical on every machine | Irrelevant; may differ per machine |
 | **Inputs** | Commands only | Reads a snapshot of the sim |
 | **Examples** | unit position, HP, pathing, RNG, AI decisions | camera, interpolation, particles, animation blending, screen-shake, sound |
@@ -35,7 +35,7 @@ separated by a hard wall.
 > **never** write to it, and nothing it computes (a float, a GPU result, a frame
 > time) may flow back across the wall. Break this once and multiplayer desyncs.
 
-### Invariant B — Commands in, snapshots out
+### Invariant B - Commands in, snapshots out
 
 The simulation is a pure function:
 
@@ -50,7 +50,7 @@ next_state = step(current_state, commands_for_this_tick)
   makes replays a 1 KB file. See [Networking](architecture/03-networking-lockstep.md).
 
 These two invariants are the reason a lockstep RTS can exist at all. Chapter
-[01 — Determinism](architecture/01-determinism.md) is the rulebook that keeps
+[01 - Determinism](architecture/01-determinism.md) is the rulebook that keeps
 them true.
 
 ---
@@ -63,7 +63,7 @@ them true.
    rendering interpolates and runs as fast as the GPU allows.
 3. **Scale by amortization, not brute force.** 1000s of units come from GPU
    instancing + indirect culling (render) and flow fields + spatial hashing
-   (sim) — never per-unit draw calls or per-unit A*.
+   (sim) - never per-unit draw calls or per-unit A*.
 4. **AI is a player, not a subsystem.** Bots emit the same `Command`s a human
    does, through the same API. Built alongside everything else, they double as
    our automated test harness (headless bot-vs-bot).
@@ -166,7 +166,7 @@ flowchart TD
 ```
 
 ```rust
-// apps/client — the heartbeat. Simplified.
+// apps/client - the heartbeat. Simplified.
 const TICK_HZ: u32 = 25;
 const TICK_DT: Fixed = Fixed::ONE / TICK_HZ;   // sim timestep (fixed-point)
 const INPUT_DELAY: u32 = 3;                      // ticks of latency we hide
@@ -174,13 +174,13 @@ const INPUT_DELAY: u32 = 3;                      // ticks of latency we hide
 let mut accumulator = 0.0f64;                    // wall time is PRESENTATION-only
 let mut prev = sim.snapshot();
 loop {
-    let dt = frame_timer.tick();                 // real seconds, f64 — never enters sim
+    let dt = frame_timer.tick();                 // real seconds, f64 - never enters sim
     input.drain_into(&mut local_cmds);
     accumulator += dt;
 
     while accumulator >= TICK_DT.to_f64() {
         if !net.commands_ready(sim.tick() + 1) {
-            break;                               // lockstep stall — render last good state
+            break;                               // lockstep stall - render last good state
         }
         net.send(sim.tick() + INPUT_DELAY, local_cmds.take());
         let cmds = net.commands_for(sim.tick() + 1);
@@ -191,7 +191,7 @@ loop {
     }
 
     let alpha = (accumulator / TICK_DT.to_f64()) as f32;
-    renderer.draw(&prev, sim.current(), alpha);  // interpolated, 120–160 FPS
+    renderer.draw(&prev, sim.current(), alpha);  // interpolated, 120-160 FPS
 }
 ```
 
@@ -200,7 +200,7 @@ Why this shape:
 - **Determinism**: `sim.step` only ever sees commands. The variable `dt`,
   `accumulator`, and `alpha` are presentation-only and never touch the sim.
 - **High FPS over a slow sim**: at 25 Hz sim and 144 Hz display we render ~6
-  interpolated frames per tick — smooth motion without simulating more often.
+  interpolated frames per tick - smooth motion without simulating more often.
 - **Latency hiding**: commands issued now execute `INPUT_DELAY` ticks later, so
   remote commands arrive "just in time." See
   [Networking](architecture/03-networking-lockstep.md).
@@ -228,7 +228,7 @@ sequenceDiagram
     SIM->>NET: state_hash(T) for desync detection
 ```
 
-Note that AI and human input enter at the **same point** (`CommandBuffer`) — the
+Note that AI and human input enter at the **same point** (`CommandBuffer`) - the
 core of "AI is a player." See [AI Bots](architecture/09-ai-bots.md).
 
 ---
@@ -239,7 +239,7 @@ core of "AI is a player." See [AI Bots](architecture/09-ai-bots.md).
 |---|---------|--------------------------|
 | 00 | [Overview](architecture/00-overview.md) | Vision, glossary, references, reading order |
 | 01 | [Determinism](architecture/01-determinism.md) | The foundation: fixed-point, RNG, ordering, checksums, pitfalls |
-| 02 | [Simulation & data model](architecture/02-simulation.md) | "Lots of units 100s–1000s", ECS/SoA, scheduling |
+| 02 | [Simulation & data model](architecture/02-simulation.md) | "Lots of units 100s-1000s", ECS/SoA, scheduling |
 | 03 | [Networking & lockstep](architecture/03-networking-lockstep.md) | "Multiplayer (WebRTC/WS, P2P + server assist)", replays |
 | 04 | [Rendering (wgpu)](architecture/04-rendering-wgpu.md) | "3D model, shaders", "vertex lighting", high frame rate, scale |
 | 05 | [Animation](architecture/05-animation.md) | "Animations" at crowd scale |
@@ -282,14 +282,14 @@ branches; pick to prune.
 1. **Map topology default.** Flat (StarCraft) is the default; spherical/planetary
    (Planetary Annihilation) is supported via a `Topology` abstraction in
    `pathfind`/`worldgen`. Confirm whether spherical is *the* mode or an option.
-   ("Spherical A*" in the brief suggests at least an option — see
+   ("Spherical A*" in the brief suggests at least an option - see
    [Ch.07](architecture/07-pathfinding-navigation.md).)
 2. **Web/WASM as a first-class target?** If yes, WebRTC is mandatory and a few
    render features tighten to the WebGPU subset. If native-only, QUIC simplifies
    networking. Default assumption: **both**.
 3. **Netcode model.** Default is **deterministic lockstep + input delay** (correct
    for RTS scale). Rollback (GGPO-style) is discussed but *not* recommended for
-   1000s of units — re-simulating crowds on every rollback is too costly.
+   1000s of units - re-simulating crowds on every rollback is too costly.
 4. **Art style.** "Lots of vertex lighting" reads as a stylized/low-poly look,
    which is also the cheapest path to 1000s of units at 144 FPS. Confirm if you
    instead want full PBR per-pixel (more cost, fewer units).

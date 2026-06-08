@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Astromancy logo"
+     viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Astromancers logo"
      font-family="'Eurostile','Bahnschrift','DejaVu Sans','Arial Narrow',sans-serif">
   <defs>
     <radialGradient id="bg" cx="50%" cy="42%" r="70%">
@@ -14,9 +14,9 @@
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" fill="url(#bg)"/>
-  <!-- the Astromancy mission patch -->
+  <!-- the Astromancers mission patch -->
   <image xlink:href="emblem.png" href="emblem.png" x="182" y="54" width="660" height="660"/>
   <!-- wordmark + tagline -->
-  <text x="512" y="852" text-anchor="middle" font-size="112" font-weight="800" letter-spacing="4" fill="url(#wm)">ASTROMANCY</text>
+  <text x="512" y="852" text-anchor="middle" font-size="92" font-weight="800" letter-spacing="3" fill="url(#wm)">ASTROMANCERS</text>
   <text x="512" y="912" text-anchor="middle" font-size="29" font-weight="600" letter-spacing="6" fill="#8aa3cc">SPACE · MAGIC · REAL-TIME STRATEGY</text>
 </svg>

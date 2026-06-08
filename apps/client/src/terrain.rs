@@ -3,7 +3,7 @@
 
 pub const HALF: f32 = 600.0;
 pub const SEA_LEVEL: f32 = 0.0;
-/// The seabed never drops below this — shallow water (~10 m deep) instead of a
+/// The seabed never drops below this - shallow water (~10 m deep) instead of a
 /// bottomless bowl, so the floor reads cleanly under the surface.
 pub const SEABED: f32 = SEA_LEVEL - 10.0;
 

@@ -1,4 +1,4 @@
-# 08 — Procedural Map Generation (large maps)
+# 08 - Procedural Map Generation (large maps)
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Pathfinding](07-pathfinding-navigation.md) · [Next: AI Bots](09-ai-bots.md)
 
@@ -10,7 +10,7 @@
 
 ## 1. The determinism requirement (this is the catch)
 
-Two peers with different terrain desync instantly — a "passable" cliff on one
+Two peers with different terrain desync instantly - a "passable" cliff on one
 machine is a wall on another. So map generation is bound by the same rules as the
 sim:
 
@@ -21,7 +21,7 @@ flowchart LR
     map --> q["Quantize to fixed-point grid / geodesic cells"]
     q --> hash["map_hash exchanged at start -> verify all peers agree"]
     hash -->|match| play["Begin match"]
-    hash -->|mismatch| abort["Abort — content/version divergence (Ch.03 §7)"]
+    hash -->|mismatch| abort["Abort - content/version divergence (Ch.03 §7)"]
 ```
 
 Two valid strategies (we use the first, with the second as a safety net):
@@ -36,7 +36,7 @@ Two valid strategies (we use the first, with the second as a safety net):
 ([Ch.03 §7](03-networking-lockstep.md)) so a mismatch is caught before tick 0
 rather than as a mid-game desync.
 
-### Floats in generation — handled carefully
+### Floats in generation - handled carefully
 
 Noise functions are naturally floating-point. Two ways to stay safe:
 
@@ -69,19 +69,19 @@ graph TD
     d --> nav["8. Build nav structures (grid sectors / navmesh, Ch.07)"]
 ```
 
-1. **Elevation** — fractal/layered noise (Perlin/Simplex/OpenSimplex2 via the
+1. **Elevation** - fractal/layered noise (Perlin/Simplex/OpenSimplex2 via the
    `noise` crate, or value noise) to a heightmap; domain warping for natural
    shapes.
-2. **Hydrology** — sea level, lakes, optional river carving / light erosion.
-3. **Biomes** — assign by elevation + moisture (+ latitude on a sphere): grass,
-   desert, rock, snow — drives textures and movement cost.
-4. **Passability** — slope/water/cliff thresholds mark cells walkable or not,
+2. **Hydrology** - sea level, lakes, optional river carving / light erosion.
+3. **Biomes** - assign by elevation + moisture (+ latitude on a sphere): grass,
+   desert, rock, snow - drives textures and movement cost.
+4. **Passability** - slope/water/cliff thresholds mark cells walkable or not,
    feeding the `Topology` ([Ch.07](07-pathfinding-navigation.md)).
-5. **Resources** — place economy nodes (StarCraft minerals/gas analog) by rules.
-6. **Start locations** — see §4 (fairness).
-7. **Decoration** — purely visual props; **presentation-only**, can use floats and
+5. **Resources** - place economy nodes (StarCraft minerals/gas analog) by rules.
+6. **Start locations** - see §4 (fairness).
+7. **Decoration** - purely visual props; **presentation-only**, can use floats and
    even differ cosmetically per machine ([Ch.01](01-determinism.md)).
-8. **Nav build** — precompute sectors/portals/flow-field scaffolding or navmesh
+8. **Nav build** - precompute sectors/portals/flow-field scaffolding or navmesh
    ([Ch.07](07-pathfinding-navigation.md)); deterministic + hashed.
 
 ## 3. Flat vs spherical generation
@@ -92,7 +92,7 @@ graph TD
   (no seams, no pole distortion) and write per-geodesic-cell values; optionally a
   light **tectonic/plate** pass for continents (the Planetary-Annihilation look).
   Start locations and resources are placed on the geodesic grid. Same pipeline,
-  different sampling domain — the staged design above is topology-agnostic.
+  different sampling domain - the staged design above is topology-agnostic.
 
 ## 4. Large maps & fairness
 
@@ -107,7 +107,7 @@ graph TD
 - **Reachability validation**: after generation, a deterministic flood-fill
   confirms all start locations and resources are mutually reachable
   ([Ch.07](07-pathfinding-navigation.md)); if not, perturb the seed and
-  regenerate (deterministically) — never ship an unplayable map.
+  regenerate (deterministically) - never ship an unplayable map.
 
 ## 5. Verification & tooling
 
@@ -116,6 +116,6 @@ graph TD
 - A **headless generator** (in `testkit`/`worldgen`) renders previews and runs the
   reachability/fairness checks in CI for a range of seeds
   ([Ch.10](10-roadmap-testing.md)).
-- Because generation is seed-deterministic, **a map is just a seed + params** —
+- Because generation is seed-deterministic, **a map is just a seed + params** -
   shareable as a short string, and reproducible forever (same property that makes
   replays tiny, [Ch.03 §6](03-networking-lockstep.md)).

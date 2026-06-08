@@ -2,11 +2,11 @@
 //!
 //! Lives *inside* the world state and is part of the hashed state
 //! (`docs/architecture/01-determinism.md`). The algorithm is **pinned**
-//! (SplitMix64) and must never change without bumping the sim version — every
+//! (SplitMix64) and must never change without bumping the sim version - every
 //! peer must draw the same sequence in the same order. Never use `rand`'s
 //! thread RNG in the sim: it is OS-seeded and non-portable.
 
-/// SplitMix64 — a small, fast, fully deterministic PRNG.
+/// SplitMix64 - a small, fast, fully deterministic PRNG.
 #[derive(Clone, Debug)]
 pub struct DetRng {
     state: u64,

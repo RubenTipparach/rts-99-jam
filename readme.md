@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="assets/branding/emblem.png" alt="Astromancy" width="300">
+  <img src="assets/branding/logo.png" alt="Astromancers - Space · Magic · Real-Time Strategy" width="760">
 </p>
 
-<p align="center"><em>Space · Magic · Real-Time Strategy — branding in <a href="assets/branding/">assets/branding/</a></em></p>
+<p align="center"><em>Brand kit in <a href="assets/branding/">assets/branding/</a></em></p>
 
-# Astromancy
+# Astromancers
 
 A deterministic, lockstep real-time strategy game of **space and magic**, in the
-lineage of *StarCraft* and *Planetary Annihilation* — built in **Rust** with a
+lineage of *StarCraft* and *Planetary Annihilation* - built in **Rust** with a
 **wgpu** renderer (no Bevy). *(Repo: `rts-99-jam`.)*
 
-Targets: 100s–1000s of units, **120–160 FPS**, large flat **or** spherical maps,
+Targets: 100s-1000s of units, **120-160 FPS**, large flat **or** spherical maps,
 procedural generation, peer-to-peer multiplayer with server assist, and
 first-class AI bots.
 
@@ -18,9 +18,9 @@ first-class AI bots.
 
 The design is documented in full:
 
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** — start here: the two invariants, the
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - start here: the two invariants, the
   dual-clock game loop, the crate workspace, and the chapter index.
-- **[docs/architecture/](docs/architecture/)** — one chapter per concern:
+- **[docs/architecture/](docs/architecture/)** - one chapter per concern:
 
   | # | Chapter | Topic |
   |---|---------|-------|
@@ -41,7 +41,7 @@ The design is documented in full:
 Only **commands** cross the network; every machine runs a **bit-identical
 deterministic simulation** (fixed-point math, no floats) so 1000s of units cost
 almost no bandwidth. The sim ticks slowly and exactly (~25 Hz) while the **wgpu**
-renderer **interpolates** between sim states at 120–160 FPS. Scale comes from GPU
+renderer **interpolates** between sim states at 120-160 FPS. Scale comes from GPU
 instancing + indirect culling (rendering) and flow-field pathing + spatial hashing
 (simulation). **AI bots emit the same commands a human does**, run deterministically
 in-sim at no network cost, and double as the automated test harness. See
@@ -49,8 +49,8 @@ in-sim at no network cost, and double as the automated test harness. See
 
 ## Status
 
-**Milestone 0 — deterministic core (in progress).** The foundation is built and
-tested: a Cargo workspace with dependency-free, integer-only crates —
+**Milestone 0 - deterministic core (in progress).** The foundation is built and
+tested: a Cargo workspace with dependency-free, integer-only crates -
 `math` (fixed-point scalar/vector), `protocol` (commands), `sim` (generational-arena
 SoA world + pinned RNG + FNV state hash + `step()`), `replay`, and a `testkit`
 headless harness. The keystone determinism test pins a cross-platform state hash,

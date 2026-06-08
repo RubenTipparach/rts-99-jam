@@ -1,4 +1,4 @@
-# 03 — Networking & Lockstep Multiplayer
+# 03 - Networking & Lockstep Multiplayer
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Simulation](02-simulation.md) · [Next: Rendering](04-rendering-wgpu.md)
 
@@ -15,8 +15,8 @@ commands players issue**, not unit state. The bandwidth math is decisive:
 
 | Approach | Per-player bandwidth with 1000 units |
 |---|---|
-| State sync (send unit positions) | ~hundreds of KB/s up & down — infeasible |
-| **Lockstep (send commands)** | a few **bytes** per command, a few commands/sec — trivial |
+| State sync (send unit positions) | ~hundreds of KB/s up & down - infeasible |
+| **Lockstep (send commands)** | a few **bytes** per command, a few commands/sec - trivial |
 
 Two deterministic netcodes exist:
 
@@ -28,9 +28,9 @@ Two deterministic netcodes exist:
 
 **We choose lockstep + input delay.** Rollback is brilliant for fighting games
 (2 players, tiny state) but wrong here: rolling back means re-simulating **1000s
-of units across several ticks every time a prediction misses** — far too
+of units across several ticks every time a prediction misses** - far too
 expensive at RTS scale, and our state is huge to snapshot per frame. Lockstep's
-only downside — input latency — is hidden by input delay and is acceptable for
+only downside - input latency - is hidden by input delay and is acceptable for
 RTS (you're commanding armies, not frame-counting parries).
 
 > This is **Open Decision #3** in [ARCHITECTURE.md §8](../ARCHITECTURE.md). The
@@ -41,7 +41,7 @@ RTS (you're commanding armies, not frame-counting parries).
 Time is divided into **ticks** ([Ch.00 glossary](00-overview.md)). Commands issued
 during tick *T* are tagged to **execute at tick `T + INPUT_DELAY`**. A peer may
 simulate tick *T* only once it holds *every* peer's command set for *T* (possibly
-empty — "I did nothing this tick" is itself a message).
+empty - "I did nothing this tick" is itself a message).
 
 ```mermaid
 sequenceDiagram
@@ -60,7 +60,7 @@ sequenceDiagram
     R-->>A: hashes match ✔ (else flag desync)
 ```
 
-- **INPUT_DELAY** (e.g. 2–4 ticks) is the cushion that lets remote commands
+- **INPUT_DELAY** (e.g. 2-4 ticks) is the cushion that lets remote commands
   arrive before they're needed. Bigger delay = more lag tolerance but more
   perceived input lag.
 - **Adaptive latency** (StarCraft-style): measure RTT and grow/shrink the delay
@@ -69,7 +69,7 @@ sequenceDiagram
   a message so peers can advance.
 
 ```rust
-// crates/net — the lockstep gate the game loop calls (ARCHITECTURE.md §4).
+// crates/net - the lockstep gate the game loop calls (ARCHITECTURE.md §4).
 pub trait Lockstep {
     fn submit_local(&mut self, exec_tick: u64, cmds: Vec<Command>);
     fn commands_ready(&self, tick: u64) -> bool;       // have all peers' cmds?
@@ -81,14 +81,14 @@ pub trait Lockstep {
 ## 3. Handling latency, stalls & disconnects
 
 - **Stall**: if a peer's commands for the next tick haven't arrived, the sim
-  **cannot advance** — that's the lockstep contract. The loop renders the last
+  **cannot advance** - that's the lockstep contract. The loop renders the last
   good state and shows the classic *"Waiting for players…"* overlay (rendering
-  keeps running because it's on a separate clock — [ARCHITECTURE.md §4](../ARCHITECTURE.md)).
+  keeps running because it's on a separate clock - [ARCHITECTURE.md §4](../ARCHITECTURE.md)).
 - **Lag spikes**: input delay absorbs small ones; adaptive delay handles
   sustained latency without permanent input lag.
 - **Drop**: after a timeout, the relay declares a peer dropped, the remaining
   peers agree (the relay arbitrates), and the sim continues without them (their
-  units idle / go to an AI takeover — see [Ch.09](09-ai-bots.md)).
+  units idle / go to an AI takeover - see [Ch.09](09-ai-bots.md)).
 - **Reconnect / late join**: ship a **state snapshot** ([Ch.02 §8](02-simulation.md))
   to the rejoining/observing client, then stream subsequent commands. Pure
   command replay from tick 0 also works for observers but is slow for long games.
@@ -109,7 +109,7 @@ The brief asks "WebRTC/ws?". Here's the call and the reasoning.
   *requires* commands to arrive reliably and in order (a lost command desyncs
   everyone), so we don't use unreliable mode for commands. WebRTC works in the
   **browser and natively** (via [`str0m`](https://docs.rs/str0m), a sans-IO WebRTC
-  impl, or `webrtc`), giving us one transport everywhere — directly answering
+  impl, or `webrtc`), giving us one transport everywhere - directly answering
   "WebRTC/ws?".
 - **Signaling → WebSocket** to the relay (SDP/ICE exchange to establish WebRTC).
 - **QUIC** is offered as a native-only fast path if web support is dropped
@@ -143,13 +143,13 @@ graph TD
 2. **TURN fallback**: relays media when direct P2P fails behind strict NATs.
 3. **Command coordination ("server assist")**: collects each peer's per-tick
    commands, broadcasts the merged set, and provides a **single ordering
-   authority** — every peer sees commands in the same order, which removes a
+   authority** - every peer sees commands in the same order, which removes a
    whole class of ordering desyncs.
 4. **Desync arbitration**: collects `state_hash(T)` from peers, flags the odd one
    out, triggers state dumps ([Ch.01 §6](01-determinism.md)).
 5. **Drop arbitration & late-join snapshots** (§3).
 
-Crucially, the relay does **not** run the simulation — every peer does. It's
+Crucially, the relay does **not** run the simulation - every peer does. It's
 cheap to host (just shuffles small messages) and sidesteps P2P's NAT and
 trust-ordering headaches. When a direct P2P path is available and lower latency,
 peers may exchange commands directly and use the relay only for hashing/arbitration.
@@ -159,12 +159,12 @@ peers may exchange commands directly and use the relay only for hashing/arbitrat
 > client *has* the data; fog of war is enforced client-side). The relay's hash
 > arbitration catches *modified-sim* cheats (they desync). Server-authoritative
 > simulation would prevent info cheats but throws away the bandwidth win that
-> makes 1000s of units possible — not worth it here.
+> makes 1000s of units possible - not worth it here.
 
 ## 6. Replays & spectating (free from determinism)
 
 A replay is just the **map seed + start config + the full command log**. Re-feed
-it to the deterministic sim and the entire match reconstructs exactly — perfectly,
+it to the deterministic sim and the entire match reconstructs exactly - perfectly,
 in a tiny file.
 
 ```mermaid
@@ -178,13 +178,13 @@ flowchart LR
 - **Recording** (`crates/replay`): persist start config + every executed
   `CommandSet`. Negligible size.
 - **Playback**: run the sim from the log; the renderer attaches to its snapshots.
-  Free camera, variable speed, pause — because you're re-simulating, not playing
+  Free camera, variable speed, pause - because you're re-simulating, not playing
   a video.
 - **Spectators** are observers who receive the command stream (and an initial
   snapshot to skip the replay-from-zero wait, §3).
 - **Version safety**: a replay is only valid for the sim version that produced it.
   Stamp replays with a **sim-version + content hash**; refuse mismatches (a
-  changed Marine, hasher, or system order breaks determinism — [Ch.01](01-determinism.md)).
+  changed Marine, hasher, or system order breaks determinism - [Ch.01](01-determinism.md)).
 
 ## 7. Protocol & versioning (`crates/protocol`)
 
@@ -195,9 +195,9 @@ flowchart LR
   messages (`Hash`, `Ack`, `PlayerDropped`, `Snapshot`).
 - **Versioning**: protocol and sim share a version number. On connect, peers
   exchange `{ protocol_version, sim_version, content_hash }` and refuse to start
-  if any differ — divergent rules would desync immediately.
+  if any differ - divergent rules would desync immediately.
 - **Bandwidth**: even with all players spamming commands, this is a few KB/s.
-  Unit count is irrelevant to bandwidth — *that's the whole point of lockstep.*
+  Unit count is irrelevant to bandwidth - *that's the whole point of lockstep.*
 
 ## 8. Build order (so multiplayer is testable early)
 

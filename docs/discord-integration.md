@@ -1,22 +1,22 @@
-# Discord integration — setup
+# Discord integration - setup
 
 This game uses Discord for **sign-in**, for **finding your friends** (share a room
-code in chat, or hop in via a Discord invite), and — for the developer — for an
+code in chat, or hop in via a Discord invite), and - for the developer - for an
 **admin portal** gated to your Discord account. It can also post **match
 notifications** (a friend opened a room, your match is starting) either as DMs to
 opted-in players or to a channel webhook.
 
 There are two levels of setup:
 
-- **Login + admin (recommended):** full OAuth — players click **"Sign in with
+- **Login + admin (recommended):** full OAuth - players click **"Sign in with
   Discord,"** and your Discord ID unlocks the admin dashboard. Needs the client
   ID/secret below.
 - **Notifications only (minimal):** just a bot token (DMs) or a channel webhook,
   with no login.
 
-> Flavor note for the portal/app description: this is *Astromancy* — a
-> deterministic RTS of **space and magic**, where the wizard nation of Philosophia
-> and the tech-driven magicless fight across the solar system. Use that as the
+> Flavor note for the portal/app description: this is *Astromancers* - a
+> deterministic RTS of **space and magic**, where the wizard nation of the
+> Astromancers and the tech-driven magicless fight across the solar system. Use that as the
 > Discord application name/description so the consent screen reads on-brand.
 
 ---
@@ -25,11 +25,11 @@ There are two levels of setup:
 
 In the [Discord Developer Portal](https://discord.com/developers/applications):
 
-1. **New Application** → name it (e.g. `Astromancy`). The name + icon here are
+1. **New Application** → name it (e.g. `Astromancers`). The name + icon here are
    what players see on the OAuth consent screen, so upload the game emblem
    (`assets/branding/emblem.png`).
 2. **Bot** (left nav) → **Add Bot**.
-3. **Reset Token** → copy it. This is your `DISCORD_BOT_TOKEN` — treat it like a
+3. **Reset Token** → copy it. This is your `DISCORD_BOT_TOKEN` - treat it like a
    password (see [§3](#3-give-the-server-the-secrets)).
 4. **Privileged Gateway Intents:** leave all **off**. Login, room codes, and
    basic DMs need no privileged intents.
@@ -72,7 +72,7 @@ http://localhost:8080/auth/discord/callback
 
 - Replace `rts-99-jam` with your actual Fly app name.
 - Add the `localhost` line for local development.
-- You usually **don't** need to set `DISCORD_REDIRECT_URI` — the server derives
+- You usually **don't** need to set `DISCORD_REDIRECT_URI` - the server derives
   this callback automatically. Set it (§3) only if OAuth fails behind the proxy;
   a URL mismatch is the #1 OAuth error.
 
@@ -83,7 +83,7 @@ http://localhost:8080/auth/discord/callback
 
 ## 3. Give the server the secrets
 
-The server is configured through the environment variables below — set them with
+The server is configured through the environment variables below - set them with
 `fly secrets set`. There's nothing else to configure: the SQLite file lives at a
 built-in default path on the mounted Fly Volume (see below).
 
@@ -93,15 +93,15 @@ built-in default path on the mounted Fly Volume (see below).
 | `DISCORD_CLIENT_SECRET` | Sign-in | Proves the server *is* your app when exchanging the OAuth code. Dev Portal → OAuth2 → Reset Secret. **Secret.** |
 | `DISCORD_BOT_TOKEN` | Bot DMs / presence / invites | Authenticates the bot user. Dev Portal → Bot → Reset Token. **Secret.** Optional if you only do login. |
 | `DISCORD_GUILD_ID` | Guild-gated features | ID of your bot's server (§2a). Optional. |
-| `ADMIN_DISCORD_ID` | Admin portal | Your Discord **user** ID — unlocks the admin dashboard for that account. Developer Mode → right-click your name → Copy User ID. |
+| `ADMIN_DISCORD_ID` | Admin portal | Your Discord **user** ID - unlocks the admin dashboard for that account. Developer Mode → right-click your name → Copy User ID. |
 | `FLY_API_TOKEN` | CI auto-deploy | Deploy token for the GitHub Actions workflow that pushes to Fly. Lives in **GitHub repo secrets**, not `fly secrets`. Create with `fly tokens create deploy`. |
-| `DISCORD_REDIRECT_URI` | Sign-in (only if needed) | Usually **not set** — the server derives the callback URL. Add it only if OAuth fails behind the proxy (then use the exact §2c URL). |
+| `DISCORD_REDIRECT_URI` | Sign-in (only if needed) | Usually **not set** - the server derives the callback URL. Add it only if OAuth fails behind the proxy (then use the exact §2c URL). |
 
 ### Why a database at all if we're on Fly?
 
 Fly runs the container but **does not keep its filesystem** across deploys or
-restarts — so users, match records, and the AoE2-style stat charts need storage
-that survives. We use **SQLite on a Fly Volume** — the same pattern as
+restarts - so users, match records, and the AoE2-style stat charts need storage
+that survives. We use **SQLite on a Fly Volume** - the same pattern as
 high-frontier-fan-game:
 
 ```
@@ -109,14 +109,14 @@ fly volumes create data --size 1
 ```
 
 Mount it at `/data` in `fly.toml`; the server opens its SQLite file there by
-default. That's the whole story — nothing to configure: no `DATABASE_URL`, no
+default. That's the whole story - nothing to configure: no `DATABASE_URL`, no
 `DATABASE_PATH`, no separate database service.
 
 ### Sign-in needs no signing secret
 
 Sessions are **opaque**: on login the server generates a random token, stores it
 in a `sessions` row in that same SQLite file, and sets it as an httpOnly cookie.
-Each request is authenticated by a DB lookup, not by verifying a signature — so
+Each request is authenticated by a DB lookup, not by verifying a signature - so
 there is **no `SESSION_SECRET`/JWT key** to set or rotate. (The OAuth `state`
 value is likewise a random token checked server-side.) Admin access is just: look
 up the session → get its `discord_id` → compare to `ADMIN_DISCORD_ID`.
@@ -132,7 +132,7 @@ fly secrets set \
   ADMIN_DISCORD_ID=YOUR_DISCORD_USER_ID
 ```
 
-The database needs no config — the server opens SQLite on the mounted volume by
+The database needs no config - the server opens SQLite on the mounted volume by
 default. `FLY_API_TOKEN` is a **GitHub** repo secret for the deploy workflow
 (`fly tokens create deploy`), not something you set with `fly secrets`.
 
@@ -143,7 +143,7 @@ default. `FLY_API_TOKEN` is a **GitHub** repo secret for the deploy workflow
 ### Local development
 
 ```bash
-# .env (git-ignored) — placeholders shown
+# .env (git-ignored) - placeholders shown
 DISCORD_CLIENT_ID=...
 DISCORD_CLIENT_SECRET=...
 ADMIN_DISCORD_ID=YOUR_DISCORD_USER_ID
@@ -172,7 +172,7 @@ From the main menu → **Sign in with Discord**:
    6-character code**, and appear to friends.
 
 **Finding friends:** share your room's 6-character code in any Discord channel or
-DM — a friend pastes it into **Join by code**. (Deeper "Join via Discord" using
+DM - a friend pastes it into **Join by code**. (Deeper "Join via Discord" using
 Rich Presence invites is a planned enhancement.)
 
 **Admin:** if your `discord_id` matches `ADMIN_DISCORD_ID`, the menu also shows
@@ -188,9 +188,9 @@ Opt-in, per player. One event = one message, no throttling:
 
 | Event | Message |
 |---|---|
-| A friend opens a room | "🛰️ `username` opened a room — code `AB12CD`" |
-| Your room fills / match starts | "⚔️ Your match is starting — `N` nation-corps deployed" |
-| Match ends | "🏁 Match over — winner: `username` (`duration`)" |
+| A friend opens a room | "🛰️ `username` opened a room - code `AB12CD`" |
+| Your room fills / match starts | "⚔️ Your match is starting - `N` nation-corps deployed" |
+| Match ends | "🏁 Match over - winner: `username` (`duration`)" |
 
 Delivered as **DMs** to players who linked Discord and toggled notifications on,
 or to a **channel webhook** (below) for a whole community.
@@ -199,7 +199,7 @@ or to a **channel webhook** (below) for a whole community.
 
 ## Channel webhook (no bot)
 
-The simplest path for a community feed — no per-player linking:
+The simplest path for a community feed - no per-player linking:
 
 1. In a Discord channel → **Edit Channel → Integrations → Webhooks → New
    Webhook** → copy the URL.
@@ -214,7 +214,7 @@ webhook URL as a secret.
 
 ## Privacy / security notes
 
-- We store only your Discord **user ID**, username, and avatar hash — opt-in, and
+- We store only your Discord **user ID**, username, and avatar hash - opt-in, and
   deletable from your profile.
 - `DISCORD_CLIENT_SECRET` and `DISCORD_BOT_TOKEN` are **server-side only**; they
   never reach the game client.
@@ -222,7 +222,7 @@ webhook URL as a secret.
   enabled §2a); the access token is single-use and not persisted.
 - Sessions are opaque random tokens stored server-side (SQLite); deleting the
   `sessions` row logs that session out. No signing key to manage or leak.
-- Admin access is strictly the `ADMIN_DISCORD_ID` allowlist — there is no
+- Admin access is strictly the `ADMIN_DISCORD_ID` allowlist - there is no
   password to leak.
 
 ---
@@ -233,10 +233,10 @@ webhook URL as a secret.
 |---|---|
 | `redirect_uri_mismatch` | The URL in §2c must **exactly** match `DISCORD_REDIRECT_URI` (scheme, host, path, no trailing slash). |
 | `invalid_client` | Wrong/rotated `DISCORD_CLIENT_SECRET`; reset it in the portal and re-set the Fly secret. |
-| Sign-in works locally but not on Fly | Set `DISCORD_REDIRECT_URI` explicitly — Fly's proxy host differs from the public URL. |
+| Sign-in works locally but not on Fly | Set `DISCORD_REDIRECT_URI` explicitly - Fly's proxy host differs from the public URL. |
 | Admin menu missing | Your `discord_id` doesn't match `ADMIN_DISCORD_ID` (check for stray spaces), or you're not signed in. |
-| Stats reset after deploy | SQLite is writing to the container, not the Volume — make sure the Fly Volume is mounted at the path the server uses (`/data`) in `fly.toml`. |
-| Bot can't DM a player | The player hasn't linked Discord / opted in, or shares no mutual context — fall back to the channel webhook. |
+| Stats reset after deploy | SQLite is writing to the container, not the Volume - make sure the Fly Volume is mounted at the path the server uses (`/data`) in `fly.toml`. |
+| Bot can't DM a player | The player hasn't linked Discord / opted in, or shares no mutual context - fall back to the channel webhook. |
 | Nothing happens on login | `DISCORD_CLIENT_ID`/`SECRET` not set; check server logs at startup for which features are enabled. |
 
 ---

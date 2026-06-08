@@ -1,7 +1,7 @@
 //! Deterministic fixed-point math for the simulation core.
 //!
 //! The simulation must be bit-identical on every CPU, OS, and run (see
-//! `docs/architecture/01-determinism.md`), which rules out floating point —
+//! `docs/architecture/01-determinism.md`), which rules out floating point -
 //! its rounding, transcendentals, and fused-multiply-add differ across
 //! hardware. [`Fx`] is an integer-backed fixed-point scalar whose every
 //! operation reduces to integer arithmetic and is therefore identical

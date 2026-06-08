@@ -26,7 +26,7 @@ enum UserEvent {
 
 /// Mobile **test** controls (web only).
 ///
-/// DOM is allowed only for these — they let a developer drive desktop
+/// DOM is allowed only for these - they let a developer drive desktop
 /// interactions (pan / zoom / right-click) from a touch device. The buttons are
 /// bare elements in `index.html`; all behavior is wired here. State lives in a
 /// thread-local the app reads each frame; everything else stays in WASM.
@@ -175,7 +175,7 @@ struct App {
     input: Input,
     last_frame: Instant,
     /// Set once a touch is seen, so edge-panning (a mouse affordance) is
-    /// disabled on touch devices — the d-pad pans there instead.
+    /// disabled on touch devices - the d-pad pans there instead.
     pointer_is_touch: bool,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     last_css: (u32, u32),
@@ -248,7 +248,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
         event_loop.set_control_flow(ControlFlow::Poll);
 
-        let mut attrs = Window::default_attributes().with_title("Astromancy");
+        let mut attrs = Window::default_attributes().with_title("Astromancers");
         #[cfg(target_arch = "wasm32")]
         {
             use winit::platform::web::WindowAttributesExtWebSys;
@@ -289,7 +289,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // A Resized event can fire while the GPU is still initializing
                 // (gfx is None then, so it's dropped). Sync the surface to the
                 // window's real size now, or the first frames render at the
-                // stale tiny size — a single pixel stretched to full screen.
+                // stale tiny size - a single pixel stretched to full screen.
                 if let Some(w) = &self.window {
                     let s = w.inner_size();
                     gfx.resize(s.width, s.height);

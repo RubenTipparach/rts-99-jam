@@ -1,4 +1,4 @@
-# 05 — Animation (at crowd scale)
+# 05 - Animation (at crowd scale)
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Rendering](04-rendering-wgpu.md) · [Next: Particles](06-particles.md)
 
@@ -10,7 +10,7 @@
 ## 1. The scaling problem
 
 Classic skeletal animation does, per unit per frame: sample animation curves →
-compute ~30–80 bone matrices → skin the mesh. On the **CPU**, that's hopeless for
+compute ~30-80 bone matrices → skin the mesh. On the **CPU**, that's hopeless for
 thousands of units. So the rule is: **make per-unit animation cost independent of
 unit count** by precomputing poses and doing the work on the GPU.
 
@@ -28,10 +28,10 @@ bone matrices**: rows = animation frames, columns = bones. At runtime each
 instance carries `(clip_id, phase)`; the vertex shader looks up the bone matrices
 for that clip+frame and skins on the GPU.
 
-- **Cost is O(1) CPU per unit** — just write `(clip, phase)` into the instance
+- **Cost is O(1) CPU per unit** - just write `(clip, phase)` into the instance
   buffer ([Ch.04 §1](04-rendering-wgpu.md)). Animating 1000 units costs the same
   per-unit as animating one.
-- Works perfectly with **GPU instancing + indirect draws** — this is the standard
+- Works perfectly with **GPU instancing + indirect draws** - this is the standard
   "crowd animation" technique (a.k.a. animation/bone textures; VAT is the
   vertex-position variant).
 - **Trade-off**: discrete baked frames and **limited runtime blending** between
@@ -80,7 +80,7 @@ in the shader with full blend trees. Few units → cost is fine.
 ## 4. Driving animation from sim state
 
 - The sim stores a tiny, discrete **`AnimState`** per unit (`Idle`, `Walk`,
-  `Attack`, `Cast`, `Death`, …) — set by the order/state machine
+  `Attack`, `Cast`, `Death`, …) - set by the order/state machine
   ([Ch.02 §5](02-simulation.md)). It's fixed-point/enum and part of determinism
   only insofar as it's derived from sim logic; the *visual* it maps to is not.
 - The renderer maps `AnimState → clip` and advances **`phase`** using the
@@ -90,18 +90,18 @@ in the shader with full blend trees. Few units → cost is fine.
 - **Event-synced animation**: when combat fires on tick *T*
   ([Ch.02](02-simulation.md)), the sim emits a one-shot presentation event
   ("unit X attacked") the renderer uses to trigger the attack clip and a muzzle
-  particle/light ([Ch.06](06-particles.md)) — keeping visuals in step with the
+  particle/light ([Ch.06](06-particles.md)) - keeping visuals in step with the
   authoritative sim without the sim knowing about animation.
 
 ## 5. Transitions & polish (cheap wins)
 
 - **Cross-fade** between consecutive clips by blending two sampled poses over a
-  short window — enough to kill popping, cheap even at scale.
+  short window - enough to kill popping, cheap even at scale.
 - **Death → ragdoll/disintegrate**: a death is a sim event; the corpse is a
   presentation-only entity (it can use floats/particles and is reaped on the
   render side).
 - **Procedural touches** (turret yaw tracking the target, recoil, lean into
-  turns) computed in the renderer from snapshot data — never fed back.
+  turns) computed in the renderer from snapshot data - never fed back.
 
 ## 6. Why not CPU skinning or per-unit GPU palettes?
 
@@ -112,4 +112,4 @@ in the shader with full blend trees. Few units → cost is fine.
 | **Baked bone texture (atlas)** | ~zero | limited | ✔ **default for the masses** |
 | Real-time GPU skinning | low, but only viable for few | full | ✔ **heroes/closeups only** |
 
-The mix in §2–§3 gives crowd scale *and* fidelity where it's seen.
+The mix in §2-§3 gives crowd scale *and* fidelity where it's seen.

@@ -1,9 +1,9 @@
-# 07 — Pathfinding, Navigation & Collision Avoidance
+# 07 - Pathfinding, Navigation & Collision Avoidance
 
 [← Back to ARCHITECTURE.md](../ARCHITECTURE.md) · [Prev: Particles](06-particles.md) · [Next: Worldgen](08-procedural-generation.md)
 
 > Brief: *advanced spherical A*, navmesh navigation, or some way to navigate
-> terrain; collision avoidance — for 100s–1000s of units.* This is pure
+> terrain; collision avoidance - for 100s-1000s of units.* This is pure
 > **simulation**, so everything here is **fixed-point and deterministic**
 > ([Ch.01](01-determinism.md)). The headline: **don't run A* per unit.** Use a
 > layered system where the expensive search is shared by whole groups.
@@ -35,7 +35,7 @@ The brief says "spherical A*" but "like StarCraft" (flat). We support both behin
 one trait so the rest of the sim doesn't care:
 
 ```rust
-// crates/pathfind — navigation is generic over the world's shape.
+// crates/pathfind - navigation is generic over the world's shape.
 pub trait Topology {
     type Cell: Copy + Eq + Ord;                 // Ord => deterministic ordering
     fn neighbors(&self, c: Self::Cell) -> NeighborIter<Self::Cell>;
@@ -50,10 +50,10 @@ pub trait Topology {
   StarCraft default. Cells map directly to the spatial grid
   ([Ch.02 §4](02-simulation.md)).
 - **Spherical map** → `GeodesicTopology`: the planet is a **subdivided
-  icosahedron** (a *geodesic grid* of mostly-hexagonal cells — the
+  icosahedron** (a *geodesic grid* of mostly-hexagonal cells - the
   Planetary-Annihilation approach). Pathfinding runs on this graph; "spherical A*"
   is just A* over geodesic cells. Movement is constrained to the sphere surface
-  (integrate on the local tangent plane, re-project onto the sphere — all in
+  (integrate on the local tangent plane, re-project onto the sphere - all in
   fixed-point).
 
 ```mermaid
@@ -71,7 +71,7 @@ graph LR
 > is the default; spherical is a drop-in `Topology`. Because everything above the
 > trait is shape-agnostic, choosing later is cheap.
 
-## 3. Layer 1 — Hierarchical long-range A* (HPA*)
+## 3. Layer 1 - Hierarchical long-range A* (HPA*)
 
 Searching a million-cell map per move is too slow even once. So:
 
@@ -84,7 +84,7 @@ Searching a million-cell map per move is too slow even once. So:
   tie-breaks ([Ch.01 §4](01-determinism.md)). On a sphere, sectors are patches of
   the geodesic grid.
 
-## 4. Layer 2 — Flow fields (the scale trick)
+## 4. Layer 2 - Flow fields (the scale trick)
 
 For a group heading to a goal, compute **one vector field** over the relevant
 cells and let *every* unit sample it:
@@ -93,7 +93,7 @@ cells and let *every* unit sample it:
   costs) → an **integration field** (distance-to-goal per cell).
 - Derive a **flow field**: each cell stores the direction toward the lowest
   neighbor (`Topology::direction`).
-- Every unit's "where do I go next" becomes **one cell lookup — O(1) per unit**,
+- Every unit's "where do I go next" becomes **one cell lookup - O(1) per unit**,
   no per-unit search. 1000 units share the cost of one field.
 - Compute fields lazily per (goal, sector) and **cache** them; recompute on
   obstacle changes (a new building, a destroyed bridge).
@@ -108,15 +108,15 @@ graph LR
     flow --> sample["Each unit: 1 lookup -> desired dir"]
 ```
 
-## 5. Layer 4 — Local collision avoidance (ORCA)
+## 5. Layer 4 - Local collision avoidance (ORCA)
 
 Flow fields route the *group*; units still must not pile up or interpenetrate.
-The chosen algorithm is **ORCA** (Optimal Reciprocal Collision Avoidance) —
+The chosen algorithm is **ORCA** (Optimal Reciprocal Collision Avoidance) -
 the modern, analytic member of the **velocity-obstacle** family (VO → RVO →
 ORCA), reimplemented in fixed-point. We pick ORCA over its predecessor **RVO**
 because it solves avoidance with a cheap **linear program** instead of velocity
-*sampling*, giving smoother motion, lower per-agent cost, and — crucially for
-RTS crowds — a graceful fallback when a unit is too boxed-in to be fully safe.
+*sampling*, giving smoother motion, lower per-agent cost, and - crucially for
+RTS crowds - a graceful fallback when a unit is too boxed-in to be fully safe.
 
 **How it works**, per unit, per tick:
 
@@ -124,17 +124,17 @@ RTS crowds — a graceful fallback when a unit is too boxed-in to be fully safe.
    **sorted by `EntityId`** for determinism.
 2. For each neighbor, derive one **half-plane** of permitted velocities (the set
    that stays collision-free for a time horizon τ, with each unit taking its
-   share of the avoidance — reciprocity, so no oscillation).
+   share of the avoidance - reciprocity, so no oscillation).
 3. The allowed velocities are the **intersection of those half-planes** clipped
    to the unit's max-speed disc; pick the one closest to the flow-field's desired
    velocity via a **2D linear program**. If the region is empty (too dense to be
    safe), a **3D-LP fallback** returns the least-bad (minimum-penetration)
-   velocity — so a unit never deadlocks for lack of any solution.
+   velocity - so a unit never deadlocks for lack of any solution.
 
-**Determinism notes** (these matter more than the algorithm choice —
+**Determinism notes** (these matter more than the algorithm choice -
 [Ch.01](01-determinism.md)):
 
-- All geometry — distances, normals, `sqrt`, the LP — runs through the
+- All geometry - distances, normals, `sqrt`, the LP - runs through the
   fixed-point + CORDIC math in `math` ([Ch.01 §2](01-determinism.md)). No floats.
 - The textbook LP randomizes constraint order for expected-time performance.
   **That randomization is a desync.** Process constraints in a **fixed order**
@@ -157,10 +157,10 @@ supplying the goal direction** so a stalled agent still gets nudged along instea
 of deadlocking. (Units with turn limits get a kinematic clamp on top of the ORCA
 result.)
 
-> All avoidance math is fixed-point and order-stable — a desync here would be as
+> All avoidance math is fixed-point and order-stable - a desync here would be as
 > fatal as one in combat ([Ch.01](01-determinism.md)).
 
-## 6. Navmesh — the alternative for organic terrain
+## 6. Navmesh - the alternative for organic terrain
 
 Grid + flow fields are ideal for RTS-scale crowds. A **navigation mesh** (convex
 polygons over walkable surfaces, Recast/Detour-style) is better when terrain is
@@ -171,7 +171,7 @@ paths. The design keeps it as an **alternative `Topology`/cost source**:
   or load it; rebuild regions on terrain edits.
 - A* over polygons + funnel algorithm for taut paths; flow fields can still be
   layered on top for groups.
-- **Determinism caveat**: navmesh *generation* often uses floats — so either
+- **Determinism caveat**: navmesh *generation* often uses floats - so either
   generate it **offline/at load deterministically and quantize to fixed-point**,
   or generate from the shared seed and **hash it** like the map
   ([Ch.08 §5](08-procedural-generation.md)). The *runtime* queries must be
@@ -208,4 +208,4 @@ sequenceDiagram
   change.
 - **All fixed-point, all order-stable**: costs, open sets, neighbor lists, and the
   `Topology::Cell: Ord` bound guarantee identical paths on every machine
-  ([Ch.01](01-determinism.md)) — so two peers' armies always move identically.
+  ([Ch.01](01-determinism.md)) - so two peers' armies always move identically.

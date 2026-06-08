@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
-     viewBox="0 0 1600 520" width="1600" height="520" role="img" aria-label="Astromancy logo"
+     viewBox="0 0 1600 520" width="1600" height="520" role="img" aria-label="Astromancers logo"
      font-family="'Eurostile','Bahnschrift','DejaVu Sans','Arial Narrow',sans-serif">
   <defs>
     <linearGradient id="wm" x1="0" y1="0" x2="0" y2="1">
@@ -9,12 +9,12 @@
     </linearGradient>
   </defs>
 
-  <!-- emblem: the Astromancy (Philosophia) mission patch -->
+  <!-- emblem: the Astromancers mission patch -->
   <image xlink:href="emblem.png" href="emblem.png" x="22" y="26" width="470" height="470"/>
 
   <!-- wordmark -->
-  <text x="536" y="286" font-size="112" font-weight="800" letter-spacing="4" fill="url(#wm)">ASTROMANCY</text>
+  <text x="536" y="286" font-size="100" font-weight="800" letter-spacing="3" fill="url(#wm)">ASTROMANCERS</text>
   <text x="540" y="342" font-size="32" font-weight="600" letter-spacing="5" fill="#8aa3cc">SPACE · MAGIC · REAL-TIME STRATEGY</text>
   <line x1="542" y1="370" x2="1430" y2="370" stroke="#33507a" stroke-width="2" opacity="0.7"/>
-  <text x="542" y="412" font-size="26" font-weight="500" letter-spacing="4" fill="#6f86ad">EX CINERE AD ASTRA — FROM THE ASHES, TO THE STARS</text>
+  <text x="542" y="412" font-size="26" font-weight="500" letter-spacing="4" fill="#6f86ad">EX CINERE AD ASTRA - FROM THE ASHES, TO THE STARS</text>
 </svg>
