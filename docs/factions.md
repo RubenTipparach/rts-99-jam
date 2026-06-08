@@ -14,30 +14,30 @@ core asymmetry. Launch-faction detail (costs, tech tree) lives in
 
 **Mined, shared** (every worker gathers these):
 
-- **Ore** - bulk material; the body of every structure and unit. (The sim's
+- 🪨 **Ore** - bulk material; the body of every structure and unit. (The sim's
   existing `ore`.)
-- **Carbon** - the advanced material: biomass for grown lifeforms (Astromancers,
+- ⚫ **Carbon** - the advanced material: biomass for grown lifeforms (Astromancers,
   Warren) and composites / propellant for machines (Hollowmen, Rimelings).
-- **Water** - mined from ice, the strategic prize. It feeds growth and Mana for
+- 💧 **Water** - mined from ice, the strategic prize. It feeds growth and Mana for
   the magic side, coolant and Power for the tech side; whoever holds the ice
   controls the enemy's energy.
 
 **Energy, generated, per faction:**
 
-- **Mana** - the magic pool: spent on casts, shields, and conversions.
-- **Power** - the industrial supply: a live draw that gates how much you can run
+- 🔮 **Mana** - the magic pool: spent on casts, shields, and conversions.
+- ⚡ **Power** - the industrial supply: a live draw that gates how much you can run
   at once (never "spent").
 
 Each faction relates to the two energies differently, and that relationship is
 the asymmetry:
 
-| Faction | Mana | Power | Flavor |
+| Faction | 🔮 Mana | ⚡ Power | Flavor |
 |---|---|---|---|
-| Astromancers | Generate natively (reliquaries, ley-nodes) | None | Magic-native |
-| Hollowmen | None: they deny it (null-fields) and burn allies' bottled magic | Generate (reactors) | "We make our own power" |
-| Ninefold (cats) | Generate, tied to a lunar cycle | None | Run on "instinct" |
-| Warren (rats) | Scavenge from salvage and the converted dead | None | Run on "genetics" |
-| Rimelings | Cannot produce; drain it from nearby enemy casters (plus a trickle from ether-collectors) | Generate (reactors) | The only faction on both energies |
+| 🌌 Astromancers | Generate natively (reliquaries, ley-nodes) | None | Magic-native |
+| ⚙️ Hollowmen | None: they deny it (null-fields) and burn allies' bottled magic | Generate (reactors) | "We make our own power" |
+| 🐱 Ninefold (cats) | Generate, tied to a lunar cycle | None | Run on "instinct" |
+| 🐀 Warren (rats) | Scavenge from salvage and the converted dead | None | Run on "genetics" |
+| 🦑 Rimelings | Cannot produce; drain it from nearby enemy casters (plus a trickle from ether-collectors) | Generate (reactors) | The only faction on both energies |
 
 Every faction still needs the RTS basics - a **HQ**, a **builder/worker**, a
 **materials extractor**, **production**, and **defense** - so those are listed
