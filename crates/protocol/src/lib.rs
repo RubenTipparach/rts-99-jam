@@ -26,6 +26,15 @@ pub enum BuildingKind {
     Barracks,
 }
 
+/// Harvestable resource nodes.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ResourceKind {
+    /// Ore: shiny crystals that erupt from the ground.
+    Ore,
+    /// Carbon: a gas geyser.
+    Carbon,
+}
+
 /// A single player/AI intent for one simulation tick. Units/buildings are
 /// referenced by their slot index (from the world snapshot). One command per
 /// entity keeps this `Copy` and trivial to serialize.
@@ -45,6 +54,10 @@ pub enum Command {
         x: Fx,
         y: Fx,
     },
+    /// Scenario setup: place a neutral resource node.
+    SpawnResource { kind: ResourceKind, x: Fx, y: Fx },
+    /// Send a worker to harvest a resource node (mine, then return to deposit).
+    Harvest { unit: u32, node: u32 },
     /// Move to a point (no auto-engage on the way).
     Move { unit: u32, x: Fx, y: Fx },
     /// Move to a point, attacking any enemy encountered.

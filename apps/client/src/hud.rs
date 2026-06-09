@@ -366,9 +366,10 @@ pub fn draw(
     ctx.set_font("bold 16px monospace");
     let _ = ctx.fill_text(
         &format!(
-            "ASTROMANCERS  ore {ore}      your force: {pu} inf / {pb} barracks      visible enemy: {eu} inf / {eb} barracks      selected: {}",
+            "ASTROMANCERS  ore {ore}  carbon {carbon}      your force: {pu} inf / {pb} barracks      visible enemy: {eu} inf / {eb} barracks      selected: {}",
             game.selected_count(),
             ore = game.player_ore() as i64,
+            carbon = game.player_carbon() as i64,
         ),
         14.0,
         24.0,
@@ -376,7 +377,7 @@ pub fn draw(
     ctx.set_fill_style_str("#8aa3cc");
     ctx.set_font("12px monospace");
     let _ = ctx.fill_text(
-        "left: select / drag-box    right: move / attack    middle-drag or WASD: pan    wheel: zoom    minimap: click/drag to look    Esc: pause",
+        "left: select / drag-box    right: move / attack (worker + ore/carbon: harvest)    middle-drag or WASD: pan    wheel: zoom    Esc: pause",
         14.0,
         hf - bar + 22.0,
     );

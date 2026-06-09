@@ -708,7 +708,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.game.skip_tick();
                     if let Some(gfx) = self.gfx.as_mut() {
                         let aspect = gfx.aspect();
-                        let (infantry, b_astro, b_hollow, acolytes, engineers, rings) =
+                        let (infantry, b_astro, b_hollow, acolytes, engineers, ore, carbon, rings) =
                             self.game.render_data();
                         let fow = self.game.fow_bytes();
                         let vp = self.camera.view_proj(aspect);
@@ -718,6 +718,8 @@ impl ApplicationHandler<UserEvent> for App {
                             &b_hollow,
                             &acolytes,
                             &engineers,
+                            &ore,
+                            &carbon,
                             &rings,
                             &fow,
                             vp,
@@ -758,7 +760,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.game.skip_tick();
                     if let Some(gfx) = self.gfx.as_mut() {
                         let aspect = gfx.aspect();
-                        let (infantry, b_astro, b_hollow, acolytes, engineers, rings) =
+                        let (infantry, b_astro, b_hollow, acolytes, engineers, ore, carbon, rings) =
                             self.game.render_data();
                         let fow = self.game.fow_bytes();
                         let vp = self.camera.view_proj(aspect);
@@ -768,6 +770,8 @@ impl ApplicationHandler<UserEvent> for App {
                             &b_hollow,
                             &acolytes,
                             &engineers,
+                            &ore,
+                            &carbon,
                             &rings,
                             &fow,
                             vp,
@@ -850,7 +854,7 @@ impl ApplicationHandler<UserEvent> for App {
 
                 if let Some(gfx) = self.gfx.as_mut() {
                     let aspect = gfx.aspect();
-                    let (infantry, b_astro, b_hollow, acolytes, engineers, rings) =
+                    let (infantry, b_astro, b_hollow, acolytes, engineers, ore, carbon, rings) =
                         self.game.render_data();
                     let fow = self.game.fow_bytes();
                     let vp = self.camera.view_proj(aspect);
@@ -860,6 +864,8 @@ impl ApplicationHandler<UserEvent> for App {
                         &b_hollow,
                         &acolytes,
                         &engineers,
+                        &ore,
+                        &carbon,
                         &rings,
                         &fow,
                         vp,

@@ -16,7 +16,7 @@ mod rng;
 pub use rng::DetRng;
 
 use math::{Fx, Vec3};
-use protocol::{BuildingKind, Command, PlayerId, UnitKind};
+use protocol::{BuildingKind, Command, PlayerId, ResourceKind, UnitKind};
 
 /// A stable handle to an entity (generation guards against slot reuse).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -33,6 +33,10 @@ pub enum Kind {
     /// fights (no auto-aggro, no attack orders).
     Worker,
     Barracks,
+    /// Ore crystals: harvested into the ore stockpile.
+    OreNode,
+    /// Carbon gas geyser: harvested into the carbon stockpile.
+    CarbonNode,
 }
 
 /// Mobile units: they path, take move orders, and obey the no-stacking rule.
@@ -40,12 +44,38 @@ fn is_mobile(k: Kind) -> bool {
     matches!(k, Kind::Infantry | Kind::Worker)
 }
 
+/// Harvestable resource nodes (neutral, static, not valid combat targets).
+fn is_resource(k: Kind) -> bool {
+    matches!(k, Kind::OreNode | Kind::CarbonNode)
+}
+
+/// A node's full starting amount, by kind (also used for the display fraction).
+fn node_capacity(k: Kind) -> Fx {
+    match k {
+        Kind::OreNode => Fx::from_int(1500),
+        Kind::CarbonNode => Fx::from_int(1200),
+        _ => Fx::ZERO,
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Order {
     Idle,
-    Move { x: Fx, y: Fx },
-    AttackMove { x: Fx, y: Fx },
-    Attack { target: u32 },
+    Move {
+        x: Fx,
+        y: Fx,
+    },
+    AttackMove {
+        x: Fx,
+        y: Fx,
+    },
+    Attack {
+        target: u32,
+    },
+    /// Worker: cycle between mining `node` and depositing at the nearest base.
+    Harvest {
+        node: u32,
+    },
 }
 
 struct Stats {
@@ -84,8 +114,24 @@ fn stats(kind: Kind) -> Stats {
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
         },
+        // Resource nodes are inert: tons of "hp" so stray AoE can't pop them.
+        Kind::OreNode | Kind::CarbonNode => Stats {
+            max_hp: Fx::from_int(100000),
+            speed: Fx::ZERO,
+            range2: Fx::ZERO,
+            damage: Fx::ZERO,
+            attack_cd: Fx::ZERO,
+            aggro2: Fx::ZERO,
+        },
     }
 }
+
+/// Worker harvesting tuning.
+const NEUTRAL: PlayerId = u16::MAX;
+const CARRY_CAP: Fx = Fx::from_int(8);
+const MINE_RATE: Fx = Fx::from_ratio(1, 5); // resource per tick while mining
+const MINE_RANGE2: Fx = Fx::from_int(36); // mine within range 6 of a node
+const DEPOSIT_RANGE2: Fx = Fx::from_int(100); // deposit within range 10 of a building
 
 const PROD_TICKS: i32 = 55;
 const TEAM_UNIT_CAP: usize = 30;
@@ -118,6 +164,10 @@ pub struct Snap {
     pub hp: Fx,
     pub max_hp: Fx,
     pub moving: bool,
+    /// Workers only, display-only: actively mining a node this tick.
+    pub mining: bool,
+    /// Resource nodes only, display-only: fraction of the node remaining (1..0).
+    pub resource_frac: Fx,
     /// Buildings only: units queued for production and the current unit's
     /// build progress (0..1). Display-only; not part of the state hash.
     pub queued: u32,
@@ -185,6 +235,16 @@ pub struct World {
     rally: Vec<Vec3>,
     /// Per-player ore stockpile, indexed by `PlayerId`.
     ore: Vec<Fx>,
+    /// Per-player carbon stockpile, indexed by `PlayerId`.
+    carbon: Vec<Fx>,
+    /// Resource nodes only: amount of material remaining.
+    amount: Vec<Fx>,
+    /// Workers only: material currently carried, and which stockpile it feeds
+    /// (0 = ore, 1 = carbon).
+    carried: Vec<Fx>,
+    carry_kind: Vec<u8>,
+    /// Workers only, display-only: actively mining a node this tick.
+    mining: Vec<bool>,
 }
 
 #[inline]
@@ -210,6 +270,11 @@ impl World {
             queue: Vec::new(),
             rally: Vec::new(),
             ore: Vec::new(),
+            carbon: Vec::new(),
+            amount: Vec::new(),
+            carried: Vec::new(),
+            carry_kind: Vec::new(),
+            mining: Vec::new(),
         }
     }
 
@@ -227,6 +292,22 @@ impl World {
             self.ore.push(Fx::from_int(STARTING_ORE));
         }
         &mut self.ore[i]
+    }
+
+    /// A player's current carbon (starts at zero).
+    pub fn carbon(&self, player: PlayerId) -> Fx {
+        self.carbon
+            .get(player as usize)
+            .copied()
+            .unwrap_or(Fx::ZERO)
+    }
+
+    fn carbon_mut(&mut self, player: PlayerId) -> &mut Fx {
+        let i = player as usize;
+        while self.carbon.len() <= i {
+            self.carbon.push(Fx::ZERO);
+        }
+        &mut self.carbon[i]
     }
 
     #[inline]
@@ -249,6 +330,10 @@ impl World {
             self.prod.push(Fx::ZERO);
             self.queue.push(0);
             self.rally.push(Vec3::ZERO);
+            self.amount.push(Fx::ZERO);
+            self.carried.push(Fx::ZERO);
+            self.carry_kind.push(0);
+            self.mining.push(false);
         }
     }
 
@@ -265,8 +350,14 @@ impl World {
         // Nobody auto-produces: a building stays idle until a unit is queued.
         self.prod[i] = Fx::ZERO;
         self.queue[i] = 0;
-        let _ = self.ore_mut(owner); // materialize the owner's stockpile
-                                     // Default rally a little "south" of a building.
+        self.amount[i] = node_capacity(kind);
+        self.carried[i] = Fx::ZERO;
+        self.carry_kind[i] = 0;
+        self.mining[i] = false;
+        if owner != NEUTRAL {
+            let _ = self.ore_mut(owner); // materialize the owner's stockpile
+        }
+        // Default rally a little "south" of a building.
         self.rally[i] = Vec3::new(x, y - Fx::from_int(7), Fx::ZERO);
         id
     }
@@ -287,7 +378,7 @@ impl World {
         let my_owner = self.owner[i];
         let mut best: Option<(u32, Fx)> = None;
         for j in 0..self.arena.capacity() {
-            if !self.arena.alive[j] || self.owner[j] == my_owner {
+            if !self.arena.alive[j] || self.owner[j] == my_owner || is_resource(self.kind[j]) {
                 continue;
             }
             let d2 = dist2(me, self.pos[j].x, self.pos[j].y);
@@ -297,6 +388,39 @@ impl World {
             }
         }
         best
+    }
+
+    /// Nearest living building owned by `owner` (a worker's drop-off point).
+    fn nearest_dropoff(&self, owner: PlayerId, from: Vec3) -> Option<Vec3> {
+        let mut best: Option<(Vec3, Fx)> = None;
+        for j in 0..self.arena.capacity() {
+            if !self.arena.alive[j] || self.kind[j] != Kind::Barracks || self.owner[j] != owner {
+                continue;
+            }
+            let d2 = dist2(from, self.pos[j].x, self.pos[j].y);
+            match best {
+                Some((_, bd)) if bd <= d2 => {}
+                _ => best = Some((self.pos[j], d2)),
+            }
+        }
+        best.map(|(p, _)| p)
+    }
+
+    /// Nearest living resource node (any kind), for auto-retargeting a worker
+    /// whose node ran out.
+    fn nearest_node(&self, from: Vec3) -> Option<u32> {
+        let mut best: Option<(u32, Fx)> = None;
+        for j in 0..self.arena.capacity() {
+            if !self.arena.alive[j] || !is_resource(self.kind[j]) {
+                continue;
+            }
+            let d2 = dist2(from, self.pos[j].x, self.pos[j].y);
+            match best {
+                Some((_, bd)) if bd <= d2 => {}
+                _ => best = Some((j as u32, d2)),
+            }
+        }
+        best.map(|(i, _)| i)
     }
 
     /// Advance the simulation by one tick. The only place game truth changes.
@@ -334,6 +458,23 @@ impl World {
                         BuildingKind::Barracks => Kind::Barracks,
                     };
                     self.spawn(k, owner, x, y);
+                }
+                Command::SpawnResource { kind, x, y } => {
+                    let k = match kind {
+                        ResourceKind::Ore => Kind::OreNode,
+                        ResourceKind::Carbon => Kind::CarbonNode,
+                    };
+                    self.spawn(k, NEUTRAL, x, y);
+                }
+                Command::Harvest { unit, node } => {
+                    let (u, n) = (unit as usize, node as usize);
+                    if self.arena.alive_at(unit)
+                        && self.kind[u] == Kind::Worker
+                        && self.arena.alive_at(node)
+                        && is_resource(self.kind[n])
+                    {
+                        self.order[u] = Order::Harvest { node };
+                    }
                 }
                 Command::Move { unit, x, y } => self.set_order(unit, Order::Move { x, y }),
                 Command::AttackMove { unit, x, y } => {
@@ -435,6 +576,22 @@ impl World {
         };
     }
 
+    /// Step entity `i` toward `(tx, ty)` at `speed`, snapping on arrival.
+    fn step_toward(&mut self, i: usize, tx: Fx, ty: Fx, speed: Fx) {
+        let me = self.pos[i];
+        let dx = tx - me.x;
+        let dy = ty - me.y;
+        let d = (dx * dx + dy * dy).sqrt();
+        if d > speed && d > Fx::ZERO {
+            let s = speed / d;
+            self.pos[i].x = me.x + dx * s;
+            self.pos[i].y = me.y + dy * s;
+        } else {
+            self.pos[i].x = tx;
+            self.pos[i].y = ty;
+        }
+    }
+
     fn units_update(&mut self) {
         let cap = self.arena.capacity();
         let mut damage = vec![Fx::ZERO; cap];
@@ -447,6 +604,67 @@ impl World {
             // attack order just walks them to the target and deals nothing.
             let inf = stats(self.kind[i]);
             let me = self.pos[i];
+            self.mining[i] = false;
+
+            // Harvest is a self-contained cycle (mine the node, then return to
+            // the nearest base and deposit), handled before the combat orders.
+            if let Order::Harvest { node } = self.order[i] {
+                let n = node as usize;
+                let node_ok = self.arena.alive_at(node) && is_resource(self.kind[n]);
+                let returning =
+                    self.carried[i] >= CARRY_CAP || (!node_ok && self.carried[i] > Fx::ZERO);
+                if returning {
+                    // Carry the load home to the nearest owned building.
+                    if let Some(bp) = self.nearest_dropoff(self.owner[i], me) {
+                        if dist2(me, bp.x, bp.y) <= DEPOSIT_RANGE2 {
+                            let load = self.carried[i];
+                            let owner = self.owner[i];
+                            if self.carry_kind[i] == 1 {
+                                *self.carbon_mut(owner) += load;
+                            } else {
+                                *self.ore_mut(owner) += load;
+                            }
+                            self.carried[i] = Fx::ZERO;
+                            if !node_ok {
+                                self.order[i] = match self.nearest_node(me) {
+                                    Some(nn) => Order::Harvest { node: nn },
+                                    None => Order::Idle,
+                                };
+                            }
+                        } else {
+                            self.step_toward(i, bp.x, bp.y, inf.speed);
+                        }
+                    }
+                } else if node_ok {
+                    // Walk to the node, then mine it.
+                    let np = self.pos[n];
+                    if dist2(me, np.x, np.y) <= MINE_RANGE2 {
+                        let space = CARRY_CAP - self.carried[i];
+                        let take = MINE_RATE.min(self.amount[n]).min(space);
+                        self.amount[n] -= take;
+                        self.carried[i] += take;
+                        self.carry_kind[i] = if self.kind[n] == Kind::CarbonNode {
+                            1
+                        } else {
+                            0
+                        };
+                        self.mining[i] = true;
+                        if self.amount[n] <= Fx::ZERO {
+                            self.arena.free_index(node);
+                        }
+                    } else {
+                        self.step_toward(i, np.x, np.y, inf.speed);
+                    }
+                } else {
+                    // Empty-handed and the node is gone: find another or stop.
+                    self.order[i] = match self.nearest_node(me) {
+                        Some(nn) => Order::Harvest { node: nn },
+                        None => Order::Idle,
+                    };
+                }
+                self.cooldown[i] = (self.cooldown[i] - Fx::ONE).max(Fx::ZERO);
+                continue;
+            }
 
             // Resolve a move-target and/or an attack-target from the order.
             let mut move_to: Option<(Fx, Fx)> = None;
@@ -454,6 +672,7 @@ impl World {
 
             match self.order[i] {
                 Order::Idle => {}
+                Order::Harvest { .. } => {} // handled above
                 Order::Move { x, y } => {
                     if dist2(me, x, y) <= Fx::from_ratio(4, 10) {
                         self.order[i] = Order::Idle;
@@ -579,7 +798,7 @@ impl World {
         }
 
         for (i, &(rawx, rawy)) in push.iter().enumerate() {
-            if !self.arena.alive[i] || self.kind[i] != Kind::Infantry {
+            if !self.arena.alive[i] || !is_mobile(self.kind[i]) {
                 continue;
             }
             let mut sx = rawx * SEP_FACTOR;
@@ -608,6 +827,16 @@ impl World {
             } else {
                 Fx::ZERO
             };
+            let resource_frac = if is_resource(self.kind[i]) {
+                let cap = node_capacity(self.kind[i]);
+                if cap > Fx::ZERO {
+                    (self.amount[i] / cap).clamp(Fx::ZERO, Fx::ONE)
+                } else {
+                    Fx::ZERO
+                }
+            } else {
+                Fx::ZERO
+            };
             out.push(Snap {
                 index: i as u32,
                 generation: self.arena.generation[i],
@@ -617,6 +846,8 @@ impl World {
                 hp: self.hp[i],
                 max_hp: stats(self.kind[i]).max_hp,
                 moving: !matches!(self.order[i], Order::Idle),
+                mining: self.mining[i],
+                resource_frac,
                 queued: self.queue[i],
                 build_frac,
             });
@@ -639,6 +870,8 @@ impl World {
                 Kind::Infantry => 0,
                 Kind::Barracks => 1,
                 Kind::Worker => 2,
+                Kind::OreNode => 3,
+                Kind::CarbonNode => 4,
             });
             h.write_u32(self.owner[i] as u32);
             h.write_i64(self.pos[i].x.to_raw());
@@ -647,11 +880,15 @@ impl World {
             h.write_i64(self.cooldown[i].to_raw());
             h.write_i64(self.prod[i].to_raw());
             h.write_u32(self.queue[i]);
+            h.write_i64(self.amount[i].to_raw());
+            h.write_i64(self.carried[i].to_raw());
+            h.write_u64(self.carry_kind[i] as u64);
             let (tag, a, b) = match self.order[i] {
                 Order::Idle => (0u64, 0i64, 0i64),
                 Order::Move { x, y } => (1, x.to_raw(), y.to_raw()),
                 Order::AttackMove { x, y } => (2, x.to_raw(), y.to_raw()),
                 Order::Attack { target } => (3, target as i64, 0),
+                Order::Harvest { node } => (4, node as i64, 0),
             };
             h.write_u64(tag);
             h.write_i64(a);
@@ -659,6 +896,9 @@ impl World {
         }
         for &ore in &self.ore {
             h.write_i64(ore.to_raw());
+        }
+        for &carbon in &self.carbon {
+            h.write_i64(carbon.to_raw());
         }
         h.finish()
     }

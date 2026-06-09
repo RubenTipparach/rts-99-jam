@@ -5,7 +5,7 @@ use crate::camera::Camera;
 use crate::gfx::{InstanceRaw, RingRaw, FOW_RES};
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
-use protocol::{BuildingKind, Command, UnitKind};
+use protocol::{BuildingKind, Command, ResourceKind, UnitKind};
 use sim::{Kind, Snap, World};
 use std::collections::HashSet;
 use web_time::Instant;
@@ -108,6 +108,25 @@ impl Game {
                 kind: UnitKind::Worker,
                 x: fxi(-12 + 12 * k),
                 y: fxi(196),
+            });
+        }
+        // Resource nodes: an ore patch and a carbon geyser near the player base,
+        // plus an ore patch up by each enemy base to fight over.
+        setup.push(Command::SpawnResource {
+            kind: ResourceKind::Ore,
+            x: fxi(-70),
+            y: fxi(170),
+        });
+        setup.push(Command::SpawnResource {
+            kind: ResourceKind::Carbon,
+            x: fxi(70),
+            y: fxi(168),
+        });
+        for &bx in &[-150i32, 150] {
+            setup.push(Command::SpawnResource {
+                kind: ResourceKind::Ore,
+                x: fxi(bx + 60),
+                y: fxi(-150),
             });
         }
         // Two enemy barracks far to the north, each with a guard squad - hidden
@@ -375,14 +394,16 @@ impl Game {
         };
     }
 
-    /// Instances for the infantry mesh, the two faction barracks meshes
-    /// (Astromancer, Hollowmen), the two faction worker meshes (Acolyte,
-    /// Engineer), and selection rings. Meshes are authored at world scale, so
-    /// instance scale is ~1.
+    /// Instances for each mesh - infantry, the two faction barracks (Astromancer,
+    /// Hollowmen), the two faction workers (Acolyte, Engineer), the two resource
+    /// nodes (ore, carbon) - plus selection rings. Meshes are authored at world
+    /// scale, so instance scale is ~1 (nodes shrink with depletion).
     #[allow(clippy::type_complexity)]
     pub fn render_data(
         &self,
     ) -> (
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
         Vec<InstanceRaw>,
         Vec<InstanceRaw>,
         Vec<InstanceRaw>,
@@ -396,6 +417,8 @@ impl Game {
         let mut barracks_hollow = Vec::new();
         let mut acolytes = Vec::new();
         let mut engineers = Vec::new();
+        let mut ore_nodes = Vec::new();
+        let mut carbon_nodes = Vec::new();
         let mut rings = Vec::new();
         for s in &self.curr {
             let (wx, wz) = self.lerped(s);
@@ -404,7 +427,20 @@ impl Game {
             }
             let ground = terrain::height(wx, wz);
             let tint = team_color(s.owner);
-            if s.kind == Kind::Barracks {
+            if matches!(s.kind, Kind::OreNode | Kind::CarbonNode) {
+                // Nodes shrink as they deplete (resource_frac runs 1 -> 0).
+                let scl = 0.55 + 0.45 * f(s.resource_frac);
+                let inst = InstanceRaw {
+                    offset: [wx, ground, wz],
+                    scale: [scl, scl, scl],
+                    color: [1.0, 1.0, 1.0, 0.0],
+                };
+                if s.kind == Kind::OreNode {
+                    ore_nodes.push(inst);
+                } else {
+                    carbon_nodes.push(inst);
+                }
+            } else if s.kind == Kind::Barracks {
                 let inst = InstanceRaw {
                     offset: [wx, ground, wz],
                     scale: [1.0, 1.0, 1.0],
@@ -422,12 +458,19 @@ impl Game {
                     });
                 }
             } else if s.kind == Kind::Worker {
-                // Workers animate per faction: the Acolyte hovers with a slow
-                // bob; the Engineer plants on the ground and bobs when walking.
+                // Workers animate per faction. The Acolyte hovers with a slow
+                // bob; the Engineer plants and bobs while walking. While mining,
+                // both get a faster work bob to read as "gathering".
                 let phase = s.index as f32 * 1.3;
+                let work = if s.mining {
+                    (self.time * 14.0 + phase).sin().abs()
+                } else {
+                    0.0
+                };
                 let inst = match self.faction_of(s.owner) {
                     Faction::Astromancer => {
-                        let y = ground + 1.1 + ((self.time * 2.2) + phase).sin() * 0.18;
+                        let hover = if s.mining { 0.5 } else { 1.1 }; // dips to gather
+                        let y = ground + hover + ((self.time * 2.2) + phase).sin() * 0.18;
                         InstanceRaw {
                             offset: [wx, y, wz],
                             scale: [1.0, 1.0, 1.0],
@@ -436,9 +479,10 @@ impl Game {
                     }
                     Faction::Hollowmen => {
                         let mut y = ground;
-                        if s.moving {
+                        if s.moving && !s.mining {
                             y += ((self.time * 9.0) + phase).sin().abs() * 0.12;
                         }
+                        y += work * 0.10; // drilling bob
                         InstanceRaw {
                             offset: [wx, y, wz],
                             scale: [1.0, 1.0, 1.0],
@@ -485,6 +529,8 @@ impl Game {
             barracks_hollow,
             acolytes,
             engineers,
+            ore_nodes,
+            carbon_nodes,
             rings,
         )
     }
@@ -549,8 +595,8 @@ impl Game {
                 (_, Kind::Infantry) => c.1 += 1,
                 (0, Kind::Barracks) => c.2 += 1,
                 (_, Kind::Barracks) => c.3 += 1,
-                // Workers are not part of the army/building tally shown here.
-                (_, Kind::Worker) => {}
+                // Workers and resource nodes are not part of this army tally.
+                (_, Kind::Worker) | (_, Kind::OreNode) | (_, Kind::CarbonNode) => {}
             }
         }
         c
@@ -653,6 +699,12 @@ impl Game {
         f(self.world.ore(0))
     }
 
+    /// The local player's carbon stockpile (for the HUD).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn player_carbon(&self) -> f32 {
+        f(self.world.carbon(0))
+    }
+
     /// Ore cost to train one unit (for the HUD).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn train_cost(&self) -> f32 {
@@ -691,8 +743,47 @@ impl Game {
         }
     }
 
+    /// Nearest resource node to a world point within `radius`, if any.
+    fn nearest_node(&self, wx: f32, wz: f32, radius: f32) -> Option<u32> {
+        let mut best: Option<(u32, f32)> = None;
+        for s in &self.curr {
+            if !matches!(s.kind, Kind::OreNode | Kind::CarbonNode) {
+                continue;
+            }
+            let (nx, nz) = self.lerped(s);
+            let d = (nx - wx).hypot(nz - wz);
+            if d <= radius && best.is_none_or(|(_, bd)| d < bd) {
+                best = Some((s.index, d));
+            }
+        }
+        best.map(|(i, _)| i)
+    }
+
+    fn is_worker(&self, unit: u32) -> bool {
+        self.curr
+            .iter()
+            .any(|s| s.index == unit && s.kind == Kind::Worker)
+    }
+
     pub fn order(&mut self, wx: f32, wz: f32) {
         if self.selected.is_empty() {
+            return;
+        }
+        // Right-clicking a resource node sends selected workers to harvest it;
+        // any non-worker in the selection just moves to the spot.
+        if let Some(node) = self.nearest_node(wx, wz, 10.0) {
+            let sel = self.selected.clone();
+            for u in sel {
+                if self.is_worker(u) {
+                    self.pending.push(Command::Harvest { unit: u, node });
+                } else {
+                    self.pending.push(Command::Move {
+                        unit: u,
+                        x: fx(wx),
+                        y: fx(wz),
+                    });
+                }
+            }
             return;
         }
         if let Some(target) = self.nearest_enemy(wx, wz, 4.0) {

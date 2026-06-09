@@ -573,6 +573,87 @@ fn engineer_mesh() -> Vec<UnitVertex> {
     m
 }
 
+// Neutral resource nodes (see assets/concepts/units_resources.png). Never team
+// tinted. Authored at world scale; ~6 units across so they read as map features.
+
+/// Ore: a cluster of bright, faceted crystals erupting from a dark rock base.
+/// "Shininess" is faked with near-white tips and bright inner cores (the
+/// flat-shaded pipeline has no real translucency).
+fn ore_node_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let body = [0.47, 0.84, 0.92];
+    let body2 = [0.36, 0.74, 0.86];
+    let core = [0.82, 0.97, 1.0];
+    let rock = [0.28, 0.32, 0.38];
+    let rock_dk = [0.17, 0.20, 0.25];
+    push_frustum(
+        &mut m, 0.0, 0.0, 3.4, 2.6, 0.0, 1.0, rock_dk, 0.0, 7, 0.0, false,
+    );
+    push_prism(&mut m, 0.0, 0.0, 2.6, 0.0, 0.45, rock, 0.0, 7, 0.0, true);
+    // (cx, cz, r, height, body color)
+    let shards = [
+        (0.0, 0.0, 1.2, 5.4, body),
+        (1.7, 0.7, 0.8, 3.4, body2),
+        (-1.4, 1.1, 0.7, 3.0, body),
+        (0.8, -1.6, 0.6, 2.6, body2),
+        (-1.1, -1.1, 0.5, 2.0, body),
+    ];
+    for (cx, cz, r, hgt, col) in shards {
+        let y0 = 0.4;
+        let ymid = y0 + hgt * 0.55;
+        let ytip = y0 + hgt;
+        push_prism(&mut m, cx, cz, r, y0, ymid, col, 0.0, 5, 0.0, false);
+        push_pyramid(&mut m, cx, cz, r, ymid, ytip, core, 0.0, 5, 0.0);
+        // Bright inner core, slightly inset, reads as a glowing seam.
+        push_prism(
+            &mut m,
+            cx,
+            cz,
+            r * 0.42,
+            y0,
+            ymid + 0.2,
+            core,
+            0.0,
+            5,
+            0.4,
+            false,
+        );
+    }
+    m
+}
+
+/// Carbon: a vented rock mound with a glowing green gas crater. (Rising smoke is
+/// a separate transparent effect, not yet in the opaque unit pipeline.)
+fn carbon_node_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let vent = [0.21, 0.25, 0.23];
+    let vent_dk = [0.13, 0.16, 0.15];
+    let glow = [0.50, 0.95, 0.60];
+    let glow_core = [0.80, 1.0, 0.84];
+    push_frustum(
+        &mut m, 0.0, 0.0, 4.0, 3.0, 0.0, 1.6, vent_dk, 0.0, 8, 0.0, false,
+    );
+    push_frustum(
+        &mut m, 0.0, 0.0, 3.0, 2.2, 1.6, 3.0, vent, 0.0, 8, 0.0, false,
+    );
+    // Crooked vent rocks around the rim.
+    for (cx, cz) in [(2.2, 0.8), (-1.4, 2.0), (-2.0, -1.4), (1.2, -2.0)] {
+        push_box(
+            &mut m,
+            [cx - 0.55, 0.8, cz - 0.55],
+            [cx + 0.55, 2.2 + 0.18 * cx, cz + 0.55],
+            vent,
+            0.0,
+        );
+    }
+    // Glowing crater fissure.
+    push_prism(&mut m, 0.0, 0.0, 1.9, 3.0, 3.2, glow, 0.0, 8, 0.0, true);
+    push_prism(
+        &mut m, 0.0, 0.0, 1.3, 3.1, 3.35, glow_core, 0.0, 8, 0.0, true,
+    );
+    m
+}
+
 /// Opaque dark walls around the map rim, from above the water down past the
 /// seabed, so you don't see under the (translucent) water at the edges. Drawn
 /// with the unit pipeline via an identity instance.
@@ -746,6 +827,10 @@ pub struct Gfx {
     acolyte_len: u32,
     engineer_buf: wgpu::Buffer,
     engineer_len: u32,
+    ore_node_buf: wgpu::Buffer,
+    ore_node_len: u32,
+    carbon_node_buf: wgpu::Buffer,
+    carbon_node_len: u32,
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
@@ -1157,6 +1242,18 @@ impl Gfx {
             bytemuck::cast_slice(&engineer),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let ore_node = ore_node_mesh();
+        let ore_node_buf = mkbuf(
+            "ore-node",
+            bytemuck::cast_slice(&ore_node),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let carbon_node = carbon_node_mesh();
+        let carbon_node_buf = mkbuf(
+            "carbon-node",
+            bytemuck::cast_slice(&carbon_node),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let walls = water_walls();
         let walls_buf = mkbuf(
             "walls",
@@ -1209,6 +1306,10 @@ impl Gfx {
             acolyte_len: acolyte.len() as u32,
             engineer_buf,
             engineer_len: engineer.len() as u32,
+            ore_node_buf,
+            ore_node_len: ore_node.len() as u32,
+            carbon_node_buf,
+            carbon_node_len: carbon_node.len() as u32,
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
@@ -1247,6 +1348,8 @@ impl Gfx {
         barracks_hollow: &[InstanceRaw],
         acolytes: &[InstanceRaw],
         engineers: &[InstanceRaw],
+        ore_nodes: &[InstanceRaw],
+        carbon_nodes: &[InstanceRaw],
         rings: &[RingRaw],
         fow: &[u8],
         view_proj: [[f32; 4]; 4],
@@ -1254,13 +1357,25 @@ impl Gfx {
         time: f32,
     ) {
         // All meshes share one instance buffer, packed in order: infantry,
-        // Astromancer buildings, Hollowmen buildings, Acolytes, Engineers. Each
-        // mesh is drawn over its own contiguous range.
-        let ni = infantry.len().min(MAX_INSTANCES);
-        let na = barracks_astro.len().min(MAX_INSTANCES - ni);
-        let nh = barracks_hollow.len().min(MAX_INSTANCES - ni - na);
-        let nac = acolytes.len().min(MAX_INSTANCES - ni - na - nh);
-        let nen = engineers.len().min(MAX_INSTANCES - ni - na - nh - nac);
+        // Astromancer buildings, Hollowmen buildings, Acolytes, Engineers, ore
+        // nodes, carbon nodes. Each mesh is drawn over its own contiguous range.
+        let groups = [
+            infantry.len(),
+            barracks_astro.len(),
+            barracks_hollow.len(),
+            acolytes.len(),
+            engineers.len(),
+            ore_nodes.len(),
+            carbon_nodes.len(),
+        ];
+        // Clamp each group's count so the running total never exceeds the buffer.
+        let mut counts = [0usize; 7];
+        let mut used = 0usize;
+        for (c, &g) in counts.iter_mut().zip(groups.iter()) {
+            *c = g.min(MAX_INSTANCES - used);
+            used += *c;
+        }
+        let [ni, na, nh, nac, nen, nor, ncar] = counts;
         let ring_verts = ring_decals(rings);
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
         self.queue.write_buffer(
@@ -1295,37 +1410,22 @@ impl Gfx {
             );
         }
         let stride = std::mem::size_of::<InstanceRaw>() as u64;
-        if ni > 0 {
-            self.queue
-                .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&infantry[..ni]));
-        }
-        if na > 0 {
-            self.queue.write_buffer(
-                &self.instance_buf,
-                ni as u64 * stride,
-                bytemuck::cast_slice(&barracks_astro[..na]),
-            );
-        }
-        if nh > 0 {
-            self.queue.write_buffer(
-                &self.instance_buf,
-                (ni + na) as u64 * stride,
-                bytemuck::cast_slice(&barracks_hollow[..nh]),
-            );
-        }
-        if nac > 0 {
-            self.queue.write_buffer(
-                &self.instance_buf,
-                (ni + na + nh) as u64 * stride,
-                bytemuck::cast_slice(&acolytes[..nac]),
-            );
-        }
-        if nen > 0 {
-            self.queue.write_buffer(
-                &self.instance_buf,
-                (ni + na + nh + nac) as u64 * stride,
-                bytemuck::cast_slice(&engineers[..nen]),
-            );
+        let slices = [
+            &infantry[..ni],
+            &barracks_astro[..na],
+            &barracks_hollow[..nh],
+            &acolytes[..nac],
+            &engineers[..nen],
+            &ore_nodes[..nor],
+            &carbon_nodes[..ncar],
+        ];
+        let mut off = 0u64;
+        for s in slices {
+            if !s.is_empty() {
+                self.queue
+                    .write_buffer(&self.instance_buf, off * stride, bytemuck::cast_slice(s));
+            }
+            off += s.len() as u64;
         }
         if nrv > 0 {
             self.queue
@@ -1389,36 +1489,27 @@ impl Gfx {
             pass.set_vertex_buffer(0, self.walls_buf.slice(..));
             pass.set_vertex_buffer(1, self.wall_inst_buf.slice(..));
             pass.draw(0..self.walls_len, 0..1);
-            if ni > 0 || na > 0 || nh > 0 || nac > 0 || nen > 0 {
+            if used > 0 {
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
-                if ni > 0 {
-                    pass.set_vertex_buffer(0, self.infantry_buf.slice(..));
-                    pass.draw(0..self.infantry_len, 0..ni as u32);
-                }
-                if na > 0 {
-                    pass.set_vertex_buffer(0, self.barracks_astro_buf.slice(..));
-                    pass.draw(0..self.barracks_astro_len, ni as u32..(ni + na) as u32);
-                }
-                if nh > 0 {
-                    pass.set_vertex_buffer(0, self.barracks_hollow_buf.slice(..));
-                    pass.draw(
-                        0..self.barracks_hollow_len,
-                        (ni + na) as u32..(ni + na + nh) as u32,
-                    );
-                }
-                if nac > 0 {
-                    pass.set_vertex_buffer(0, self.acolyte_buf.slice(..));
-                    pass.draw(
-                        0..self.acolyte_len,
-                        (ni + na + nh) as u32..(ni + na + nh + nac) as u32,
-                    );
-                }
-                if nen > 0 {
-                    pass.set_vertex_buffer(0, self.engineer_buf.slice(..));
-                    pass.draw(
-                        0..self.engineer_len,
-                        (ni + na + nh + nac) as u32..(ni + na + nh + nac + nen) as u32,
-                    );
+                // (mesh vertex buffer, mesh vertex count, instance count) per group,
+                // drawn over consecutive instance ranges matching the packing above.
+                let meshes = [
+                    (&self.infantry_buf, self.infantry_len, ni),
+                    (&self.barracks_astro_buf, self.barracks_astro_len, na),
+                    (&self.barracks_hollow_buf, self.barracks_hollow_len, nh),
+                    (&self.acolyte_buf, self.acolyte_len, nac),
+                    (&self.engineer_buf, self.engineer_len, nen),
+                    (&self.ore_node_buf, self.ore_node_len, nor),
+                    (&self.carbon_node_buf, self.carbon_node_len, ncar),
+                ];
+                let mut base = 0u32;
+                for (buf, vlen, count) in meshes {
+                    let count = count as u32;
+                    if count > 0 {
+                        pass.set_vertex_buffer(0, buf.slice(..));
+                        pass.draw(0..vlen, base..base + count);
+                    }
+                    base += count;
                 }
             }
 
@@ -1470,5 +1561,7 @@ mod tests {
         check_mesh(&barracks_mesh_hollow(), "barracks-hollow");
         check_mesh(&acolyte_mesh(), "acolyte");
         check_mesh(&engineer_mesh(), "engineer");
+        check_mesh(&ore_node_mesh(), "ore-node");
+        check_mesh(&carbon_node_mesh(), "carbon-node");
     }
 }
