@@ -96,6 +96,15 @@ stripes.
 Each archetype ships four tileable tiles (`base`, `low`, `high`, `accent`) for
 texturing the mesh; the previews colour the mesh from the same palettes.
 
+The per-voxel **material** id is a genuine 3D field, not a height lookup: a thin
+surface **skin** (chosen by elevation, slope and the feature stamps) sits over a
+per-world **subsurface** that a cut exposes. Ice bodies show clean bright ice
+underneath; everything else shows bedrock. So crater walls, Europa's fissures,
+Mars's canyon, Io's volcano flanks and any carved cave reveal what is under the
+skin, and flats carry a little position (not height) driven albedo mottle. This
+is stored in the existing `material[nx*ny*nz]` array and textured straight from
+the mesh, so it costs no format or renderer change.
+
 ## The full catalog (buildable % and map hazards)
 
 | world | archetype | buildable | landforms / map hazards | NASA reference |

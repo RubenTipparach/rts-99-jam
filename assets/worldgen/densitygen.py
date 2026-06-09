@@ -31,6 +31,15 @@ YMIN, YMAX = -40.0, 150.0
 
 MAT_LOW, MAT_MID, MAT_HIGH, MAT_ACCENT, MAT_HAZARD = 0, 1, 2, 3, 4
 
+# Archetypes that are ice all the way down: a cut (crater wall, fissure, canyon,
+# cave) exposes clean/bright ice (MAT_ACCENT) under the dusty/grooved skin. Every
+# other body exposes bedrock (MAT_HIGH). This is the per-voxel subsurface, which
+# makes material a genuine 3D property instead of a per-column height lookup.
+ICE_ARCH = {
+    "dirty_ice", "grooved_ice", "bright_ice", "europa_ice", "triton_ice",
+    "pluto_tholin",
+}
+
 # Per-world buildable target (fraction of map that should be relatively flat).
 FLAT_TARGET = {
     "earth": 0.50, "pluto": 0.60, "triton": 0.55, "europa": 0.58, "enceladus": 0.55,
@@ -383,8 +392,19 @@ def build(world):
 
     wet = _liquid(grid, ht, world, dy)
 
+    # Subsurface material: what an exposed face / crater wall / cave reveals under
+    # the thin surface skin. This is what makes texture a genuine 3D property
+    # instead of a height lookup: ice bodies show clean ice underneath, everything
+    # else shows bedrock. (No format change: the .vxl already stores material per
+    # voxel and the renderer already textures from it.)
+    ice_under = world["archetype"] in ICE_ARCH
+    sub_m = MAT_ACCENT if ice_under else MAT_HIGH
+    sk = t["seed"]
+
     for k in range(NXZ):
+        v = k / (NXZ - 1)
         for i in range(NXZ):
+            u = i / (NXZ - 1)
             surf = ht[k][i]
             mx = 0.0
             for dk, di in ((1, 0), (-1, 0), (0, 1), (0, -1)):
@@ -394,22 +414,35 @@ def build(world):
             en = surf / span
             override = mat[k][i]
             if override is not None:
-                m = override
+                skin_m = override
             elif mx > step * 0.5:
-                m = MAT_HIGH
+                skin_m = MAT_HIGH
             elif en < 0.28:
-                m = MAT_LOW
+                skin_m = MAT_LOW
             elif en > 0.74:
-                m = MAT_ACCENT
+                skin_m = MAT_ACCENT
             else:
-                m = MAT_MID
+                skin_m = MAT_MID
+            # Height-independent mottle: break up flat plains with x/z-position
+            # noise so a plateau is not one uniform tile (skin only, never over a
+            # feature stamp).
+            if override is None and mx <= step * 0.5 and skin_m == MAT_MID:
+                mott = fbm(u * 4.5 + 11.0, v * 4.5 + 4.0, sk + 7, 3)
+                if mott > 0.66:
+                    skin_m = MAT_LOW
+                elif mott < 0.30:
+                    skin_m = sub_m
+            # Skin thickness wobbles in x/z so the skin->subsurface edge on a face
+            # is irregular, not a perfectly level band.
+            wob = fbm(u * 3.0 + 2.0, v * 3.0 + 9.0, sk + 13, 2)
+            skin = dy * (1.2 + 1.6 * wob)
             # buildable: flat, and dry land (not under ocean/lake/river)
             grid.buildable[k * NXZ + i] = 1 if (mx <= tol and (i, k) not in wet) else 0
             for j in range(NY):
                 y = YMIN + j * dy
                 d = 128.0 + (surf - y) * slope_per_unit
                 grid.density[grid.lin(i, j, k)] = int(clamp(d, 0, 255))
-                grid.material[grid.lin(i, j, k)] = m
+                grid.material[grid.lin(i, j, k)] = skin_m if (surf - y) <= skin else sub_m
 
     # 3D caves/arches into steep, dry, non-buildable ground.
     rng = Rng(t["seed"] * 977 + 3)

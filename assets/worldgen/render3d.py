@@ -75,13 +75,18 @@ def render_world(world):
     tint = world["tint"]
     bright = world["bright"]
     nxz = grid.nx
-    x0, _, _, _, z0, _ = grid.bounds
-    dx, dz = grid.dx(), grid.dz()
+    x0, _, y0, _, z0, _ = grid.bounds
+    dx, dy, dz = grid.dx(), grid.dy(), grid.dz()
 
     def col_at(vx, vz):
         ci = max(0, min(nxz - 1, int((vx - x0) / dx)))
         ck = max(0, min(nxz - 1, int((vz - z0) / dz)))
         return ci, ck
+
+    def voxel_at(vx, vy, vz):
+        ci, ck = col_at(vx, vz)
+        cj = max(0, min(grid.ny - 1, int((vy - y0) / dy)))
+        return ci, cj, ck
 
     # Project all verts; auto-fit to the frame, then expose a reusable to_screen.
     proj = []
@@ -111,8 +116,8 @@ def render_world(world):
     # Per-vertex lit colour (Gouraud). Buildable ground is pushed green; lava glows.
     vcol = [(0, 0, 0)] * len(verts)
     for vi, (vx, vy, vz) in enumerate(verts):
-        ci, ck = col_at(vx, vz)
-        mat = grid.material[grid.lin(ci, 0, ck)]
+        ci, cj, ck = voxel_at(vx, vy, vz)
+        mat = grid.material[grid.lin(ci, cj, ck)]
         base = _material_color(world, pal, mat)
         n = normals[vi]
         ndl = max(0.0, n[0] * _L[0] + n[1] * _L[1] + n[2] * _L[2])
