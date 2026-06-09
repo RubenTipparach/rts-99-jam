@@ -39,6 +39,20 @@ the asymmetry:
 | 🐀 Warren (rats) | Scavenge from salvage and the converted dead | None | Run on "genetics" |
 | 🦑 Rimelings | Cannot produce; drain it from nearby enemy casters (plus a trickle from ether-collectors) | Generate (reactors) | The only faction on both energies |
 
+**Signature resources.** Two factions layer a unique progression resource on top
+of the shared five, each drawn from that faction's own core loop:
+
+| Faction | Resource | Income | Spent on |
+|---|---|---|---|
+| 🐱 Ninefold | ⭐ Instinct | Banked when their *own* units fall: the experience of the dead returns to the living | Reviving key units (the nine lives) and permanent veteran upgrades |
+| 🐀 Warren | 🥚 Genetics | Grows with the population: every rat bred, and every enemy turned by plague, deepens the gene-pool | Mutating unit traits / genes and evolving buildings into upgraded forms |
+
+The two mirror each other: the cats bank the **dead**, the rats bank the
+**born**. Both are spent on permanent upgrades and revives, not on raw unit cost
+(the shared five still pay for the units and structures themselves), and both are
+feedback loops that need a cap or diminishing returns so they cannot snowball
+unstoppably.
+
 Every faction still needs the RTS basics - a **HQ**, a **builder/worker**, a
 **materials extractor**, **production**, and **defense** - so those are listed
 even where the flavor is unusual. Items marked *(glue)* are standard-RTS
@@ -208,8 +222,9 @@ expansion via instant structures.
 - **Detection vs stealth:** the Ninefold force every faction to field a detector;
   decide each faction's answer (Hollowmen radar, Astromancer seeing-eye, Rimeling
   sense, etc.).
-- **Conversion & soak caps:** Warren plague-conversion and Rimeling magic-soak
-  both feed on the enemy and need caps or counters so they cannot snowball
-  unstoppably.
+- **Feedback-resource caps:** Ninefold Instinct (fed by their own dead), Warren
+  Genetics and plague-conversion (fed by population growth), and Rimeling
+  magic-soak (fed by the enemy) all snowball by design and need caps or counters
+  so they cannot run away unstoppably.
 - **Jam scope:** likely ship two factions first (Astromancers vs Hollowmen, the
   cleanest grown-vs-manufactured duel), the other three as stretch.

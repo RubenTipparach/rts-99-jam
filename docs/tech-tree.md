@@ -94,15 +94,22 @@ This doc only details the two launch factions, but the two energy axes generaliz
 across all five, which is why the resource set is the way it is. Full rosters for
 these three are a later pass; their energy canon is set:
 
-| Faction | 🔮 Mana | ⚡ Power | Flavor |
+| Faction | 🔮 Mana | ⚡ Power | Signature resource |
 |---|---|---|---|
-| 🐱 Ninefold (cats) | Generate (lunar cycle) | No | Run on "instinct" |
-| 🐀 Warren (rats) | Scavenge from salvage and the converted dead | No | Run on "genetics" |
-| 🦑 Rimelings | Cannot produce; **drain it from enemy casters** | Yes (reactors) | The only faction on both energies |
+| 🐱 Ninefold (cats) | Generate (lunar cycle) | No | ⭐ **Instinct**: an XP pool banked when their *own* fall; pays revives (nine lives) and upgrades |
+| 🐀 Warren (rats) | Scavenge from salvage and the converted dead | No | 🥚 **Genetics**: grows with the population; pays gene mutations and evolving buildings |
+| 🦑 Rimelings | Cannot produce; **drain it from enemy casters** | Yes (reactors) | none unique (runs on stolen Mana + Power) |
 
 The split tracks the war's alignment: the magic side (Astromancers, cats, rats)
 runs on Mana; the anti-magic pact (Hollowmen, Rimelings) runs on Power, with the
 parasitic Rimelings straddling both by stealing the Mana they cannot make.
+
+Two of them also carry a **signature progression resource** drawn from their core
+loop, and the two mirror each other: the Ninefold bank ⭐ Instinct from their
+fallen (loss becomes power), the Warren bank 🥚 Genetics from breeding (numbers
+become tech). Both pay for upgrades and revives rather than raw unit cost, and
+both are feedback loops that want a cap so they cannot run away. Their full trees
+are a later pass.
 
 ### How to read the tables
 
