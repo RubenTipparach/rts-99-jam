@@ -75,20 +75,25 @@ expensive, slow to mass. Home turf: irradiated zones, where they heal.
 - **Golem** - heavy grown bruiser; no shield, huge HP.
 - **Hover-tank** - fast hovering armor with an arcane cannon.
 
-**Structures** (grown over time)
+**Structures** (grown, and hovering slightly off the ground)
 - **Spire** (HQ) *(glue)* - grows the colony; tech root.
 - **Reliquary** - magic income.
 - **Sanctum** *(glue)* - unit production.
 - **Citadel** - defensive temple; see Flying Fortress.
+- **Sky-Cradle** - grows the capital flying castles.
 
 **Air & heavies**
 - **Hover-craft** - skirmisher gunships.
 - **Dragon** - tech-outfitted drake with laser breath; air superiority / bomber.
 - **Flying Fortress** - a Citadel that lifts off: slow mobile temple-fortress, heavy guns, can re-root elsewhere.
+- **Sky-Bastion** - a purpose-grown flying castle; the Astromancer capital ship (heavy aether batteries, a shield aura, garrisons units).
 
 **Signature mechanic - regeneration & radiation.** Units self-shield and
-regenerate; in irradiated terrain they heal faster and hit harder. Grown
-structures can uproot and relocate (the flying fortress).
+regenerate; in irradiated terrain they heal faster and hit harder. Every structure
+hovers, and the fortress class can uproot and take flight, so the colony's heavy
+tier is a fleet of flying castles (Flying Fortress, Sky-Bastion), not just the
+Dragon. Astromancer buildings are otherwise unarmed, leaning on Wards and Citadels
+for defense.
 
 ---
 
@@ -105,7 +110,7 @@ armor, lasers, and nukes. They cannot cast, so their edge is **denial**
 - **War-Mech** - heavy walker; anti-everything brawler.
 - **Dampener Team** - projects a **null-field**: enemy casting fails inside it.
 
-**Structures**
+**Structures** (fixed in place, but each has a built-in gun, so bases self-defend)
 - **Command HQ** *(glue)*.
 - **Refinery** *(glue)* - materials income.
 - **Reactor** - power; gates production and upkeep.
@@ -120,7 +125,9 @@ armor, lasers, and nukes. They cannot cast, so their edge is **denial**
 
 **Signature mechanic - nukes & null-fields.** Superweapon nukes for siege;
 null-fields and dampeners switch off the enemy's whole magic kit so iron wins.
-Cheapest, fastest reinforcements in the game.
+Cheapest, fastest reinforcements in the game. Bases are grounded and immobile, but
+every Hollowmen building carries its own defensive weapon, so the base bites back
+even before you add Null Pylons.
 
 ---
 

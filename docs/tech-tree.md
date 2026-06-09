@@ -43,6 +43,7 @@ the asymmetry, not just the unit art.
 | **Shared economy** | 🔴 Ore, ⚫ Carbon, 💧 Water mined off the map | 🔴 Ore, ⚫ Carbon, 💧 Water mined off the map |
 | **Worker** | 🌱 **Acolyte** plants a seed; the structure *grows* unattended (slow) | 👷 **Engineer** drives a rig, must stay, can *repair* (fast) |
 | **Tree shape** | Two prongs (martial via Sanctum, arcane via Reliquary) that **converge** | One **power-gated** spine with **Factory add-ons** |
+| **Buildings** | Hover off the ground, unarmed, grown over any terrain; the fortress class uproots and flies | Grounded and fixed, but every structure has a built-in gun, so bases self-defend |
 | **Defining tech** | Regenerating shields, radiation healing, structures that **uproot and fly** | **Null-fields** (switch off enemy magic) and a one-shot **nuke** |
 | **Pace** | Few, expensive, slow to mass, very hard to kill | Many, cheap, fastest reinforcements in the game |
 | **Superweapon** | ☄️ **Radiation Bloom**: permanently irradiates terrain (heals Astros, harms others) | 🚀 **Nuclear Strike**: one devastating blast |
@@ -145,6 +146,7 @@ graph TD
     Aerie["🦅 Aerie<br/>tier 3 - air"]
     Citadel["🏰 Citadel<br/>tier 3 - fortress"]
     LeyNexus["☄️ Ley Nexus<br/>tier 3 - superweapon"]
+    SkyCradle["☁️ Sky-Cradle<br/>tier 3 - flying castles"]
 
     Spire --> Reliquary
     Spire --> Sanctum
@@ -155,9 +157,11 @@ graph TD
     Crucible --> Citadel
     Conservatory --> Citadel
     Conservatory --> LeyNexus
+    Aerie --> SkyCradle
+    Citadel --> SkyCradle
 
     classDef astro fill:#2c1e3d,stroke:#b48ad9,color:#fff;
-    class Spire,Reliquary,Sanctum,Ward,Crucible,Conservatory,Aerie,Citadel,LeyNexus astro;
+    class Spire,Reliquary,Sanctum,Ward,Crucible,Conservatory,Aerie,Citadel,LeyNexus,SkyCradle astro;
 ```
 
 ### Buildings and prerequisites
@@ -173,6 +177,16 @@ graph TD
 | 🦅 **Aerie** | 3 | Crucible | Hover-craft, Dragon | 🔴200 ⚫75 🔮50 |
 | 🏰 **Citadel** | 3 | Crucible + Conservatory | Top defense; researches Uproot -> Flying Fortress | 🔴250 ⚫50 🔮100 |
 | ☄️ **Ley Nexus** | 3 | Conservatory | Big Mana income; researches the Radiation Bloom superweapon | 🔴300 💧100 🔮150 |
+| ☁️ **Sky-Cradle** | 3 | Aerie + Citadel | Grows the capital flying castles (the Sky-Bastion) | 🔴300 ⚫75 💧75 🔮100 |
+
+**Building trait: they hover.** Every Astromancer structure floats a little off
+the ground (grown, not poured), so it can sit over water or broken terrain, and it
+carries **no weapon of its own**: defense is concentrated in the 🗿 Ward and 🏰
+Citadel. That same lift is why the Astromancer **capital class is a flying
+castle**, in two grades: the 🛫 **Flying Fortress** (a Citadel you uproot and
+relocate, via the Uproot research) and the 🏯 **Sky-Bastion** (a purpose-grown
+war-castle from the Sky-Cradle). The Dragon is the fighter; the castles are the
+navy.
 
 ### Units
 
@@ -185,6 +199,7 @@ graph TD
 | 🛸 **Hover-tank** | Crucible | - | Fast hovering armor, arcane cannon. Skirmish and raid; the mobile damage core. Light armor for its tier. | 🔴150 ⚫50 🔮25 | 28s |
 | 🛩️ **Hover-craft** | Aerie | - | Skirmisher gunship. Cheap-ish air harass and scouting; dies to dedicated anti-air. | 🔴125 ⚫25 🔮25 | 26s |
 | 🐉 **Dragon** | Aerie | - | Tech-outfitted drake, laser breath. Air superiority and bomber. Expensive centerpiece; shielded, regenerates between fights. | 🔴200 ⚫150 🔮100 | 44s |
+| 🏯 **Sky-Bastion** | Sky-Cradle | - | **Capital flying castle**, the Astromancer answer to the Capital Warship. Heavy aether batteries, a regenerating shield, and a shield/heal aura for nearby Astros; garrisons a few units. Slow; focus-fired, or shut down by null-fields (its shield drops). | 🔴500 ⚫150 🔮200 | 70s |
 
 ### Research and upgrades
 
@@ -271,6 +286,13 @@ graph TD
 | ⚓ **Drydock** | 3 | Starport + Fusion | Capital Warship | 🔴300 ⚫100 (⚡5) |
 | 🚀 **Missile Silo** | 3 | Fusion | Builds and launches the Nuke | 🔴400 ⚫50 (⚡4) |
 
+**Building trait: grounded, but armed.** A Hollowmen structure cannot relocate
+once placed, but **every building ships with a built-in defensive gun**, so a base
+defends itself without a forest of dedicated turrets. The 🚫 Null Pylon adds
+specialized anti-magic, not basic firepower. The trade for that built-in security
+is that nothing the Hollowmen build can pick up and move: no uproot, no flying
+castles.
+
 ### Units
 
 | Unit | Built at | Requires | Role and counters | Cost | Build |
@@ -323,6 +345,8 @@ graph TD
 | Frontline | Regenerating shields + radiation healing | Cheap mass + armor + stims |
 | Hard counter they fear | Null-fields drop their shields and casts | Anything that ignores attrition (shields, splash) |
 | Mobility trick | Flying Fortress (uproot and re-root) | Dropship drops and Afterburner air |
+| Buildings | Hover, unarmed, relocatable (uproot) | Grounded, fixed, each self-defends |
+| Capital | Flying castles (Flying Fortress, Sky-Bastion) | Capital Warship |
 | Detection | 👁️ Seeing-Eye research | 📡 Radar Array building |
 | Superweapon | ☄️ Radiation Bloom (persistent terrain) | 🚀 Nuclear Strike (one blast) |
 | Tempo | Slow, elite, turtle-and-snowball | Fast, expendable, relentless pressure |
