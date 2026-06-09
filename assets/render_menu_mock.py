@@ -34,6 +34,29 @@ def button(cv, x, y, w, h, label, state, scale=2 * SS):
     text(cv, x + (w - lw) // 2, y + (h - 7 * scale) // 2, label, scale, txt)
 
 
+def disc(cv, cx, cy, rx, ry, col, clip):
+    cx0, cy0, cx1, cy1 = clip
+    for yy in range(max(int(cy - ry), cy0), min(int(cy + ry) + 1, cy1)):
+        for xx in range(max(int(cx - rx), cx0), min(int(cx + rx) + 1, cx1)):
+            if ((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2 <= 1.0:
+                cv.set(xx, yy, col)
+
+
+def map_preview(cv, x, y, w, h, mp):
+    border_rect(cv, x, y, w, h, (10, 20, 38), (120, 160, 210))
+    clip = (int(x + 2 * SS), int(y + 2 * SS), int(x + w - 2 * SS), int(y + h - 2 * SS))
+    if mp == 0:
+        disc(cv, x + w * 0.5, y + h * 0.5, w * 0.30, h * 0.42, (42, 58, 48), clip)
+        disc(cv, x + w * 0.5, y + h * 0.5, w * 0.19, h * 0.27, (51, 70, 58), clip)
+        disc(cv, x + w * 0.30, y + h * 0.30, 6 * SS, 6 * SS, (74, 163, 255), clip)
+        disc(cv, x + w * 0.70, y + h * 0.70, 6 * SS, 6 * SS, (255, 90, 74), clip)
+    else:
+        disc(cv, x + w * 0.28, y + h * 0.5, w * 0.20, h * 0.34, (47, 63, 76), clip)
+        disc(cv, x + w * 0.72, y + h * 0.5, w * 0.20, h * 0.34, (47, 63, 76), clip)
+        disc(cv, x + w * 0.22, y + h * 0.5, 6 * SS, 6 * SS, (74, 163, 255), clip)
+        disc(cv, x + w * 0.78, y + h * 0.5, 6 * SS, 6 * SS, (255, 90, 74), clip)
+
+
 def panel_bg(cv, x0, y0, x1, y1):
     h = y1 - y0
     for y in range(y0, y1):
@@ -54,8 +77,8 @@ def main_menu(cv, ox, oy, w, h):
     text(cv, ox + (w - text_w(sub, 2 * SS)) // 2, oy + int(h * 0.22) + 56 * SS, sub, 2 * SS, (127, 158, 200))
     bw = 280 * SS
     bx = ox + (w - bw) // 2
-    button(cv, bx, oy + int(h * 0.50), bw, 56 * SS, "SKIRMISH", SELECTED)
-    button(cv, bx, oy + int(h * 0.50) + 72 * SS, bw, 56 * SS, "CAMPAIGN (SOON)", DISABLED)
+    button(cv, bx, oy + int(h * 0.50), bw, 56 * SS, "CAMPAIGN (SOON)", DISABLED)
+    button(cv, bx, oy + int(h * 0.50) + 72 * SS, bw, 56 * SS, "SKIRMISH", NORMAL)
 
 
 def lobby(cv, ox, oy, w, h):
@@ -77,8 +100,9 @@ def lobby(cv, ox, oy, w, h):
     text(cv, rx + 70 * SS, oy + 196 * SS, "BOTS: 1", 2 * SS, (154, 178, 216))
     button(cv, rx, oy + 184 * SS, 56 * SS, 44 * SS, "-", DISABLED)
     button(cv, rx + 320 * SS, oy + 184 * SS, 56 * SS, 44 * SS, "+", NORMAL)
-    text(cv, rx, oy + 264 * SS, "MAP:  RUINS OF AETHER", 2 * SS, (220, 230, 246))
-    button(cv, rx, oy + 286 * SS, 360 * SS, 48 * SS, "NEXT MAP", NORMAL)
+    text(cv, rx, oy + 250 * SS, "MAP:  RUINS OF AETHER", 2 * SS, (220, 230, 246))
+    map_preview(cv, rx, oy + 264 * SS, 360 * SS, 150 * SS, 0)
+    button(cv, rx, oy + 264 * SS + 162 * SS, 360 * SS, 44 * SS, "NEXT MAP", NORMAL)
 
     button(cv, ox + 30 * SS, oy + h - 86 * SS, 200 * SS, 56 * SS, "BACK", NORMAL)
     button(cv, ox + w - 230 * SS, oy + h - 86 * SS, 200 * SS, 56 * SS, "START", SELECTED)

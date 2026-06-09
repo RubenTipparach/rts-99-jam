@@ -116,23 +116,24 @@ mod web {
             Screen::Menu => {
                 let bw = 280.0;
                 let bx = (w - bw) / 2.0;
+                // Campaign sits on top (greyed, not yet playable); Skirmish below.
                 v.push(btn(
-                    Click::Skirmish,
+                    Click::None,
                     bx,
                     h * 0.46,
                     bw,
                     56.0,
-                    "SKIRMISH",
-                    true,
+                    "CAMPAIGN  (SOON)",
+                    false,
                 ));
                 v.push(btn(
-                    Click::None,
+                    Click::Skirmish,
                     bx,
                     h * 0.46 + 72.0,
                     bw,
                     56.0,
-                    "CAMPAIGN  (SOON)",
-                    false,
+                    "SKIRMISH",
+                    true,
                 ));
             }
             Screen::Lobby => {
@@ -170,12 +171,13 @@ mod web {
                     "+",
                     lobby.bots < 3,
                 ));
+                // Map preview thumbnail is drawn at y=336 (h=190); button below.
                 v.push(btn(
                     Click::NextMap,
                     rx,
-                    360.0,
+                    548.0,
                     380.0,
-                    48.0,
+                    44.0,
                     "NEXT MAP",
                     true,
                 ));
@@ -229,6 +231,55 @@ mod web {
         ctx.set_text_align("center");
         ctx.set_text_baseline("middle");
         let _ = ctx.fill_text(&b.label, b.x + b.w / 2.0, b.y + b.h / 2.0);
+    }
+
+    /// A stylized thumbnail of the chosen map: sea/space backdrop, landmasses,
+    /// and the player (blue) vs enemy (red) start positions. Placeholder art, one
+    /// arrangement per map index.
+    fn draw_map_preview(ctx: &Ctx, x: f64, y: f64, w: f64, h: f64, map: usize) {
+        use std::f64::consts::TAU;
+        // Frame + sea.
+        ctx.set_fill_style_str("#0a1426");
+        ctx.fill_rect(x, y, w, h);
+        // Clip the contents to the box so landmasses don't spill over the panel.
+        ctx.save();
+        ctx.begin_path();
+        ctx.rect(x, y, w, h);
+        ctx.clip();
+        // Landmasses + base markers, per map.
+        let land = "#2a3a30";
+        let blob = |cx: f64, cy: f64, r: f64, col: &str| {
+            ctx.set_fill_style_str(col);
+            ctx.begin_path();
+            let _ = ctx.ellipse(cx, cy, r, r * 0.78, 0.0, 0.0, TAU);
+            ctx.fill();
+        };
+        if map == 0 {
+            // Ruins of Aether: one central island, bases NW / SE.
+            blob(x + w * 0.5, y + h * 0.5, w * 0.34, land);
+            blob(x + w * 0.5, y + h * 0.5, w * 0.22, "#33463a");
+        } else {
+            // Frozen Expanse: two icy shelves, bases W / E.
+            blob(x + w * 0.28, y + h * 0.5, w * 0.22, "#2f3f4c");
+            blob(x + w * 0.72, y + h * 0.5, w * 0.22, "#2f3f4c");
+            blob(x + w * 0.5, y + h * 0.5, w * 0.12, "#33414c");
+        }
+        let bases = if map == 0 {
+            [(0.30, 0.30, "#4aa3ff"), (0.70, 0.70, "#ff5a4a")]
+        } else {
+            [(0.22, 0.5, "#4aa3ff"), (0.78, 0.5, "#ff5a4a")]
+        };
+        for (fx, fy, col) in bases {
+            ctx.set_fill_style_str(col);
+            ctx.begin_path();
+            let _ = ctx.arc(x + w * fx, y + h * fy, 6.0, 0.0, TAU);
+            ctx.fill();
+        }
+        ctx.restore();
+        // Border.
+        ctx.set_stroke_style_str("rgba(120,160,210,0.9)");
+        ctx.set_line_width(1.5);
+        ctx.stroke_rect(x, y, w, h);
     }
 
     pub fn draw(screen: Screen, lobby: &Lobby) {
@@ -288,7 +339,15 @@ mod web {
                 ctx.set_font("bold 16px monospace");
                 let _ = ctx.fill_text(&format!("BOTS: {}", lobby.bots), rx + 70.0, 278.0);
                 let map = MAPS[lobby.map as usize % MAPS.len()];
-                let _ = ctx.fill_text(&format!("MAP:  {map}"), rx, 344.0);
+                let _ = ctx.fill_text(&format!("MAP:  {map}"), rx, 326.0);
+                draw_map_preview(
+                    &ctx,
+                    rx,
+                    336.0,
+                    380.0,
+                    190.0,
+                    lobby.map as usize % MAPS.len(),
+                );
             }
             Screen::InGame => {}
         }
