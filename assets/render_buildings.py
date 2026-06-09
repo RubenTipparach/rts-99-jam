@@ -212,7 +212,7 @@ H_CYAN = (110, 196, 224)
 H_GUN = (48, 52, 58)
 H_RUST = (150, 96, 60)
 
-HOVER = 1.1  # Astromancer ground gap
+HOVER = 2.1  # Astromancer ground gap (clear air under grown structures)
 
 
 # --------------------------------------------------------------- buildings ---
@@ -222,8 +222,9 @@ HOVER = 1.1  # Astromancer ground gap
 def astro_spire():
     m = []
     y = HOVER
-    # grown root: inverted faceted cone hanging beneath the hover gap.
-    frustum(m, 0, 0, 2.2, 0.2, y, 0.05, A_SHELL3, n=8, top=False)
+    # grown root: a stubby faceted point hanging under the body (does NOT reach
+    # the ground - the air gap below sells the hover).
+    frustum(m, 0, 0, 2.2, 0.3, y, y - 1.1, A_SHELL3, n=8, top=False)
     # stacked tapering body.
     prism(m, 0, 0, 2.4, y, y + 3.4, A_SHELL, n=8)
     prism(m, 0, 0, 2.4 + 0.05, y + 1.5, y + 1.9, A_TEAL, n=8, emissive=True)  # energy band
@@ -536,18 +537,20 @@ def shade(color, normal):
 
 def render_building(cv, mesh, cx, cy, cell_w, cell_h):
     # auto-fit: project all verts to view plane, scale to cell.
-    pv = []
     bc = centroid([p for f in mesh for p in f[0]])
     vmin = [1e9, 1e9]
     vmax = [-1e9, -1e9]
-    for f in mesh:
-        for p in f[0]:
-            vx, vy, _ = view(p)
-            vmin[0] = min(vmin[0], vx); vmax[0] = max(vmax[0], vx)
-            vmin[1] = min(vmin[1], vy); vmax[1] = max(vmax[1], vy)
+    # Frame in the ground footprint too, so a hovering building shows the gap
+    # between it and its shadow (and a grounded one reads as planted on it).
+    fit_pts = [p for f in mesh for p in f[0]]
+    fit_pts += [(0, 0, 0), (4.6, 0, 4.6), (-4.6, 0, 4.6), (4.6, 0, -4.6), (-4.6, 0, -4.6)]
+    for p in fit_pts:
+        vx, vy, _ = view(p)
+        vmin[0] = min(vmin[0], vx); vmax[0] = max(vmax[0], vx)
+        vmin[1] = min(vmin[1], vy); vmax[1] = max(vmax[1], vy)
     bw = (vmax[0] - vmin[0]) or 1.0
     bh = (vmax[1] - vmin[1]) or 1.0
-    scale = min(cell_w * 0.84 / bw, cell_h * 0.84 / bh)
+    scale = min(cell_w * 0.92 / bw, cell_h * 0.9 / bh)
     mx = (vmin[0] + vmax[0]) / 2.0
     my = (vmin[1] + vmax[1]) / 2.0
 
