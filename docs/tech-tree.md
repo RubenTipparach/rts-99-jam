@@ -96,20 +96,21 @@ these three are a later pass; their energy canon is set:
 
 | Faction | 🔮 Mana | ⚡ Power | Signature resource |
 |---|---|---|---|
-| 🐱 Ninefold (cats) | Generate (lunar cycle) | No | ⭐ **Instinct**: an XP pool banked when their *own* fall; pays revives (nine lives) and upgrades |
-| 🐀 Warren (rats) | Scavenge from salvage and the converted dead | No | 🥚 **Genetics**: grows with the population; pays gene mutations and evolving buildings |
+| 🐱 Ninefold (cats) | Generate (lunar cycle) | No | ⭐ **Instinct**: an XP pool banked from their own fallen; spent to give *individual* cats new abilities (customize each character) |
+| 🐀 Warren (rats) | Scavenge from salvage and the converted dead | No | 🥚 **Genetics**: grows with the population; spent to *pivot the swarm's* traits to counter the enemy |
 | 🦑 Rimelings | Cannot produce; **drain it from enemy casters** | Yes (reactors) | none unique (runs on stolen Mana + Power) |
 
 The split tracks the war's alignment: the magic side (Astromancers, cats, rats)
 runs on Mana; the anti-magic pact (Hollowmen, Rimelings) runs on Power, with the
 parasitic Rimelings straddling both by stealing the Mana they cannot make.
 
-Two of them also carry a **signature progression resource** drawn from their core
-loop, and the two mirror each other: the Ninefold bank ⭐ Instinct from their
-fallen (loss becomes power), the Warren bank 🥚 Genetics from breeding (numbers
-become tech). Both pay for upgrades and revives rather than raw unit cost, and
-both are feedback loops that want a cap so they cannot run away. Their full trees
-are a later pass.
+Two of them also carry a **signature progression resource**, and they mirror each
+other twice: in income the Ninefold bank ⭐ Instinct from their fallen while the
+Warren bank 🥚 Genetics from breeding; in spending the Ninefold customize the
+*individual* (Instinct unlocks bespoke abilities on each cat) while the Warren
+adapt the *collective* (Genetics pivots the whole swarm to counter the enemy).
+Neither pays for raw unit cost, both want a cap, and their full trees are a later
+pass.
 
 ### How to read the tables
 

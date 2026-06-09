@@ -44,13 +44,15 @@ of the shared five, each drawn from that faction's own core loop:
 
 | Faction | Resource | Income | Spent on |
 |---|---|---|---|
-| 🐱 Ninefold | ⭐ Instinct | Banked when their *own* units fall: the experience of the dead returns to the living | Reviving key units (the nine lives) and permanent veteran upgrades |
-| 🐀 Warren | 🥚 Genetics | Grows with the population: every rat bred, and every enemy turned by plague, deepens the gene-pool | Mutating unit traits / genes and evolving buildings into upgraded forms |
+| 🐱 Ninefold | ⭐ Instinct | An XP pool banked when their *own* units fall: the experience of the dead returns to the living | Granting **individual** cats new abilities; you customize each character one by one |
+| 🐀 Warren | 🥚 Genetics | Grows with the population: every rat bred, and every enemy turned by plague, deepens the gene-pool | **Pivoting the swarm**: adapting its traits / genes (and buildings) to counter whatever the enemy fields |
 
-The two mirror each other: the cats bank the **dead**, the rats bank the
-**born**. Both are spent on permanent upgrades and revives, not on raw unit cost
-(the shared five still pay for the units and structures themselves), and both are
-feedback loops that need a cap or diminishing returns so they cannot snowball
+The two mirror each other twice over. In **income**, the cats bank the *dead* and
+the rats bank the *born*. In **spending**, the cats specialize the *individual*
+(bespoke abilities, one character at a time) while the rats adapt the *collective*
+(the whole swarm pivots its genes to counter the enemy): elite customization
+against swarm adaptation. Neither is spent on raw unit cost (the shared five still
+pay for that), and both are feedback loops that need a cap so they cannot snowball
 unstoppably.
 
 Every faction still needs the RTS basics - a **HQ**, a **builder/worker**, a
