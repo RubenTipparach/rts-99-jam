@@ -33,18 +33,19 @@ cliffs are good; spikes are not. The recipe (`densitygen.py`):
 1. A smooth, **low-frequency** base surface (no fine noise), plus a few wide,
    shallow craters with flat floors (never spikes).
 2. **Terracing** into a few big elevation tiers: gentle slopes snap to flat
-   plateau tops separated by short cliff risers. The tier count is searched per
-   world to hit its buildable target.
-3. **Voxelize** to a density field with a thin vertical iso-band so marching
-   cubes produces a clean surface; tier jumps become near-vertical cliffs.
-4. Carve a few **caves / arches** into the steep (non-buildable) ground for 3D
-   interest, leaving build space intact.
-5. Mark a per-column **buildable mask** (the flat tops) and store it in the map.
+   plateau tops separated by short cliff risers.
+3. **Smoothing for variability:** blend the hard terraces back toward the smooth
+   base (per-world `TERRACE_MIX`), then box-blur the height field (`SMOOTH`
+   passes). This rounds the cliffs/ridges marching cubes would otherwise render
+   as hard facets, and mixes plateaus with rolling ground for varied terrain.
+4. **Features**, added *after* smoothing so they stay crisp: prominent impact
+   craters, Europa fissures, the Mars canyon, Io's volcanoes, geysers.
+5. **Voxelize** to a density field; **carve** a few caves/arches into steep
+   ground; mark the per-column **buildable mask** (the flat, dry tops).
 
-Buildable fractions stay generous: airless bodies and Io are mostly flat
-(~83-95%) with craters / volcanoes for relief; resurfaced ice runs ~57-86%; the
-feature-heavy worlds (Mars, Pluto, Europa, Titan) sit ~55-81%. Earth is lowest
-(~33%) because roughly half of it is ocean.
+The smoothing makes terrain gently rolling rather than hard-faceted, so buildable
+fractions are high: most worlds ~88-99%, with the feature-heavy ones lower - Io
+~87%, Europa ~79%, Miranda ~76%, Titan ~57%, Earth ~48% (roughly half ocean).
 
 ### Landforms by erosion
 
@@ -99,27 +100,27 @@ texturing the mesh; the previews colour the mesh from the same palettes.
 
 | world | archetype | buildable | landforms / map hazards | NASA reference |
 | ----- | --------- | --------- | ----------------------- | -------------- |
-| Luna (Moon) | `regolith_grey` | 94% | flat plains; heavy cratering; basalt maria | LRO (PIA23237) |
-| Ceres | `regolith_dark` | 93% | flat; heavy cratering; brine eruptions (faculae) | Dawn (PIA21078) |
-| Vesta | `regolith_grey` | 90% | flat; heavy cratering; cliffs/scarps | Dawn (PIA15140) |
-| Mars | `mars_rust` | 81% | one big central canyon; dust storms; polar frost | Viking / MRO (PIA00565) |
-| Callisto | `dirty_ice` | 94% | flat; heavy cratering; radiation | Galileo (PIA03456) |
-| Ganymede | `grooved_ice` | 64% | grooved sulci; radiation; ice rifts | Galileo / Juno (PIA05077) |
-| Europa | `europa_ice` | 72% | long deep fissures (lineae); chaos; radiation | Galileo (PIA00294) |
-| Io | `io_sulfur` | 83% | mostly flat; giant volcanoes; lava; radiation; plumes | Galileo / Voyager 1 (PIA02509) |
-| Titan | `titan_haze` | 55% | oceans of liquid methane; haze; dunes | Cassini / Huygens (PIA12778) |
-| Enceladus | `bright_ice` | 86% | small cryo-geyser cones (tiger stripes); ice rifts | Cassini (PIA03551) |
-| Triton | `triton_ice` | 86% | cryo-geyser cones (N2 plumes); cantaloupe terrain | Voyager 2 (PIA00056) |
-| Rhea | `dirty_ice` | 95% | flat; heavy cratering; ice cliffs | Cassini (PIA21904) |
-| Iapetus | `dirty_ice` | 92% | flat; heavy cratering; albedo dichotomy | Cassini (PIA21347) |
-| Dione | `dirty_ice` | 93% | flat; heavy cratering; wispy ice cliffs | Cassini (PIA21349) |
-| Titania | `regolith_grey` | 93% | flat; heavy cratering; fault canyons | Voyager 2 (PIA01361) |
-| Oberon | `regolith_grey` | 95% | flat; heavy cratering; dark crater floors | Voyager 2 (PIA00034) |
-| Umbriel | `regolith_dark` | 94% | flat; heavy cratering; bright Wunda ring | Voyager 2 (PIA00040) |
-| Ariel | `grooved_ice` | 57% | rift valleys + fissures; scarps | Voyager 2 (PIA00037) |
-| Miranda | `grooved_ice` | 59% | chaotic grooves/rifts; Verona Rupes cliffs | Voyager 2 (PIA18185) |
-| Pluto | `pluto_tholin` | 71% | nitrogen glaciers (Sputnik Planitia); frost; cryovolcano | New Horizons (PIA09234) |
-| Chiron | `regolith_dark` | 94% | flat; heavy cratering; comet jets (outgassing) | Deep Space 1 analog (PIA03865) |
+| Luna (Moon) | `regolith_grey` | 90% | flat plains; prominent cratering; basalt maria | LRO (PIA23237) |
+| Ceres | `regolith_dark` | 89% | flat; prominent cratering; brine eruptions (faculae) | Dawn (PIA21078) |
+| Vesta | `regolith_grey` | 91% | flat; prominent cratering; cliffs/scarps | Dawn (PIA15140) |
+| Mars | `mars_rust` | 89% | one big central canyon; dust storms; polar frost | Viking / MRO (PIA00565) |
+| Callisto | `dirty_ice` | 89% | flat; prominent cratering; radiation | Galileo (PIA03456) |
+| Ganymede | `grooved_ice` | 88% | grooved sulci; radiation; ice rifts | Galileo / Juno (PIA05077) |
+| Europa | `europa_ice` | 79% | long deep fissures (lineae); chaos; radiation | Galileo (PIA00294) |
+| Io | `io_sulfur` | 87% | mostly smooth; a few large volcanoes; lava; plumes | Galileo / Voyager 1 (PIA02509) |
+| Titan | `titan_haze` | 57% | oceans of liquid methane; haze; dunes | Cassini / Huygens (PIA12778) |
+| Enceladus | `bright_ice` | 98% | small cryo-geyser cones (tiger stripes); ice rifts | Cassini (PIA03551) |
+| Triton | `triton_ice` | 99% | cryo-geyser cones (N2 plumes); cantaloupe terrain | Voyager 2 (PIA00056) |
+| Rhea | `dirty_ice` | 90% | flat; prominent cratering; ice cliffs | Cassini (PIA21904) |
+| Iapetus | `dirty_ice` | 89% | flat; prominent cratering; albedo dichotomy | Cassini (PIA21347) |
+| Dione | `dirty_ice` | 91% | flat; prominent cratering; wispy ice cliffs | Cassini (PIA21349) |
+| Titania | `regolith_grey` | 89% | flat; prominent cratering; fault canyons | Voyager 2 (PIA01361) |
+| Oberon | `regolith_grey` | 90% | flat; prominent cratering; dark crater floors | Voyager 2 (PIA00034) |
+| Umbriel | `regolith_dark` | 91% | flat; prominent cratering; bright Wunda ring | Voyager 2 (PIA00040) |
+| Ariel | `grooved_ice` | 81% | rift valleys + fissures; scarps | Voyager 2 (PIA00037) |
+| Miranda | `grooved_ice` | 76% | chaotic grooves/rifts; Verona Rupes cliffs | Voyager 2 (PIA18185) |
+| Pluto | `pluto_tholin` | 97% | nitrogen glaciers (Sputnik Planitia); frost; cryovolcano | New Horizons (PIA09234) |
+| Chiron | `regolith_dark` | 92% | flat; prominent cratering; comet jets (outgassing) | Deep Space 1 analog (PIA03865) |
 | Earth | `earth` | 33% | oceans, lakes and rivers; mountains; weather | Landsat / Blue Marble |
 
 ### Hazard glossary

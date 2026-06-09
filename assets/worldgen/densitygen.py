@@ -44,6 +44,19 @@ CAVES = {
     "europa": 1, "enceladus": 1, "io": 2, "callisto": 3, "oberon": 3, "earth": 1,
 }
 
+# How much of the hard terraced "wedding cake" to keep (1 = full plateaus/cliffs,
+# 0 = fully smooth rolling). Lower values + the smoothing passes below trade hard
+# cliffs for rounded slopes and more varied terrain.
+TERRACE_MIX = {
+    "io": 0.0, "earth": 0.4, "pluto": 0.45, "triton": 0.5, "titan": 0.55,
+    "miranda": 0.72, "ariel": 0.66, "ganymede": 0.6,
+}
+# Box-blur passes over the height field before voxelizing: rounds the cliffs and
+# ridges the marching-cubes surface would otherwise show as hard facets.
+SMOOTH = {
+    "io": 3, "earth": 2, "pluto": 2, "triton": 2, "titan": 1, "miranda": 1,
+}
+
 
 def _base_height(world, amp, freq):
     """Smooth, low-frequency surface height in world units (no fine noise)."""
@@ -61,6 +74,33 @@ def _base_height(world, amp, freq):
 
 def _terrace(h, step):
     return [[round(h[k][i] / step) * step for i in range(NXZ)] for k in range(NXZ)]
+
+
+def _smooth(h, passes):
+    """Separable 3-tap box blur over the height field (edge-clamped). Softens the
+    cliffs/ridges marching cubes would otherwise render as hard facets."""
+    for _ in range(passes):
+        tmp = [[0.0] * NXZ for _ in range(NXZ)]
+        for k in range(NXZ):
+            row = h[k]
+            for i in range(NXZ):
+                s = row[i]
+                c = 1
+                if i > 0:
+                    s += row[i - 1]; c += 1
+                if i < NXZ - 1:
+                    s += row[i + 1]; c += 1
+                tmp[k][i] = s / c
+        for k in range(NXZ):
+            for i in range(NXZ):
+                s = tmp[k][i]
+                c = 1
+                if k > 0:
+                    s += tmp[k - 1][i]; c += 1
+                if k < NXZ - 1:
+                    s += tmp[k + 1][i]; c += 1
+                h[k][i] = s / c
+    return h
 
 
 def _flat_fraction(ht, tol):
@@ -103,16 +143,16 @@ def _craters(ht, mat, seed, count):
         cx, cz = rng.uniform(0, NXZ), rng.uniform(0, NXZ)
         big = rng.rand() < 0.16
         rad = rng.uniform(0.06, 0.12) * NXZ if big else rng.uniform(0.02, 0.06) * NXZ
-        depth = rad * 0.45
-        i0, i1 = max(0, int(cx - rad * 1.5)), min(NXZ, int(cx + rad * 1.5) + 1)
-        k0, k1 = max(0, int(cz - rad * 1.5)), min(NXZ, int(cz + rad * 1.5) + 1)
+        depth = rad * 0.62                            # deeper -> more prominent
+        i0, i1 = max(0, int(cx - rad * 1.6)), min(NXZ, int(cx + rad * 1.6) + 1)
+        k0, k1 = max(0, int(cz - rad * 1.6)), min(NXZ, int(cz + rad * 1.6) + 1)
         for kk in range(k0, k1):
             for ii in range(i0, i1):
                 d = math.hypot(ii - cx, kk - cz) / rad
                 if d > 1.5:
                     continue
                 bowl = -depth * (1.0 - d * d) if d < 1.0 else 0.0
-                rim = depth * 0.4 * math.exp(-((d - 1.0) / 0.16) ** 2)
+                rim = depth * 0.55 * math.exp(-((d - 1.0) / 0.18) ** 2)
                 ht[kk][ii] += bowl + rim
                 if d < 0.55:
                     mat[kk][ii] = MAT_LOW                 # dark crater floor
@@ -304,6 +344,15 @@ def build(world):
             best = (ht, step, f)
     ht, step, _ = best
 
+    # Variability + smoothing: blend the hard terraces back toward the smooth
+    # base (so terrain is a mix of plateaus and rolling slopes, not a uniform
+    # wedding cake), then box-blur to round the cliffs/ridges. Craters and other
+    # features are added AFTER this, so they stay crisp and prominent.
+    mix = TERRACE_MIX.get(key, 0.58)
+    ht = [[hbase[k][i] * (1.0 - mix) + ht[k][i] * mix for i in range(NXZ)]
+          for k in range(NXZ)]
+    ht = _smooth(ht, SMOOTH.get(key, 1))
+
     # Material overrides + vents collected by the feature passes.
     mat = [[None] * NXZ for _ in range(NXZ)]
     vents = []
@@ -316,7 +365,7 @@ def build(world):
     if key == "mars":
         _canyon(ht, mat, t["seed"], depth=22.0, halfw=NXZ * 0.07)
     if key == "io":
-        vents += _cones(ht, mat, t["seed"], 5, height=58.0, base_r=NXZ * 0.16, kind="volcano")
+        vents += _cones(ht, mat, t["seed"], 4, height=66.0, base_r=NXZ * 0.18, kind="volcano")
     if key == "enceladus":
         vents += _cones(ht, mat, t["seed"], 9, height=13.0, base_r=NXZ * 0.05,
                         kind="geyser", region="south")
