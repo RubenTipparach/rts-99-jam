@@ -4,9 +4,10 @@
 use glam::{Mat4, Vec2, Vec3, Vec4Swizzles};
 
 // Fixed isometric-ish viewing angle (StarCraft/WC3 style).
-/// Camera yaw around +Y. Public so the minimap can rotate its world by the same
-/// angle, keeping the camera's view box upright (north = into the screen).
-pub const YAW: f32 = 0.9;
+/// Camera yaw around +Y. A clean 45 degrees, so the minimap (which rotates its
+/// world by this same angle to keep the camera's view box upright) reads as a
+/// true diamond. Public so the minimap can share the exact value.
+pub const YAW: f32 = std::f32::consts::FRAC_PI_4;
 const PITCH: f32 = 0.95;
 
 pub struct Camera {
