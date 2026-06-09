@@ -8,3 +8,7 @@
 
 # Web build output
 dist/
+
+# Python tooling cache (assets/worldgen)
+__pycache__/
+*.pyc

@@ -1,0 +1,300 @@
+{
+  "_about": "Representative NASA reference imagery per world, used to tune the texture palettes in assets/worldgen/worlds.py. Imagery credit: NASA/JPL-Caltech and partner institutions; most NASA imagery is public domain (see https://www.nasa.gov/multimedia/guidelines/).",
+  "source": "NASA Image and Video Library (images.nasa.gov)",
+  "worlds": {
+    "moon": {
+      "name": "Luna (Moon)",
+      "mission_hint": "Lunar Reconnaissance Orbiter (LROC)",
+      "query": "moon surface lunar reconnaissance orbiter",
+      "reference": {
+        "title": "Graben on the Moon",
+        "nasa_id": "PIA23237",
+        "center": "JPL",
+        "date_created": "2019-05-13T00:00:00Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA23237/PIA23237~small.jpg",
+        "description": "These graben - a kind of trench that is formed as a surface expands - were imaged near a region of the Moon called Mare Frigoris by NASA's Lunar Reconnaissance Orbiter (LRO).  https://photojournal.jpl.nasa.gov/catalog/PIA23237",
+        "asset_page": "https://images.nasa.gov/details/PIA23237"
+      }
+    },
+    "ceres": {
+      "name": "Ceres",
+      "mission_hint": "Dawn (Framing Camera)",
+      "query": "ceres occator dawn",
+      "reference": {
+        "title": "Occator on Ceres Limb",
+        "nasa_id": "PIA21078",
+        "center": "JPL",
+        "date_created": "2016-11-18T15:17:01Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA21078/PIA21078~small.jpg",
+        "description": "This image of the limb of dwarf planet Ceres shows a section of the northern hemisphere. Prominently featured is Occator Crater, home of Ceres' intriguing brightest areas.  At 57 miles (92 kilometers) wide and 2.5 miles (4 kilometers) deep, Occator displays evidence of recent geo",
+        "asset_page": "https://images.nasa.gov/details/PIA21078"
+      }
+    },
+    "vesta": {
+      "name": "Vesta",
+      "mission_hint": "Dawn (Framing Camera)",
+      "query": "vesta dawn asteroid",
+      "reference": {
+        "title": "Dawn Soars Over Asteroid Vesta in 3-D",
+        "nasa_id": "PIA15140",
+        "center": "JPL",
+        "date_created": "2011-12-01T20:48:25Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA15140/PIA15140~thumb.jpg",
+        "description": "This 3D image was obtained as Dawn approached Vesta and circled the giant asteroid during the mission survey orbit phase. You need 3D glasses to view this image.",
+        "asset_page": "https://images.nasa.gov/details/PIA15140"
+      }
+    },
+    "mars": {
+      "name": "Mars",
+      "mission_hint": "Viking / Mars Reconnaissance Orbiter",
+      "query": "mars surface viking",
+      "reference": {
+        "title": "Viking Lander 1 U.S. Flag on Mars Surface",
+        "nasa_id": "PIA00565",
+        "center": "JPL",
+        "date_created": "1997-02-28T03:03:08Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA00565/PIA00565~thumb.jpg",
+        "description": "Viking Lander 1 U.S. Flag on Mars Surface",
+        "asset_page": "https://images.nasa.gov/details/PIA00565"
+      }
+    },
+    "callisto": {
+      "name": "Callisto",
+      "mission_hint": "Galileo (SSI)",
+      "query": "callisto galileo jupiter moon",
+      "reference": {
+        "title": "Global Callisto in Color",
+        "nasa_id": "PIA03456",
+        "center": "JPL",
+        "date_created": "2001-08-22T17:11:16Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA03456/PIA03456~small.jpg",
+        "description": "Bright scars on a darker surface testify to a long history of impacts on Jupiter moon Callisto in this image of Callisto from NASA Galileo spacecraft.",
+        "asset_page": "https://images.nasa.gov/details/PIA03456"
+      }
+    },
+    "ganymede": {
+      "name": "Ganymede",
+      "mission_hint": "Galileo (SSI) / Juno (JunoCam)",
+      "query": "ganymede galileo jupiter moon",
+      "reference": {
+        "title": "Lumps Within Ganymede",
+        "nasa_id": "PIA05077",
+        "center": "JPL",
+        "date_created": "2004-08-13T22:00:00Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA05077/PIA05077~thumb.jpg",
+        "description": "This mosaic of Jupiter\u2019s moon Ganymede consists of more than 100 images acquired with NASA\u2019s Voyager and Galileo spacecrafts, showing irregular lumps beneath the icy surface.",
+        "asset_page": "https://images.nasa.gov/details/PIA05077"
+      }
+    },
+    "europa": {
+      "name": "Europa",
+      "mission_hint": "Galileo (SSI)",
+      "query": "europa galileo jupiter moon",
+      "reference": {
+        "title": "Europa Active Surface",
+        "nasa_id": "PIA00294",
+        "center": "JPL",
+        "date_created": "1997-09-07T14:06:54Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA00294/PIA00294~small.jpg",
+        "description": "On June 27, 1996, during Galileo first orbit around Jupiter, a newly discovered impact crater could be seen just right of the center of this image of Jupiter moon Europa returned by NASA Galileo spacecraft camera.  http://photojournal.jpl.nasa.gov/catalog/PIA00294",
+        "asset_page": "https://images.nasa.gov/details/PIA00294"
+      }
+    },
+    "io": {
+      "name": "Io",
+      "mission_hint": "Galileo (SSI) / Voyager 1",
+      "query": "io jupiter volcano galileo",
+      "reference": {
+        "title": "Galileo Near-Infrared Mapping Spectrometer Detects Active Lava Flows at Prometheus Volcano, Io",
+        "nasa_id": "PIA02509",
+        "center": "JPL",
+        "date_created": "1999-11-04T17:01:23Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA02509/PIA02509~thumb.jpg",
+        "description": "The active volcano Prometheus on Jupiter moon Io was imaged by NASA Galileo spacecraft during the close flyby of Io on Oct.10, 1999. The spectrometer can detect active volcanoes on Io by measuring their heat in the near-infrared wavelengths.",
+        "asset_page": "https://images.nasa.gov/details/PIA02509"
+      }
+    },
+    "titan": {
+      "name": "Titan",
+      "mission_hint": "Cassini (ISS/RADAR/VIMS) / Huygens",
+      "query": "titan saturn cassini surface",
+      "reference": {
+        "title": "Craters Before Haze",
+        "nasa_id": "PIA12778",
+        "center": "JPL",
+        "date_created": "2011-08-08T12:59:02Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA12778/PIA12778~small.jpg",
+        "description": "NASA Cassini spacecraft views the cratered surface of Saturn moon Tethys in front of the hazy orb of the planet largest moon, Titan. Tethys is much closer than Titan to Cassini.",
+        "asset_page": "https://images.nasa.gov/details/PIA12778"
+      }
+    },
+    "enceladus": {
+      "name": "Enceladus",
+      "mission_hint": "Cassini (ISS)",
+      "query": "enceladus saturn tiger stripes cassini",
+      "reference": {
+        "title": "Tiger Stripes are Cubs",
+        "nasa_id": "PIA03551",
+        "center": "JPL",
+        "date_created": "2005-08-30T09:14:00Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA03551/PIA03551~small.jpg",
+        "description": "This visual and infrared mapping spectrometer image captured by NASA Cassini spacecraft of Saturn moon Enceladus, shows the dark cracks at the south pole dubbed tiger stripes for their distinct stripe-like appearance.",
+        "asset_page": "https://images.nasa.gov/details/PIA03551"
+      }
+    },
+    "triton": {
+      "name": "Triton",
+      "mission_hint": "Voyager 2 (ISS)",
+      "query": "triton neptune voyager",
+      "reference": {
+        "title": "Triton - Detail of Dark and Light Material",
+        "nasa_id": "PIA00056",
+        "center": "JPL",
+        "date_created": "1996-09-26T12:57:42Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA00056/PIA00056~thumb.jpg",
+        "description": "NASA's Voyager 2 acquired this black and white image of Triton, Neptune's largest satellite, during the night of Aug. 24-25, 1989. Triton's limb cuts obliquely across the middle of the image. The field of view is about 1,000 km (600 miles) across. Three irregular dark areas, surr",
+        "asset_page": "https://images.nasa.gov/details/PIA00056"
+      }
+    },
+    "rhea": {
+      "name": "Rhea",
+      "mission_hint": "Cassini (ISS)",
+      "query": "rhea saturn cassini",
+      "reference": {
+        "title": "Contrasting Crescents",
+        "nasa_id": "PIA21904",
+        "center": "JPL",
+        "date_created": "2018-02-05T00:00:00Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA21904/PIA21904~thumb.jpg",
+        "description": "In this view, Saturn's icy moon Rhea passes in front of Titan as seen by NASA's Cassini spacecraft. Some of the differences between the two large moons are readily apparent. While Rhea is a heavily-cratered, airless world, Titan's nitrogen-rich atmosphere is even thicker than Ear",
+        "asset_page": "https://images.nasa.gov/details/PIA21904"
+      }
+    },
+    "iapetus": {
+      "name": "Iapetus",
+      "mission_hint": "Cassini (ISS)",
+      "query": "iapetus saturn cassini",
+      "reference": {
+        "title": "Farewell to Iapetus",
+        "nasa_id": "PIA21347",
+        "center": "JPL",
+        "date_created": "2017-09-18T00:00:00Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA21347/PIA21347~thumb.jpg",
+        "description": "Cassini bids farewell to Saturn's yin-and-yang moon, Iapetus. This image is from the last set of observations Cassini made of this world of striking contrasts. The spacecraft helped scientists better understand Iapetus, solving a centuries-old mystery of why it should be bright o",
+        "asset_page": "https://images.nasa.gov/details/PIA21347"
+      }
+    },
+    "dione": {
+      "name": "Dione",
+      "mission_hint": "Cassini (ISS)",
+      "query": "dione saturn cassini",
+      "reference": {
+        "title": "Half-lit Dione",
+        "nasa_id": "PIA21349",
+        "center": "JPL",
+        "date_created": "2017-10-16T00:00:00Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA21349/PIA21349~small.jpg",
+        "description": "Saturn's moon Dione is captured in this view from NASA's Cassini spacecraft, half in shadow and half in light. Sinuous canyons carve interconnected paths across the moon's icy landscape. Subtle variations in brightness hint at differences in composition, as well as the size and s",
+        "asset_page": "https://images.nasa.gov/details/PIA21349"
+      }
+    },
+    "titania": {
+      "name": "Titania",
+      "mission_hint": "Voyager 2 (ISS)",
+      "query": "titania uranus voyager",
+      "reference": {
+        "title": "Uranus - Montage of Uranus Five Largest Satellites",
+        "nasa_id": "PIA01361",
+        "center": "JPL",
+        "date_created": "1999-08-20T14:15:12Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA01361/PIA01361~small.jpg",
+        "description": "Montage of Uranus five largest satellites taken by NASA Voyager 2. From to right to left in order of decreasing distance from Uranus are Oberon, Titania, Umbriel, Ariel, and Miranda.",
+        "asset_page": "https://images.nasa.gov/details/PIA01361"
+      }
+    },
+    "oberon": {
+      "name": "Oberon",
+      "mission_hint": "Voyager 2 (ISS)",
+      "query": "oberon uranus voyager",
+      "reference": {
+        "title": "Oberon at Voyager Closest Approach",
+        "nasa_id": "PIA00034",
+        "center": "JPL",
+        "date_created": "1996-01-29T11:11:43Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA00034/PIA00034~thumb.jpg",
+        "description": "This image of Oberon, Uranus outermost moon, was captured by NASA Voyager 2 on Jan. 24, 1986. Clearly visible are several large impact craters in Oberon icy surface surrounded by bright rays.  http://photojournal.jpl.nasa.gov/catalog/PIA00034",
+        "asset_page": "https://images.nasa.gov/details/PIA00034"
+      }
+    },
+    "umbriel": {
+      "name": "Umbriel",
+      "mission_hint": "Voyager 2 (ISS)",
+      "query": "umbriel uranus voyager",
+      "reference": {
+        "title": "Umbriel at Closest Approach",
+        "nasa_id": "PIA00040",
+        "center": "JPL",
+        "date_created": "1996-01-31T09:54:12Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA00040/PIA00040~thumb.jpg",
+        "description": "The southern hemisphere of Umbriel displays heavy cratering in this NASA Voyager 2 image, taken Jan. 24, 1986. This frame is the most detailed image of Umbriel, the darkest of Uranus larger moons.  http://photojournal.jpl.nasa.gov/catalog/PIA00040",
+        "asset_page": "https://images.nasa.gov/details/PIA00040"
+      }
+    },
+    "ariel": {
+      "name": "Ariel",
+      "mission_hint": "Voyager 2 (ISS)",
+      "query": "ariel uranus voyager",
+      "reference": {
+        "title": "Ariel at Voyager Closest Approach",
+        "nasa_id": "PIA00037",
+        "center": "JPL",
+        "date_created": "2000-06-02T18:30:39Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA00037/PIA00037~small.jpg",
+        "description": "This picture is part of NASA Voyager 2 imaging sequence of Ariel, a moon of Uranus taken on January 24, 1986. The complexity of Ariel surface indicates that a variety of geologic processes have occurred.  http://photojournal.jpl.nasa.gov/catalog/PIA00037",
+        "asset_page": "https://images.nasa.gov/details/PIA00037"
+      }
+    },
+    "miranda": {
+      "name": "Miranda",
+      "mission_hint": "Voyager 2 (ISS)",
+      "query": "miranda uranus voyager",
+      "reference": {
+        "title": "Miranda Icy Face",
+        "nasa_id": "PIA18185",
+        "center": "JPL",
+        "date_created": "1986-01-25T00:00:00Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA18185/PIA18185~thumb.jpg",
+        "description": "Uranus icy moon Miranda is seen in this image from Voyager 2 on January 24, 1986.  https://photojournal.jpl.nasa.gov/catalog/PIA18185",
+        "asset_page": "https://images.nasa.gov/details/PIA18185"
+      }
+    },
+    "pluto": {
+      "name": "Pluto",
+      "mission_hint": "New Horizons (LORRI/Ralph)",
+      "query": "pluto new horizons",
+      "reference": {
+        "title": "New Horizons Sees Pluto",
+        "nasa_id": "PIA09234",
+        "center": "JPL",
+        "date_created": "2007-04-02T23:50:04Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA09234/PIA09234~small.jpg",
+        "description": "The Long Range Reconnaissance Imager on NASA New Horizons acquired images of the Pluto field three days apart in late September 2006, in order to see Pluto motion against a dense background of stars.",
+        "asset_page": "https://images.nasa.gov/details/PIA09234"
+      }
+    },
+    "chiron": {
+      "name": "Chiron",
+      "mission_hint": "ground-based / Hubble (centaur, comet 95P)",
+      "query": "comet nucleus",
+      "reference": {
+        "title": "Composite of Comet Borrelly Nucleus, Jets, Coma",
+        "nasa_id": "PIA03865",
+        "center": "JPL",
+        "date_created": "2002-10-08T18:45:10Z",
+        "thumbnail": "https://images-assets.nasa.gov/image/PIA03865/PIA03865~thumb.jpg",
+        "description": "A composite of images from NASA Deep Space 1 spacecraft shows features of comet Borrelly nucleus, dust jets escaping the nucleus and the cloud-like coma of dust and gases surrounding the nucleus.",
+        "asset_page": "https://images.nasa.gov/details/PIA03865"
+      }
+    }
+  }
+}

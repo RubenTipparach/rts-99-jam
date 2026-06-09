@@ -6,6 +6,7 @@ mod game;
 mod gfx;
 mod hud;
 mod terrain;
+mod worlds;
 
 use std::sync::Arc;
 use web_time::Instant;
