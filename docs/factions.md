@@ -14,7 +14,7 @@ core asymmetry. Launch-faction detail (costs, tech tree) lives in
 
 **Mined, shared** (every worker gathers these):
 
-- 🪨 **Ore** - bulk material; the body of every structure and unit. (The sim's
+- 🔴 **Ore** - bulk material; the body of every structure and unit. (The sim's
   existing `ore`.)
 - ⚫ **Carbon** - the advanced material: biomass for grown lifeforms (Astromancers,
   Warren) and composites / propellant for machines (Hollowmen, Rimelings).
