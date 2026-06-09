@@ -41,28 +41,30 @@ cliffs are good; spikes are not. The recipe (`densitygen.py`):
    interest, leaving build space intact.
 5. Mark a per-column **buildable mask** (the flat tops) and store it in the map.
 
-Buildable fractions stay generous (rough cratered worlds in the low-to-mid 30s%,
-smooth resurfaced ice up to ~87%), so every map has base-building room while
-staying visually distinct. (Earth is lower, ~33%, because roughly half of it is
-ocean.)
+Buildable fractions stay generous: airless bodies and Io are mostly flat
+(~83-95%) with craters / volcanoes for relief; resurfaced ice runs ~57-86%; the
+feature-heavy worlds (Mars, Pluto, Europa, Titan) sit ~55-81%. Earth is lowest
+(~33%) because roughly half of it is ocean.
 
 ### Landforms by erosion
 
 What carves each world depends on how it is eroded, which drives both cratering
 and its signature feature:
 
-- **Airless rock/dust (no erosion): heavy cratering.** Moon, Ceres, Vesta,
-  Callisto, Rhea, Dione, Iapetus, Titania, Oberon, Umbriel, Chiron - saturated
-  with impact craters (bowls + raised rims + bright ejecta rays), plateaus left
-  buildable between them.
+- **Airless rock/dust (no erosion): mostly FLAT, relief from CRATERS.** Moon,
+  Ceres, Vesta, Callisto, Rhea, Dione, Iapetus, Titania, Oberon, Umbriel, Chiron
+  are flat plains saturated with impact craters (bowls + raised rims + bright
+  ejecta rays); the flat ground between them is buildable.
 - **Ice-resurfaced (few craters):** Europa gets long, deep **fissures** (lineae);
-  Enceladus and Triton get **mini cryo-geysers**; Triton also gets cantaloupe
-  terrain; Ganymede / Ariel / Miranda get grooves and rifts.
-- **Volcanic:** Io gets **giant volcanoes** - tall cones with summit calderas and
-  glowing lava (and eruption plumes).
+  Enceladus and Triton get **small volcano-like cryo-geysers** (cones with vents
+  and plumes); Triton also gets cantaloupe terrain; Ganymede / Ariel / Miranda
+  get grooves and rifts.
+- **Volcanic:** Io is a **mostly flat** sulfur plain studded with **giant towering
+  volcanoes** - cones with summit calderas, glowing lava and eruption plumes.
 - **Atmospheric:** Mars is fairly plain with one big central **canyon** (Valles
-  Marineris); Titan has **oceans of liquid methane**; **Earth** has **oceans,
-  lakes and rivers** over green continents and mountain ranges.
+  Marineris); **Titan** has **oceans of liquid methane** amid dune-toned
+  highlands; **Earth** has **oceans, lakes and rivers** over green continents and
+  mountain ranges.
 
 Liquid (methane on Titan, water on Earth) is stored per-column in the map and
 drawn as a flat liquid surface; columns under liquid are not buildable.
@@ -97,27 +99,27 @@ texturing the mesh; the previews colour the mesh from the same palettes.
 
 | world | archetype | buildable | landforms / map hazards | NASA reference |
 | ----- | --------- | --------- | ----------------------- | -------------- |
-| Luna (Moon) | `regolith_grey` | 69% | heavy cratering; basalt maria; ray craters | LRO (PIA23237) |
-| Ceres | `regolith_dark` | 66% | heavy cratering; brine eruptions (faculae) | Dawn (PIA21078) |
-| Vesta | `regolith_grey` | 62% | heavy cratering; cliffs/scarps | Dawn (PIA15140) |
+| Luna (Moon) | `regolith_grey` | 94% | flat plains; heavy cratering; basalt maria | LRO (PIA23237) |
+| Ceres | `regolith_dark` | 93% | flat; heavy cratering; brine eruptions (faculae) | Dawn (PIA21078) |
+| Vesta | `regolith_grey` | 90% | flat; heavy cratering; cliffs/scarps | Dawn (PIA15140) |
 | Mars | `mars_rust` | 81% | one big central canyon; dust storms; polar frost | Viking / MRO (PIA00565) |
-| Callisto | `dirty_ice` | 67% | heavy cratering; radiation | Galileo (PIA03456) |
+| Callisto | `dirty_ice` | 94% | flat; heavy cratering; radiation | Galileo (PIA03456) |
 | Ganymede | `grooved_ice` | 64% | grooved sulci; radiation; ice rifts | Galileo / Juno (PIA05077) |
 | Europa | `europa_ice` | 72% | long deep fissures (lineae); chaos; radiation | Galileo (PIA00294) |
-| Io | `io_sulfur` | 64% | giant volcanoes; lava; radiation; plumes | Galileo / Voyager 1 (PIA02509) |
+| Io | `io_sulfur` | 83% | mostly flat; giant volcanoes; lava; radiation; plumes | Galileo / Voyager 1 (PIA02509) |
 | Titan | `titan_haze` | 55% | oceans of liquid methane; haze; dunes | Cassini / Huygens (PIA12778) |
-| Enceladus | `bright_ice` | 87% | mini cryo-geysers (tiger stripes); ice rifts | Cassini (PIA03551) |
-| Triton | `triton_ice` | 86% | cryo-geysers (N2 plumes); cantaloupe terrain | Voyager 2 (PIA00056) |
-| Rhea | `dirty_ice` | 70% | heavy cratering; ice cliffs | Cassini (PIA21904) |
-| Iapetus | `dirty_ice` | 63% | heavy cratering; equatorial ridge; albedo dichotomy | Cassini (PIA21347) |
-| Dione | `dirty_ice` | 67% | heavy cratering; wispy ice cliffs (chasmata) | Cassini (PIA21349) |
-| Titania | `regolith_grey` | 60% | heavy cratering; fault canyons (Messina) | Voyager 2 (PIA01361) |
-| Oberon | `regolith_grey` | 65% | heavy cratering; dark crater floors | Voyager 2 (PIA00034) |
-| Umbriel | `regolith_dark` | 67% | heavy cratering; bright Wunda ring | Voyager 2 (PIA00040) |
+| Enceladus | `bright_ice` | 86% | small cryo-geyser cones (tiger stripes); ice rifts | Cassini (PIA03551) |
+| Triton | `triton_ice` | 86% | cryo-geyser cones (N2 plumes); cantaloupe terrain | Voyager 2 (PIA00056) |
+| Rhea | `dirty_ice` | 95% | flat; heavy cratering; ice cliffs | Cassini (PIA21904) |
+| Iapetus | `dirty_ice` | 92% | flat; heavy cratering; albedo dichotomy | Cassini (PIA21347) |
+| Dione | `dirty_ice` | 93% | flat; heavy cratering; wispy ice cliffs | Cassini (PIA21349) |
+| Titania | `regolith_grey` | 93% | flat; heavy cratering; fault canyons | Voyager 2 (PIA01361) |
+| Oberon | `regolith_grey` | 95% | flat; heavy cratering; dark crater floors | Voyager 2 (PIA00034) |
+| Umbriel | `regolith_dark` | 94% | flat; heavy cratering; bright Wunda ring | Voyager 2 (PIA00040) |
 | Ariel | `grooved_ice` | 57% | rift valleys + fissures; scarps | Voyager 2 (PIA00037) |
 | Miranda | `grooved_ice` | 59% | chaotic grooves/rifts; Verona Rupes cliffs | Voyager 2 (PIA18185) |
 | Pluto | `pluto_tholin` | 71% | nitrogen glaciers (Sputnik Planitia); frost; cryovolcano | New Horizons (PIA09234) |
-| Chiron | `regolith_dark` | 64% | heavy cratering; comet jets (outgassing) | Deep Space 1 analog (PIA03865) |
+| Chiron | `regolith_dark` | 94% | flat; heavy cratering; comet jets (outgassing) | Deep Space 1 analog (PIA03865) |
 | Earth | `earth` | 33% | oceans, lakes and rivers; mountains; weather | Landsat / Blue Marble |
 
 ### Hazard glossary

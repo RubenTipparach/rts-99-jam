@@ -164,13 +164,23 @@ def _canyon(ht, mat, seed, depth, halfw):
                 mat[kk][ii] = MAT_HIGH if dd > 0.6 else MAT_LOW
 
 
-def _volcanoes(ht, mat, seed, n, height, base_r):
-    """Io-style giant volcanoes: tall cones with a summit caldera + lava."""
-    rng = Rng(seed * 23 + 4)
+def _cones(ht, mat, seed, n, height, base_r, kind, region=None):
+    """Build `n` volcanic cones with a summit caldera + hazard material.
+
+    One builder for all of them, scaled by `height`/`base_r`:
+      - Io: giant volcanoes (tall, wide), `kind="volcano"` (lava);
+      - Titan: towering cryovolcanoes, `kind="cryovolcano"`;
+      - Enceladus / Triton: small volcano-like geysers, `kind="geyser"`.
+    `region="south"` clusters them toward the south pole (tiger stripes).
+    """
+    rng = Rng(seed * 23 + (len(kind) * 13 + 4))
     vents = []
     for _ in range(n):
         cx = rng.uniform(base_r, NXZ - base_r)
-        cz = rng.uniform(base_r, NXZ - base_r)
+        if region == "south":
+            cz = rng.uniform(NXZ * 0.52, NXZ - base_r)
+        else:
+            cz = rng.uniform(base_r, NXZ - base_r)
         i0, i1 = int(cx - base_r), int(cx + base_r) + 1
         k0, k1 = int(cz - base_r), int(cz + base_r) + 1
         for kk in range(max(0, k0), min(NXZ, k1)):
@@ -179,29 +189,12 @@ def _volcanoes(ht, mat, seed, n, height, base_r):
                 if d >= 1.0:
                     continue
                 ht[kk][ii] += height * (1.0 - d) ** 1.6
-                if d < 0.16:
+                if d < 0.18:
                     ht[kk][ii] -= height * 0.3           # summit caldera
-                    mat[kk][ii] = MAT_HAZARD             # lava
-                elif d < 0.24:
                     mat[kk][ii] = MAT_HAZARD
-        vents.append((int(cx), int(cz), "volcano"))
-    return vents
-
-
-def _geysers(ht, mat, seed, n):
-    """Enceladus-style mini geysers: small vents along south-polar fractures."""
-    rng = Rng(seed * 29 + 6)
-    vents = []
-    for _ in range(n):
-        i = rng.randint(8, NXZ - 9)
-        k = rng.randint(int(NXZ * 0.55), NXZ - 9)   # toward the "south"
-        for dk in (-1, 0, 1):
-            for di in (-1, 0, 1):
-                ii, kk = i + di, k + dk
-                if 0 <= ii < NXZ and 0 <= kk < NXZ:
-                    ht[kk][ii] -= 2.0
+                elif d < 0.26:
                     mat[kk][ii] = MAT_HAZARD
-        vents.append((i, k, "geyser"))
+        vents.append((int(cx), int(cz), kind))
     return vents
 
 
@@ -278,21 +271,36 @@ def build(world):
     t = world["terrain"]
     target = FLAT_TARGET.get(key, 0.40)
     rough = 1.0 - target
-    amp = min(70.0, t["relief"] * (34.0 + rough * 44.0))
-    if key == "mars":
-        amp *= 0.55           # Mars is fairly plain; the canyon is its feature
-    freq = 1.7 + rough * 2.0
-    hbase = _base_height(world, amp, freq)
-    span0 = max(1.0, max(max(r) for r in hbase) - min(min(r) for r in hbase))
-
     dy = (YMAX - YMIN) / (NY - 1)
     tol = dy * 0.6
+
+    # Mostly-flat worlds whose relief comes from discrete features, not terraced
+    # mesas: airless rock/ice with no erosion (Moon, Ceres, Vesta, Callisto,
+    # Rhea, Dione, Iapetus, the Uranian moons, Chiron) where craters do the work,
+    # and Io (flat sulfur plains studded with giant volcanoes).
+    crater_dominated = world["archetype"] in ("regolith_grey", "regolith_dark", "dirty_ice")
+    flat_base = crater_dominated or key == "io"
+    if flat_base:
+        amp = min(20.0, 8.0 + t["relief"] * 9.0)
+        freq = 1.55
+        plain_target = 0.74
+        tiers_try = (1, 2, 3, 4)
+    else:
+        amp = min(70.0, t["relief"] * (34.0 + rough * 44.0))
+        if key == "mars":
+            amp *= 0.55       # Mars is fairly plain; the canyon is its feature
+        freq = 1.7 + rough * 2.0
+        plain_target = target
+        tiers_try = (2, 3, 4, 5, 6, 8, 10, 12)
+
+    hbase = _base_height(world, amp, freq)
+    span0 = max(1.0, max(max(r) for r in hbase) - min(min(r) for r in hbase))
     best = None
-    for tiers in (2, 3, 4, 5, 6, 8, 10, 12):
+    for tiers in tiers_try:
         step = max(dy * 1.5, span0 / tiers)
         ht = _terrace(hbase, step)
         f = _flat_fraction(ht, tol)
-        if best is None or abs(f - target) < abs(best[2] - target):
+        if best is None or abs(f - plain_target) < abs(best[2] - plain_target):
             best = (ht, step, f)
     ht, step, _ = best
 
@@ -308,11 +316,12 @@ def build(world):
     if key == "mars":
         _canyon(ht, mat, t["seed"], depth=22.0, halfw=NXZ * 0.07)
     if key == "io":
-        vents += _volcanoes(ht, mat, t["seed"], 5, height=58.0, base_r=NXZ * 0.16)
+        vents += _cones(ht, mat, t["seed"], 5, height=58.0, base_r=NXZ * 0.16, kind="volcano")
     if key == "enceladus":
-        vents += _geysers(ht, mat, t["seed"], 9)
+        vents += _cones(ht, mat, t["seed"], 9, height=13.0, base_r=NXZ * 0.05,
+                        kind="geyser", region="south")
     if key == "triton":
-        vents += _geysers(ht, mat, t["seed"], 4)
+        vents += _cones(ht, mat, t["seed"], 6, height=11.0, base_r=NXZ * 0.05, kind="geyser")
 
     # Shift so the lowest point sits at 0, then voxelize.
     lo0 = min(min(r) for r in ht)

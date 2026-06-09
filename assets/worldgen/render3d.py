@@ -178,13 +178,13 @@ def _plumes(frame, grid, stats, to_screen):
         sx, syy, _ = to_screen(*_xz(grid, i, k, sy_top))
         sx, syy = int(sx), int(syy)
         if kind == "volcano":
-            col, height, spread0 = (255, 150, 60), 90, 2.0
-        else:  # geyser (mini)
-            col, height, spread0 = (210, 232, 246), 46, 1.2
+            col, height, spread0, alpha0 = (255, 150, 60), 90, 2.0, 0.85
+        else:  # geyser (mini cryo-cone)
+            col, height, spread0, alpha0 = (210, 232, 246), 44, 1.1, 0.5
         for t in range(height):
             f = t / height
             spread = spread0 + f * (4.0 if kind == "geyser" else 3.0)
-            a = (1.0 - f) ** 1.5 * (0.85 if kind == "volcano" else 0.5)
+            a = (1.0 - f) ** 1.5 * alpha0
             yy = syy - t
             for dxp in range(-int(spread), int(spread) + 1):
                 fall = 1.0 - abs(dxp) / (spread + 0.5)
