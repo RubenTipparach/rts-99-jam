@@ -37,7 +37,7 @@ the asymmetry:
 | ⚙️ Hollowmen | None: they deny it (null-fields) and burn allies' bottled magic | Generate (reactors) | "We make our own power" |
 | 🐱 Ninefold (cats) | Generate, tied to a lunar cycle | None | Run on "instinct" |
 | 🐀 Warren (rats) | Scavenge from salvage and the converted dead | None | Run on "genetics" |
-| 🦑 Rimelings | Cannot produce; drain it from nearby enemy casters (plus a trickle from ether-collectors) | Generate (reactors) | The only faction on both energies |
+| 🦑 Rimelings (note might change to leviathans) | Cannot produce; drain it from nearby enemy casters (plus a trickle from ether-collectors) | Generate (reactors) | The only faction on both energies |
 
 **Signature resources.** Two factions layer a unique progression resource on top
 of the shared five, each drawn from that faction's own core loop:
