@@ -39,6 +39,15 @@ jobs:
         working-directory: apps/client
         run: trunk build --release --public-url /rts-99-jam/
 
+      # Publish the browser map editor (dev tool) and the raw .vxl presets it
+      # loads, alongside the game, at /rts-99-jam/tools/mapeditor/. The maps are
+      # also embedded in the wasm; the editor needs them as fetchable files.
+      - name: Bundle the map editor + its .vxl presets
+        run: |
+          mkdir -p apps/client/dist/tools/mapeditor apps/client/dist/assets/maps
+          cp tools/mapeditor/index.html apps/client/dist/tools/mapeditor/
+          cp assets/maps/*.vxl apps/client/dist/assets/maps/
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
