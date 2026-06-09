@@ -36,7 +36,10 @@
     background: #11151f; border-right: 1px solid #1d2433;
   }
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #stage { flex: 1; display: grid; place-items: center; overflow: hidden; background: #06090f; }
+  #stage { flex: 1; display: flex; overflow: hidden; background: #06090f; }
+  .pane { flex: 1; display: grid; place-items: center; overflow: hidden; min-width: 0; position: relative; }
+  .pane[hidden] { display: none; }
+  #pane3d { border-left: 1px solid #1d2433; }
   canvas { image-rendering: pixelated; background: #000; box-shadow: 0 0 0 1px #1d2433; cursor: crosshair; }
   #cv3 { image-rendering: auto; box-shadow: none; cursor: grab; width: 100%; height: 100%; }
   #cv3:active { cursor: grabbing; }
@@ -78,8 +81,9 @@
 
   <h2>View</h2>
   <div class="row">
-    <button id="mode2d" class="on">2D edit</button>
-    <button id="mode3d">3D view</button>
+    <button data-layout="2d">2D</button>
+    <button data-layout="split" class="on">Split</button>
+    <button data-layout="3d">3D</button>
   </div>
   <div class="row" style="margin-top:6px">
     <button data-ov="hill" class="on">Relief</button>
@@ -89,7 +93,7 @@
   </div>
   <label>3D height exaggeration <span class="val" id="exv">3.0</span></label>
   <input id="exag" type="range" min="1" max="8" step="0.5" value="3">
-  <p class="note">3D is an orbit preview (drag to rotate, wheel to zoom). Switch to 2D edit to paint. The game renders the real shaded terrain.</p>
+  <p class="note">3D: left-drag paints with the current tool, right-drag orbits, shift-drag (or middle) pans, wheel zooms. Split paints in 2D and updates 3D live.</p>
 
   <h2>Tool</h2>
   <div class="row" id="tools">
@@ -130,8 +134,8 @@
 
 <div id="main">
   <div id="stage">
-    <canvas id="cv" width="256" height="256"></canvas>
-    <canvas id="cv3" width="900" height="640" hidden></canvas>
+    <div id="pane2d" class="pane"><canvas id="cv" width="256" height="256"></canvas></div>
+    <div id="pane3d" class="pane"><canvas id="cv3" width="900" height="640"></canvas></div>
   </div>
   <div id="status">load a map to begin</div>
 </div>
@@ -174,7 +178,7 @@ let M = null; // loaded map model
 const ui = {
   overlay: "hill", tool: "raise", radius: 14, strength: 6,
   mat: 2, lqlevel: 0, buildVal: 1, liqErase: false, skin: 7,
-  view3d: false, exag: 3,
+  layout: "split", exag: 3,
 };
 
 // ---- VXL1 parse ----
@@ -271,9 +275,9 @@ function render() {
     d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  // fit canvas to stage
-  const stage = document.getElementById("stage");
-  const s = Math.max(1, Math.floor(Math.min(stage.clientWidth, stage.clientHeight) / nx));
+  // fit canvas to its pane
+  const pane = document.getElementById("pane2d");
+  const s = Math.max(1, Math.floor(Math.min(pane.clientWidth, pane.clientHeight) / nx));
   cv.style.width = (nx * s) + "px"; cv.style.height = (nz * s) + "px";
 }
 
@@ -324,7 +328,7 @@ function applyBrush(ci, ck) {
         break;
     }
   }
-  render();
+  refresh();
 }
 
 // ---- export ----
@@ -380,7 +384,7 @@ async function loadFromBuffer(buf, key) {
     `${M.nx} x ${M.ny} x ${M.nz}  bounds y[${M.bounds[2]},${M.bounds[3]}]  buildable ${(M.flat / 10).toFixed(1)}%`;
   document.getElementById("lqlevel").min = M.bounds[2];
   document.getElementById("lqlevel").max = M.bounds[3];
-  render();
+  applyLayout(ui.layout);
   status(`loaded ${M.key}`);
 }
 async function loadPreset(key) {
@@ -393,14 +397,15 @@ async function loadPreset(key) {
   }
 }
 
-// ---- 3D orbit preview (WebGL2) ----
-// A read-only orbit view of the current heightfield, lit and coloured by
-// material. Edit in 2D; this previews what the surface looks like in 3D (it is
-// a heightfield view, so it shows the same single-surface model the editor edits
-// and exports, not carved caves). The game itself draws the real shaded terrain.
+// ---- 3D view (WebGL2): orbit + pan + zoom, and paint on the surface ----
+// An interactive view of the current heightfield, lit and coloured by material.
+// It is a heightfield view (the single-surface model the editor edits/exports,
+// not carved caves). Left-drag paints with the current tool (via a raycast),
+// right-drag orbits, shift/middle-drag pans, wheel zooms. The game draws the
+// real shaded terrain.
 const cv3 = document.getElementById("cv3");
-let gl = null, prog3 = null, vao = null, glbufs = null, idxCount = 0;
-const cam3 = { yaw: 0.9, pitch: 0.85, dist: 1500 };
+let gl = null, prog3 = null, vao = null, glbufs = null, idxCount = 0, mesh3my = 0;
+const cam3 = { yaw: 0.9, pitch: 0.85, dist: 1500, tx: 0, tz: 0 };
 
 const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -453,10 +458,10 @@ function initGL() {
 }
 
 function resize3d() {
-  const stage = document.getElementById("stage");
+  const pane = document.getElementById("pane3d");
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  cv3.width = Math.max(1, Math.floor(stage.clientWidth * dpr));
-  cv3.height = Math.max(1, Math.floor(stage.clientHeight * dpr));
+  cv3.width = Math.max(1, Math.floor(pane.clientWidth * dpr));
+  cv3.height = Math.max(1, Math.floor(pane.clientHeight * dpr));
 }
 
 function buildMesh3d() {
@@ -465,6 +470,7 @@ function buildMesh3d() {
   const x0 = M.bounds[0], z0 = M.bounds[4];
   let sum = 0; for (let c = 0; c < H.length; c++) sum += H[c];
   const my = sum / H.length * ex; // centre the terrain vertically
+  mesh3my = my;
   const V = nx * nz, pos = new Float32Array(V * 3), nor = new Float32Array(V * 3), col = new Float32Array(V * 3);
   for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
     const c = k * nx + i, o = c * 3;
@@ -494,14 +500,17 @@ function buildMesh3d() {
   gl.bindVertexArray(null);
 }
 
+function target3() { return [cam3.tx, 0, cam3.tz]; }
+function eyePos() {
+  const cp = Math.cos(cam3.pitch), sp = Math.sin(cam3.pitch), cy = Math.cos(cam3.yaw), sy = Math.sin(cam3.yaw);
+  return [cam3.tx + cam3.dist * cp * cy, cam3.dist * sp, cam3.tz + cam3.dist * cp * sy];
+}
 function render3d() {
   if (!gl || !M) return;
   gl.viewport(0, 0, cv3.width, cv3.height);
   gl.clearColor(0.02, 0.03, 0.06, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  const proj = perspective(Math.PI / 4, cv3.width / cv3.height, 1, 9000);
-  const cp = Math.cos(cam3.pitch), sp = Math.sin(cam3.pitch), cy = Math.cos(cam3.yaw), sy = Math.sin(cam3.yaw);
-  const eye = [cam3.dist * cp * cy, cam3.dist * sp, cam3.dist * cp * sy];
-  const mvp = mul(proj, lookAt(eye, [0, 0, 0], [0, 1, 0]));
+  const proj = perspective(Math.PI / 4, cv3.width / cv3.height, 1, 12000);
+  const mvp = mul(proj, lookAt(eyePos(), target3(), [0, 1, 0]));
   gl.useProgram(prog3);
   gl.uniformMatrix4fv(gl.getUniformLocation(prog3, "u_mvp"), false, mvp);
   gl.uniform3f(gl.getUniformLocation(prog3, "u_light"), -0.5, 0.8, 0.4);
@@ -510,15 +519,70 @@ function render3d() {
   gl.bindVertexArray(null);
 }
 
-function setView3d(on) {
-  if (on && !M) { status("load a map first"); return; }
-  if (on && !gl && !initGL()) return;
-  ui.view3d = on;
-  document.getElementById("mode2d").classList.toggle("on", !on);
-  document.getElementById("mode3d").classList.toggle("on", on);
-  cv.hidden = on; cv3.hidden = !on;
-  if (on) { resize3d(); buildMesh3d(); render3d(); status("3D view: drag to orbit, wheel to zoom"); }
-  else render();
+function paneVisible(which) { return ui.layout === "split" || ui.layout === which; }
+
+function applyLayout(mode) {
+  // No WebGL2 -> fall back to 2D rather than show nothing.
+  if ((mode === "split" || mode === "3d") && M && !gl && !initGL()) mode = "2d";
+  ui.layout = mode;
+  setActive("[data-layout]", "data-layout", mode);
+  document.getElementById("pane2d").hidden = !paneVisible("2d");
+  document.getElementById("pane3d").hidden = !paneVisible("3d");
+  if (!M) return;
+  if (paneVisible("2d")) render();
+  if (paneVisible("3d") && gl) { resize3d(); buildMesh3d(); render3d(); }
+}
+
+// Re-render the visible panes after an edit; the 3D rebuild is coalesced to once
+// per frame so painting stays smooth.
+let pend3d = false;
+function schedule3d() {
+  if (pend3d) return; pend3d = true;
+  requestAnimationFrame(() => { pend3d = false; if (M && gl) { buildMesh3d(); render3d(); } });
+}
+function refresh() {
+  if (paneVisible("2d")) render();
+  if (paneVisible("3d")) schedule3d();
+}
+
+function panCam(dx, dy) {
+  const fwd = norm3(sub3(target3(), eyePos()));
+  const right = norm3(cross3(fwd, [0, 1, 0]));
+  const fg = norm3([fwd[0], 0, fwd[2]]); // forward projected onto the ground
+  const s = cam3.dist * 0.0015;
+  cam3.tx += (-dx * right[0] + dy * fg[0]) * s;
+  cam3.tz += (-dx * right[2] + dy * fg[2]) * s;
+}
+
+// Map a cv3 mouse event to a terrain column by marching a camera ray against the
+// heightfield, in the same centred/exaggerated space as the 3D mesh.
+function raycastColumn(e) {
+  const r = cv3.getBoundingClientRect();
+  const ndcx = ((e.clientX - r.left) / r.width) * 2 - 1;
+  const ndcy = 1 - ((e.clientY - r.top) / r.height) * 2;
+  const eye = eyePos(), fwd = norm3(sub3(target3(), eye));
+  const right = norm3(cross3(fwd, [0, 1, 0])), up = cross3(right, fwd);
+  const t = Math.tan(Math.PI / 8), asp = cv3.width / cv3.height;
+  const dir = norm3([
+    fwd[0] + ndcx * t * asp * right[0] + ndcy * t * up[0],
+    fwd[1] + ndcx * t * asp * right[1] + ndcy * t * up[1],
+    fwd[2] + ndcx * t * asp * right[2] + ndcy * t * up[2],
+  ]);
+  const ex = ui.exag, x0 = M.bounds[0], z0 = M.bounds[4];
+  const dx = (M.bounds[1] - x0) / (M.nx - 1), dz = (M.bounds[5] - z0) / (M.nz - 1);
+  for (let s = 1; s < 1000; s++) {
+    const L = s * 8;
+    const px = eye[0] + dir[0] * L, py = eye[1] + dir[1] * L, pz = eye[2] + dir[2] * L;
+    const i = Math.round((px - x0) / dx), k = Math.round((pz - z0) / dz);
+    if (i < 0 || i >= M.nx || k < 0 || k >= M.nz) continue;
+    if (py <= M.H[k * M.nx + i] * ex - mesh3my) return [i, k];
+  }
+  return null;
+}
+
+function paint3d(e) {
+  const hit = raycastColumn(e);
+  if (hit) applyBrush(hit[0], hit[1]);
 }
 
 // ---- ui wiring ----
@@ -568,27 +632,39 @@ function initUi() {
   };
   document.getElementById("export").onclick = () => M ? exportVxl() : status("load a map first");
 
-  // 3D view toggle + exaggeration
-  document.getElementById("mode2d").onclick = () => setView3d(false);
-  document.getElementById("mode3d").onclick = () => setView3d(true);
+  // layout (2D / Split / 3D) + height exaggeration
+  document.querySelectorAll("[data-layout]").forEach((b) =>
+    b.onclick = () => applyLayout(b.getAttribute("data-layout")));
   const exag = document.getElementById("exag");
   exag.oninput = () => {
     ui.exag = +exag.value; document.getElementById("exv").textContent = (+exag.value).toFixed(1);
-    if (ui.view3d && M) { buildMesh3d(); render3d(); }
+    if (paneVisible("3d") && M && gl) { buildMesh3d(); render3d(); }
   };
-  // orbit controls (active in 3D mode)
-  let drag = false, mx = 0, mz = 0;
-  cv3.addEventListener("mousedown", (e) => { drag = true; mx = e.clientX; mz = e.clientY; });
-  window.addEventListener("mouseup", () => drag = false);
-  window.addEventListener("mousemove", (e) => {
-    if (!drag) return;
-    cam3.yaw += (e.clientX - mx) * 0.01;
-    cam3.pitch = Math.max(0.12, Math.min(1.52, cam3.pitch + (e.clientY - mz) * 0.01));
-    mx = e.clientX; mz = e.clientY; render3d();
+  // 3D pointer: left-drag paints (raycast), right-drag orbits, shift/middle pans.
+  let nav = null, mx = 0, mz = 0;
+  cv3.addEventListener("contextmenu", (e) => e.preventDefault());
+  cv3.addEventListener("mousedown", (e) => {
+    if (!M) return;
+    e.preventDefault();
+    mx = e.clientX; mz = e.clientY;
+    if (e.button === 2) nav = "orbit";
+    else if (e.button === 1 || e.shiftKey) nav = "pan";
+    else { nav = "paint"; paint3d(e); }
   });
+  window.addEventListener("mousemove", (e) => {
+    if (!nav) return;
+    const dx = e.clientX - mx, dy = e.clientY - mz; mx = e.clientX; mz = e.clientY;
+    if (nav === "orbit") {
+      cam3.yaw += dx * 0.01;
+      cam3.pitch = Math.max(0.12, Math.min(1.52, cam3.pitch + dy * 0.01));
+      render3d();
+    } else if (nav === "pan") { panCam(dx, dy); render3d(); }
+    else if (nav === "paint") { paint3d(e); }
+  });
+  window.addEventListener("mouseup", () => nav = null);
   cv3.addEventListener("wheel", (e) => {
     e.preventDefault();
-    cam3.dist = Math.max(300, Math.min(5000, cam3.dist * Math.exp(e.deltaY * 0.001)));
+    cam3.dist = Math.max(200, Math.min(6000, cam3.dist * Math.exp(e.deltaY * 0.001)));
     render3d();
   }, { passive: false });
 
@@ -604,7 +680,8 @@ function initUi() {
     if (down) applyBrush(i, k);
   });
   window.addEventListener("resize", () => {
-    if (ui.view3d) { resize3d(); render3d(); } else render();
+    if (paneVisible("2d")) render();
+    if (paneVisible("3d") && gl) { resize3d(); render3d(); }
   });
 
   // capability check (Compression Streams)

@@ -27,9 +27,11 @@ Needs a current browser (Chrome / Edge / Firefox / Safari) for `CompressionStrea
 ## What you can edit
 
 A top-down view with **Relief / Material / Buildable / Liquid** overlays, and a
-**2D edit / 3D view** toggle: 3D is a WebGL orbit preview of the current surface
-(drag to rotate, wheel to zoom, with a height-exaggeration slider); switch back
-to 2D edit to paint. The game itself renders the real shaded terrain.
+**2D / Split / 3D** layout. The 3D pane is an interactive WebGL view of the
+surface (height-exaggeration slider): **left-drag paints** with the current tool,
+**right-drag orbits**, **shift/middle-drag pans**, **wheel zooms**. **Split**
+shows 2D and 3D together and updates the 3D live as you paint in 2D. The game
+itself renders the real shaded terrain (lobby -> pick world -> Start).
 
 Tools (brush radius + strength):
 
