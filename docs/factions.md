@@ -45,7 +45,7 @@ of the shared five, each drawn from that faction's own core loop:
 | Faction | Resource | Income | Spent on |
 |---|---|---|---|
 | 🐱 Ninefold | ⭐ Instinct | An XP pool banked when their *own* units fall: the experience of the dead returns to the living | Granting **individual** cats new abilities; you customize each character one by one |
-| 🐀 Warren | 🥚 Genetics | Grows with the population: every rat bred, and every enemy turned by plague, deepens the gene-pool | **Pivoting the swarm**: adapting its traits / genes (and buildings) to counter whatever the enemy fields |
+| 🐀 Warren | 🧬 Genetics | Grows with the population: every rat bred, and every enemy turned by plague, deepens the gene-pool | **Pivoting the swarm**: adapting its traits / genes (and buildings) to counter whatever the enemy fields |
 
 The two mirror each other twice over. In **income**, the cats bank the *dead* and
 the rats bank the *born*. In **spending**, the cats specialize the *individual*
