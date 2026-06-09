@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """One-command world-gen build.
 
-Regenerates the texture sets (assets/textures/worlds/) and the preview
-screenshots + contact sheet (docs/worldgen/), all from the catalog in
-`worlds.py`. Pure stdlib; no GPU and no install step.
+Regenerates everything from the catalog in `worlds.py`:
+  1. texture sets        -> assets/textures/worlds/<archetype>/
+  2. baked voxel maps    -> assets/maps/<key>.vxl   (static, editable)
+  3. preview screenshots -> docs/worldgen/previews/ + contact_sheet.png
+     (marching-cubes renders of the actual voxel maps; no GPU needed)
 
-Run:  python3 assets/worldgen/build.py            # textures + all previews
+Run:  python3 assets/worldgen/build.py            # everything
       python3 assets/worldgen/build.py --fetch     # also refresh NASA refs (network)
 
-Tip: WORLDGEN_QUICK=1 makes the previews render small and fast for iteration.
+Tip: render a subset fast with `python3 assets/worldgen/render3d.py moon io`.
 """
 
 import sys
 
 import textures
-import render
+import bake
+import render3d
 
 
 def main():
@@ -23,7 +26,8 @@ def main():
         fetch_nasa.main()
     made = textures.generate()
     print(f"textures: {len(made)} archetype sets -> assets/textures/worlds/")
-    render.main()
+    bake.main()
+    render3d.main()
 
 
 if __name__ == "__main__":

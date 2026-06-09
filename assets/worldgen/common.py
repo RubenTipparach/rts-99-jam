@@ -325,3 +325,18 @@ def draw_text(frame, x, y, s, color=(235, 235, 235), scale=2, shadow=True):
                         if shadow:
                             frame.put(px + scale, py + scale, (12, 12, 16))
                         frame.put(px, py, color)
+
+
+def contact_sheet(frames, path, cols=3, shrink=2):
+    """Tile `frames` (optionally box-downscaled by `shrink`) into a grid image."""
+    if not frames:
+        return
+    thumbs = [fr.downscaled(shrink) if shrink > 1 else fr for fr in frames]
+    tw, th = thumbs[0].w, thumbs[0].h
+    rows = (len(thumbs) + cols - 1) // cols
+    pad = 6
+    sheet = Frame(cols * tw + (cols + 1) * pad, rows * th + (rows + 1) * pad, bg=(8, 9, 14))
+    for k, fr in enumerate(thumbs):
+        r, c = divmod(k, cols)
+        sheet.blit(fr, pad + c * (tw + pad), pad + r * (th + pad))
+    sheet.save(path)

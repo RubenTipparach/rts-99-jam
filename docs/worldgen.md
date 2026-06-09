@@ -4,25 +4,53 @@
 
 The game can be fought over real Solar System bodies. This page documents the
 **21 battlefield worlds**, the **texture archetypes** they share, the **map
-hazards** on each, and the **procedural terrain** that builds them. Everything is
-presentation-side (floats / assets); none of it touches the deterministic sim
-(see [`CLAUDE.md`](../CLAUDE.md), "two worlds, one wall").
+hazards** on each, and the **marching-cubes voxel terrain** that builds them.
+Everything here is presentation-side (floats / assets); none of it touches the
+deterministic sim (see [`CLAUDE.md`](../CLAUDE.md), "two worlds, one wall").
 
 - Catalog + generator: [`assets/worldgen/`](../assets/worldgen/) (pure Python stdlib)
+- Baked map files: [`assets/maps/<key>.vxl`](../assets/maps/) (static, editable)
 - Texture sets: [`assets/textures/worlds/`](../assets/textures/worlds/)
-- Engine procgen mirror: [`apps/client/src/worlds.rs`](../apps/client/src/worlds.rs)
 - NASA references: [`worldgen/nasa_references.json`](worldgen/nasa_references.json)
 
 ## The worlds at a glance
 
 ![All 21 worlds](worldgen/contact_sheet.png)
 
-Many of these bodies share a look (barren cratered rock, dirty ice), so they are
-grouped into a handful of **texture archetypes**; a few are visually unique and
-get their own. A per-world tint, seed and terrain recipe then make each distinct,
-so (for example) the cool, grooved ice of Ganymede never reads like the warm grey
-rock of the Moon, and Europa's red-brown lineae never look like Enceladus's blue
-tiger stripes.
+Each map is a sculpted 3D **density grid** meshed with **marching cubes**, not a
+heightmap. That is deliberate: terraced plateaus give large, flat, buildable
+tops, the tier boundaries become crisp cliffs, and there are no high-frequency
+heightmap spikes. Going fully 3D also allows caves and overhangs, which a
+heightmap cannot represent. Green in the previews marks the relatively flat,
+**buildable** ground.
+
+## Terrain design: buildable, not spiky
+
+The brief: a guaranteed share of relatively flat, buildable ground; plateaus and
+cliffs are good; spikes are not. The recipe (`densitygen.py`):
+
+1. A smooth, **low-frequency** base surface (no fine noise), plus a few wide,
+   shallow craters with flat floors (never spikes).
+2. **Terracing** into a few big elevation tiers: gentle slopes snap to flat
+   plateau tops separated by short cliff risers. The tier count is searched per
+   world to hit its buildable target.
+3. **Voxelize** to a density field with a thin vertical iso-band so marching
+   cubes produces a clean surface; tier jumps become near-vertical cliffs.
+4. Carve a few **caves / arches** into the steep (non-buildable) ground for 3D
+   interest, leaving build space intact.
+5. Mark a per-column **buildable mask** (the flat tops) and store it in the map.
+
+Buildable fractions land between ~58% (rough, cratered worlds like Miranda) and
+~90% (smooth resurfaced ice like Europa), so every map has ample base-building
+room while staying visually distinct.
+
+## Texture archetypes
+
+Many bodies share a look (barren cratered rock, dirty ice), so they are grouped
+into archetypes; a few are unique. A per-world tint, seed and terrain recipe make
+each distinct, so Ganymede's cool grooved ice never reads like the Moon's warm
+grey rock, and Europa's red-brown lineae never look like Enceladus's blue tiger
+stripes.
 
 | archetype | look | worlds |
 | --------- | ---- | ------ |
@@ -38,115 +66,92 @@ tiger stripes.
 | `triton_ice` | UNIQUE: pinkish nitrogen ice, cantaloupe terrain | triton |
 | `pluto_tholin` | UNIQUE: tan tholins beside bright nitrogen plains | pluto |
 
-Each archetype ships four tileable tiles (`base`, `low`, `high`, `accent`) that
-drop straight into the client's existing four-sampler terrain shader.
+Each archetype ships four tileable tiles (`base`, `low`, `high`, `accent`) for
+texturing the mesh; the previews colour the mesh from the same palettes.
 
-## Four that are wholly unique
+## The full catalog (buildable % and map hazards)
 
-| | | |
-| --- | --- | --- |
-| ![Europa](worldgen/previews/europa.png) | ![Io](worldgen/previews/io.png) | |
-| **Europa** - smooth young ice, red-brown lineae, chaos terrain | **Io** - sulfur plains, black lava lakes, eruption plumes | |
-| ![Titan](worldgen/previews/titan.png) | ![Enceladus](worldgen/previews/enceladus.png) | |
-| **Titan** - orange haze, dune seas, dark methane lakes | **Enceladus** - fresh ice, south-polar cryo-geysers | |
-
-(Per-world full-resolution previews are in [`worldgen/previews/`](worldgen/previews/).)
-
-## The full catalog (with map hazards)
-
-| world | archetype | map hazards | NASA reference |
-| ----- | --------- | ----------- | -------------- |
-| Luna (Moon) | `regolith_grey` | basalt maria; ray craters | Lunar Reconnaissance Orbiter (PIA23237) |
-| Ceres | `regolith_dark` | brine eruptions (faculae); ray craters | Dawn (PIA21078) |
-| Vesta | `regolith_grey` | cliffs/scarps; ray craters | Dawn (PIA15140) |
-| Mars | `mars_rust` | dust storms; polar frost; canyon scarps | Viking / MRO (PIA00565) |
-| Callisto | `dirty_ice` | radiation; ray craters | Galileo (PIA03456) |
-| Ganymede | `grooved_ice` | radiation; ice rifts | Galileo / Juno (PIA05077) |
-| Europa | `europa_ice` | ice rifts (lineae); chaos terrain; radiation | Galileo (PIA00294) |
-| Io | `io_sulfur` | lava lakes; radiation; volcanic plumes | Galileo / Voyager 1 (PIA02509) |
-| Titan | `titan_haze` | methane seas; organic haze; cryo-geysers | Cassini / Huygens (PIA12778) |
-| Enceladus | `bright_ice` | cryo-geysers (tiger stripes); ice rifts | Cassini (PIA03551) |
-| Triton | `triton_ice` | cryo-geysers (N2 plumes); polar frost | Voyager 2 (PIA00056) |
-| Rhea | `dirty_ice` | ray craters; ice cliffs | Cassini (PIA21904) |
-| Iapetus | `dirty_ice` | equatorial ridge; albedo dichotomy | Cassini (PIA21347) |
-| Dione | `dirty_ice` | wispy ice cliffs (chasmata); ray craters | Cassini (PIA21349) |
-| Titania | `regolith_grey` | fault canyons (Messina); ray craters | Voyager 2 (PIA01361) |
-| Oberon | `regolith_grey` | dark crater floors; scarps | Voyager 2 (PIA00034) |
-| Umbriel | `regolith_dark` | bright Wunda ring; radiation | Voyager 2 (PIA00040) |
-| Ariel | `grooved_ice` | graben rift valleys; scarps | Voyager 2 (PIA00037) |
-| Miranda | `grooved_ice` | Verona Rupes (~20 km cliff); coronae rifts | Voyager 2 (PIA18185) |
-| Pluto | `pluto_tholin` | nitrogen glaciers (Sputnik Planitia); frost; cryovolcano | New Horizons (PIA09234) |
-| Chiron | `regolith_dark` | comet jets (outgassing); ray craters | Deep Space 1 analog (PIA03865) |
+| world | archetype | buildable | map hazards | NASA reference |
+| ----- | --------- | --------- | ----------- | -------------- |
+| Luna (Moon) | `regolith_grey` | 68% | basalt maria; ray craters | LRO (PIA23237) |
+| Ceres | `regolith_dark` | 66% | brine eruptions (faculae); ray craters | Dawn (PIA21078) |
+| Vesta | `regolith_grey` | 63% | cliffs/scarps; ray craters | Dawn (PIA15140) |
+| Mars | `mars_rust` | 66% | dust storms; polar frost; canyon scarps | Viking / MRO (PIA00565) |
+| Callisto | `dirty_ice` | 66% | radiation; ray craters | Galileo (PIA03456) |
+| Ganymede | `grooved_ice` | 63% | radiation; ice rifts | Galileo / Juno (PIA05077) |
+| Europa | `europa_ice` | 90% | ice rifts (lineae); chaos terrain; radiation | Galileo (PIA00294) |
+| Io | `io_sulfur` | 71% | lava lakes; radiation; volcanic plumes | Galileo / Voyager 1 (PIA02509) |
+| Titan | `titan_haze` | 80% | methane seas; organic haze; cryo-geysers | Cassini / Huygens (PIA12778) |
+| Enceladus | `bright_ice` | 85% | cryo-geysers (tiger stripes); ice rifts | Cassini (PIA03551) |
+| Triton | `triton_ice` | 85% | cryo-geysers (N2 plumes); polar frost | Voyager 2 (PIA00056) |
+| Rhea | `dirty_ice` | 70% | ray craters; ice cliffs | Cassini (PIA21904) |
+| Iapetus | `dirty_ice` | 64% | equatorial ridge; albedo dichotomy | Cassini (PIA21347) |
+| Dione | `dirty_ice` | 66% | wispy ice cliffs (chasmata); ray craters | Cassini (PIA21349) |
+| Titania | `regolith_grey` | 59% | fault canyons (Messina); ray craters | Voyager 2 (PIA01361) |
+| Oberon | `regolith_grey` | 66% | dark crater floors; scarps | Voyager 2 (PIA00034) |
+| Umbriel | `regolith_dark` | 65% | bright Wunda ring; radiation | Voyager 2 (PIA00040) |
+| Ariel | `grooved_ice` | 62% | graben rift valleys; scarps | Voyager 2 (PIA00037) |
+| Miranda | `grooved_ice` | 58% | Verona Rupes (~20 km cliff); coronae rifts | Voyager 2 (PIA18185) |
+| Pluto | `pluto_tholin` | 69% | nitrogen glaciers (Sputnik Planitia); frost; cryovolcano | New Horizons (PIA09234) |
+| Chiron | `regolith_dark` | 64% | comet jets (outgassing); ray craters | Deep Space 1 analog (PIA03865) |
 
 ### Hazard glossary
 
-Hazards are declared per world in `worlds.py` and rendered into the previews
-(and meant to drive gameplay terrain effects):
+Hazards are declared per world in `worlds.py` (and meant to drive gameplay terrain
+effects): **lava lakes / volcanic plumes** (Io), **methane seas** (Titan),
+**cryo-geysers** (Enceladus, Triton, Pluto), **ice rifts / chaos / grooves**
+(Europa, Ganymede, Ariel, Miranda, Enceladus), **dust storms** (Mars, Titan),
+**brine eruptions** (Ceres), **cliffs / scarps** (Miranda, Vesta, Dione, the
+Uranian moons), **albedo dichotomy / equatorial ridge** (Iapetus), **nitrogen
+glaciers** (Pluto), **radiation** (the Jovian moons), and **comet jets** (Chiron).
 
-- **lava lakes / volcanic plumes** (Io): glowing molten paterae and eruption jets.
-- **methane seas** (Titan): still, dark hydrocarbon lakes pooled in the lowlands.
-- **cryo-geysers** (Enceladus, Triton, Pluto): icy/nitrogen jets along fractures.
-- **ice rifts / chaos / grooves** (Europa, Ganymede, Ariel, Miranda, Enceladus):
-  fractured, resurfaced terrain (Europa's reddish lineae, the others' sulci).
-- **dust storms** (Mars, Titan haze): wind-blown haze sweeping the surface.
-- **brine eruptions** (Ceres): bright salt deposits (Occator-style faculae).
-- **cliffs / scarps** (Miranda, Vesta, Dione, Iapetus, the Uranian moons): big drops.
-- **albedo dichotomy / equatorial ridge** (Iapetus): a dark hemisphere and a ridge.
-- **nitrogen glaciers** (Pluto): flat, bright resurfaced plains.
-- **radiation** (the Jovian moons): an environmental hazard zone.
-- **comet jets** (Chiron): sublimation outgassing from an icy-rock centaur.
+## The map file format (`.vxl`)
 
-## How the terrain is generated
-
-`render.py` builds each world from its recipe in `worlds.py`, then shades it with
-the world's texture set and draws hazards on top. The recipe knobs:
+A baked map is a tiny, documented container (`voxel.py`). The canonical, editable
+artifact is the raw density grid:
 
 ```
-relief        overall vertical scale          grooves/groove_dir   parallel sulci ridges
-roughness     fbm detail                      rifts                thin fractures / graben
-warp          domain-warp strength            dunes/dune_dir       aeolian ripple fields
-crater_*      impact crater density/size      calderas             volcanic floors (Io)
-smoothness    resurfacing (fewer craters)     cantaloupe           dimpled terrain (Triton)
-                                              plains               flat resurfaced basins
-                                              ridge                equatorial ridge (Iapetus)
+magic   "VXL1"                     4 bytes
+nx ny nz                           3 x uint16  (grid dims; y is up)
+x0 x1 y0 y1 z0 z1                  6 x int16   (world-space bounds)
+flat_permil  reserved             2 x uint16   (buildable fraction * 1000)
+payload = zlib( density[nx*ny*nz] + material[nx*ny*nz] + buildable[nx*nz] )
+          density: uint8 (>=128 solid),  material: uint8,  buildable: uint8 mask
 ```
 
-The pipeline per world: layered value-noise heightfield (with domain warp) ->
-add grooves / dunes / cantaloupe / ridge / plains -> rasterize impact craters
-(bowl + raised rim + ejecta) -> derive material & hazard masks -> oblique,
-hill-shaded render sampling the texture set, with hazard overlays (lava glow,
-flat dark lakes, geyser/jet plumes, sweeping dust haze) and a label + hazard
-legend baked in. It is deterministic: same catalog in, byte-identical assets out.
+The 21 maps total under 400 KB. Edit later with the ops on `VoxelGrid`
+(`fill_box`, `carve_sphere`, ...), `python3 assets/worldgen/voxel.py <map.vxl>`
+to inspect, or any tool that speaks VXL1.
 
-This mirrors the staged worldgen pipeline in
-[Ch.08](architecture/08-procedural-generation.md); the previews are produced
-without a GPU (a tiny software heightfield renderer) so the look can be verified
-in CI-friendly, headless environments.
+## Engine integration
 
-### In the engine
+The deterministic sim is flat 2D fixed-point, so the safe path (chosen design) is
+**marching-cubes mesh + cliffs for the look, with buildability / gameplay derived
+from the baked `buildable` mask on a 2.5D plane**. The plan:
 
-[`apps/client/src/worlds.rs`](../apps/client/src/worlds.rs) is the engine-side
-mirror of the terrain recipes (same knobs, `f32`). `terrain.rs` uses it when a
-world is selected:
+- `apps/client/src/voxel.rs`: load a `.vxl`, run marching cubes to a mesh, and
+  expose `surface_height(x, z)` + `buildable(x, z)`. (Engine-side, `f32`.)
+- The renderer draws the MC mesh; units sit on `surface_height`; placement uses
+  `buildable`.
+- Fully 3D-aware pathing/building (units under overhangs) is the larger,
+  determinism-sensitive follow-up: any terrain the sim consumes must be
+  fixed-point and re-pins the golden hash, so it is staged carefully rather than
+  rushed into the sim.
 
-```rust
-// apps/client/src/worlds.rs
-pub const ACTIVE: usize = usize::MAX; // out of range -> default Earthlike map
-// set to an index from WORLDS (0 = Moon, 7 = Io, 8 = Titan, ...) to fight there
-```
-
-The default keeps the existing Earthlike map. Wiring the per-world texture sets
-and hazard rendering all the way through the wgpu pipeline (the previews show the
-target look) is the natural next step.
+(The earlier parameterized heightmap procgen in `apps/client/src/worlds.rs`
+remains as a lightweight fallback.)
 
 ## Regenerating
 
 ```sh
-python3 assets/worldgen/build.py            # textures + previews + contact sheet
+python3 assets/worldgen/build.py            # textures + baked maps + previews
 python3 assets/worldgen/build.py --fetch    # also refresh the NASA references (network)
+python3 assets/worldgen/render3d.py moon io # fast subset preview
+python3 assets/worldgen/bake.py             # just the .vxl maps
 ```
 
-See [`assets/worldgen/README.md`](../assets/worldgen/README.md) for details.
+See [`assets/worldgen/README.md`](../assets/worldgen/README.md) for the module
+breakdown.
 
 ## Imagery credit
 
@@ -154,4 +159,5 @@ Palettes are tuned to match real spacecraft imagery: NASA / JPL-Caltech and
 partner missions (LROC, Dawn, Galileo, Cassini-Huygens, Voyager 2, Juno, New
 Horizons, Deep Space 1, Hubble). Most NASA imagery is public domain; see the NASA
 [media usage guidelines](https://www.nasa.gov/multimedia/guidelines/). The
-generated tiles and previews here are original procedural art, not NASA imagery.
+generated tiles, maps and previews here are original procedural art, not NASA
+imagery.
