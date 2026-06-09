@@ -24,10 +24,20 @@ import math
 from common import fbm, clamp, Rng
 import voxel as vox
 
-HALF = 600
-NXZ = 128
-NY = 48
+# World is 1024 x 1024 units (HALF = 512), and the XZ grid is 257 samples = 256
+# cells, so dx = dz = 1024 / 256 = exactly 4.0 units. That divides cleanly into
+# the sim's integer logical units and lines up 1:1 with the 256-cell fog grid
+# (apps/client gfx::FOW_RES). Keep these in step with terrain::HALF.
+HALF = 512
+NXZ = 257
+NY = 128
 YMIN, YMAX = -40.0, 150.0
+
+# World-space (resolution-independent) tuning, so the grid can be re-sampled at a
+# higher NXZ/NY without terrain getting "stricter": a flat-enough-to-build column
+# and the surface-skin thickness are physical sizes, not voxel counts.
+FLAT_TOL = 2.4   # max neighbour height delta (world units) still counted buildable
+SKIN_MIN, SKIN_VAR = 4.8, 6.5  # surface skin thickness range (world units)
 
 MAT_LOW, MAT_MID, MAT_HIGH, MAT_ACCENT, MAT_HAZARD = 0, 1, 2, 3, 4
 
@@ -321,7 +331,7 @@ def build(world):
     target = FLAT_TARGET.get(key, 0.40)
     rough = 1.0 - target
     dy = (YMAX - YMIN) / (NY - 1)
-    tol = dy * 0.6
+    tol = FLAT_TOL
 
     # Mostly-flat worlds whose relief comes from discrete features, not terraced
     # mesas: airless rock/ice with no erosion (Moon, Ceres, Vesta, Callisto,
@@ -435,7 +445,7 @@ def build(world):
             # Skin thickness wobbles in x/z so the skin->subsurface edge on a face
             # is irregular, not a perfectly level band.
             wob = fbm(u * 3.0 + 2.0, v * 3.0 + 9.0, sk + 13, 2)
-            skin = dy * (1.2 + 1.6 * wob)
+            skin = SKIN_MIN + SKIN_VAR * wob
             # buildable: flat, and dry land (not under ocean/lake/river)
             grid.buildable[k * NXZ + i] = 1 if (mx <= tol and (i, k) not in wet) else 0
             for j in range(NY):

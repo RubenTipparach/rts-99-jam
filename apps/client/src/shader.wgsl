@@ -97,23 +97,29 @@ fn fs_terrain(in: TerrainOut) -> @location(0) vec4<f32> {
 // ---------------- voxel terrain (marching-cubes worlds) ----------------
 // A 3D mesh, so it is textured triplanar from the selected world's tile set
 // (base/low/high/accent bound to the grass/dirt/rock/sand slots) and tinted per
-// world. Material id picks the tile; steep faces blend toward the "high" tile.
+// world. Each vertex carries soft blend weights (mid/low/high/accent + hazard)
+// sampled from the 3D material field, so tiles fade into each other across a
+// material boundary (e.g. surface skin -> exposed subsurface) instead of
+// switching abruptly. Steep faces still lean a little toward the "high" tile.
 struct VoxelOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) mat: f32,
+    @location(2) w: vec4<f32>,
+    @location(3) haz: f32,
 };
 @vertex
 fn vs_voxel(
     @location(0) pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) mat: f32,
+    @location(2) w: vec4<f32>,
+    @location(3) haz: f32,
 ) -> VoxelOut {
     var o: VoxelOut;
     o.world = pos;
     o.normal = normal;
-    o.mat = mat;
+    o.w = w;
+    o.haz = haz;
     o.clip = cam.view_proj * vec4<f32>(pos, 1.0);
     return o;
 }
@@ -121,22 +127,24 @@ fn vs_voxel(
 fn fs_voxel(in: VoxelOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let p = in.world;
-    let m = i32(round(in.mat));
-    var col = triplanar(t_grass, p, n); // 1 = mid / base surface
-    if (m == 0) { col = triplanar(t_dirt, p, n); }        // low / basin
-    else if (m == 2) { col = triplanar(t_rock, p, n); }   // high / cliff
-    else if (m == 3) { col = triplanar(t_sand, p, n); }   // accent (rays/lineae)
+    let w = in.w; // x mid/base, y low, z high, w accent
+    let haz = in.haz;
 
-    // Steep faces read as exposed rock/ice regardless of material.
+    // Triplanar-sample each tile once, then blend by the per-vertex weights.
+    let cg = triplanar(t_grass, p, n);
+    let cd = triplanar(t_dirt, p, n);
+    let cr = triplanar(t_rock, p, n);
+    let cs = triplanar(t_sand, p, n);
+    let lava = mix(cs, vec3<f32>(0.95, 0.42, 0.12), 0.55);
+    var col = w.x * cg + w.y * cd + w.z * cr + w.w * cs + haz * lava;
+
+    // Steep faces lean toward exposed rock/ice, but only at near-vertical and
+    // gently, so the material weights (skin vs subsurface) stay in charge.
     let slope = clamp(1.0 - n.y, 0.0, 1.0);
-    col = mix(col, triplanar(t_rock, p, n), smoothstep(0.5, 0.9, slope));
+    col = mix(col, cr, smoothstep(0.65, 0.95, slope) * (1.0 - haz) * 0.55);
     col = col * world.tint.rgb;
 
-    var emis = vec3<f32>(0.0);
-    if (m == 4) { // hazard: lava / vents glow
-        col = mix(triplanar(t_sand, p, n), vec3<f32>(0.95, 0.42, 0.12), 0.55);
-        emis = vec3<f32>(1.0, 0.45, 0.12) * world.tint.a;
-    }
+    let emis = vec3<f32>(1.0, 0.45, 0.12) * world.tint.a * haz;
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
     let lit = (col * (0.4 + 0.7 * ndl) + emis) * fow(in.world);
     return vec4<f32>(lit, 1.0);

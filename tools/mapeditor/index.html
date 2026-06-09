@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<!--
+  Astromancers voxel map editor (dev tool, not part of the game).
+
+  Loads the baked .vxl battlefields from assets/maps, lets you tinker with the
+  terrain (height, material, buildable, liquid) on a top-down view, and exports a
+  .vxl you can drop back into assets/maps and commit. It speaks the same VXL1
+  format as assets/worldgen/voxel.py and apps/client/src/voxel.rs, and uses the
+  browser's native zlib (Compression Streams, "deflate") so there are no deps.
+
+  This is a heightfield + material-strata editor: an edited column is rebuilt as a
+  single-surface column (skin over subsurface), so carved caves/overhangs in
+  columns you paint are flattened. Untouched columns are written back verbatim,
+  so existing 3D features elsewhere are preserved. Author full 3D features in the
+  Python pipeline (assets/worldgen).
+
+  Run it over http so the presets can be fetched, e.g. from the repo root:
+      python3 -m http.server
+  then open  http://localhost:8000/tools/mapeditor/
+  (or just open this file and use "Load .vxl file" to pick a map by hand).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Astromancers map editor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
+    background: #0b0e16; color: #c7d3e6; display: flex; height: 100vh;
+  }
+  #side {
+    width: 280px; flex: 0 0 280px; padding: 12px; overflow-y: auto;
+    background: #11151f; border-right: 1px solid #1d2433;
+  }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #stage { flex: 1; display: grid; place-items: center; overflow: hidden; background: #06090f; }
+  canvas { image-rendering: pixelated; background: #000; box-shadow: 0 0 0 1px #1d2433; cursor: crosshair; }
+  h1 { font-size: 14px; margin: 0 0 2px; color: #e7eefa; letter-spacing: .04em; }
+  .sub { color: #6c7d99; margin: 0 0 12px; font-size: 11px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #7f93b8; margin: 16px 0 6px; }
+  label { display: block; margin: 6px 0 2px; color: #9fb0cc; }
+  select, input[type=file], button {
+    width: 100%; padding: 6px 8px; background: #18202f; color: #cdd9ec;
+    border: 1px solid #283143; border-radius: 4px; font: inherit;
+  }
+  input[type=range] { width: 100%; }
+  button { cursor: pointer; }
+  button:hover { background: #1f293b; }
+  button.on { background: #2a5a96; border-color: #3a78c8; color: #eaf2ff; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .row > button { width: auto; flex: 1 1 calc(50% - 3px); }
+  .mat { display: flex; gap: 6px; flex-wrap: wrap; }
+  .mat > button { width: auto; flex: 1 1 calc(33% - 4px); padding: 6px 2px; font-size: 11px; }
+  .sw { display: inline-block; width: 9px; height: 9px; margin-right: 4px; vertical-align: middle; border: 1px solid #0006; }
+  #status { padding: 6px 12px; background: #11151f; border-top: 1px solid #1d2433; color: #8fa1bf; font-size: 12px; white-space: pre; }
+  .val { color: #cdd9ec; float: right; }
+  .note { color: #6c7d99; font-size: 11px; margin-top: 4px; }
+  .warn { color: #e0a76a; }
+  hr { border: 0; border-top: 1px solid #1d2433; margin: 14px 0; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>MAP EDITOR</h1>
+  <p class="sub">voxel .vxl battlefields</p>
+
+  <h2>Load</h2>
+  <label>Preset (from assets/maps)</label>
+  <select id="preset"></select>
+  <label>or load a .vxl file</label>
+  <input id="file" type="file" accept=".vxl">
+  <p class="note" id="dims">no map loaded</p>
+
+  <h2>View</h2>
+  <div class="row">
+    <button data-ov="hill" class="on">Relief</button>
+    <button data-ov="mat">Material</button>
+    <button data-ov="build">Buildable</button>
+    <button data-ov="liq">Liquid</button>
+  </div>
+
+  <h2>Tool</h2>
+  <div class="row" id="tools">
+    <button data-tool="raise" class="on">Raise</button>
+    <button data-tool="lower">Lower</button>
+    <button data-tool="smooth">Smooth</button>
+    <button data-tool="flatten">Flatten</button>
+    <button data-tool="mat">Paint mat</button>
+    <button data-tool="build">Buildable</button>
+    <button data-tool="liquid">Liquid</button>
+    <button data-tool="pick">Eyedrop</button>
+  </div>
+
+  <label>Brush radius <span class="val" id="rv">14</span></label>
+  <input id="radius" type="range" min="1" max="60" value="14">
+  <label>Strength <span class="val" id="sv">6</span></label>
+  <input id="strength" type="range" min="1" max="40" value="6">
+
+  <h2>Paint material</h2>
+  <div class="mat" id="mats"></div>
+
+  <h2>Liquid / build</h2>
+  <label>Liquid surface (world y) <span class="val" id="lqv">0</span></label>
+  <input id="lqlevel" type="range" min="-40" max="150" value="0">
+  <div class="row">
+    <button id="buildon" class="on">Build = on</button>
+    <button id="liqerase">Liquid = erase</button>
+  </div>
+
+  <hr>
+  <h2>Export</h2>
+  <label>Skin thickness (world units) <span class="val" id="skv">7</span></label>
+  <input id="skin" type="range" min="0" max="24" value="7">
+  <button id="export">Download .vxl</button>
+  <p class="note">Drop the file into <code>assets/maps/</code> (same name) and commit. Edited columns lose caves/overhangs; untouched columns keep theirs.</p>
+  <p class="note warn" id="caps"></p>
+</div>
+
+<div id="main">
+  <div id="stage"><canvas id="cv" width="256" height="256"></canvas></div>
+  <div id="status">load a map to begin</div>
+</div>
+
+<script>
+"use strict";
+
+// ---- map catalog (keys match assets/maps/<key>.vxl, order = lobby order) ----
+const MAPS = [
+  "moon","ceres","vesta","mars","callisto","ganymede","europa","io","titan",
+  "enceladus","triton","rhea","iapetus","dione","titania","oberon","umbriel",
+  "ariel","miranda","pluto","chiron","earth",
+];
+
+// material slots: id -> {name, color for the Material overlay}
+const MAT = [
+  { id: 0, name: "low",    col: [70, 64, 58] },
+  { id: 1, name: "mid",    col: [150, 138, 110] },
+  { id: 2, name: "high",   col: [150, 152, 158] },
+  { id: 3, name: "accent", col: [222, 210, 188] },
+  { id: 4, name: "hazard", col: [236, 120, 44] },
+];
+
+const ISO = 128;
+
+// ---- zlib via native Compression Streams ("deflate" = RFC1950 zlib) ----
+async function inflate(u8) {
+  const ds = new DecompressionStream("deflate");
+  const s = new Blob([u8]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+async function deflate(u8) {
+  const cs = new CompressionStream("deflate");
+  const s = new Blob([u8]).stream().pipeThrough(cs);
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+
+// ---- editor state ----
+let M = null; // loaded map model
+const ui = {
+  overlay: "hill", tool: "raise", radius: 14, strength: 6,
+  mat: 2, lqlevel: 0, buildVal: 1, liqErase: false, skin: 7,
+};
+
+// ---- VXL1 parse ----
+async function parseVxl(buf) {
+  const b = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  if (b[0] !== 86 || b[1] !== 88 || b[2] !== 76 || b[3] !== 49) throw new Error("not a VXL1 file");
+  const nx = dv.getUint16(4, false), ny = dv.getUint16(6, false), nz = dv.getUint16(8, false);
+  const bounds = [
+    dv.getInt16(10, false), dv.getInt16(12, false), dv.getInt16(14, false),
+    dv.getInt16(16, false), dv.getInt16(18, false), dv.getInt16(20, false),
+  ];
+  const flat = dv.getUint16(22, false);
+  const seaRaw = dv.getInt16(24, false);
+  const raw = await inflate(b.subarray(26));
+  const n = nx * ny * nz, cols = nx * nz;
+  const density = raw.subarray(0, n);
+  const material = raw.subarray(n, 2 * n);
+  const buildable = raw.subarray(2 * n, 2 * n + cols);
+  const liquid = raw.length >= 2 * n + 2 * cols
+    ? raw.subarray(2 * n + cols, 2 * n + 2 * cols) : new Uint8Array(cols);
+  return { nx, ny, nz, bounds, flat, sea: seaRaw === -32768 ? null : seaRaw,
+           density, material, buildable: Uint8Array.from(buildable), liquid: Uint8Array.from(liquid) };
+}
+
+const lin = (m, i, j, k) => (j * m.nz + k) * m.nx + i;
+const dyOf = (m) => (m.bounds[3] - m.bounds[2]) / (m.ny - 1);
+const worldY = (m, j) => m.bounds[2] + j * dyOf(m);
+
+// Build the working model (heightfield + per-column material/build/liquid)
+// from the raw 3D arrays, keeping the originals for verbatim write-back.
+function buildModel(p) {
+  const { nx, nz, ny } = p;
+  const cols = nx * nz, dy = dyOf(p);
+  const H = new Float32Array(cols);       // surface world-y
+  const surfMat = new Uint8Array(cols);   // material at the surface
+  const subMat = new Uint8Array(cols);    // material a few voxels down (strata)
+  const build = Uint8Array.from(p.buildable);
+  const liq = Uint8Array.from(p.liquid);
+  const dirty = new Uint8Array(cols);
+  for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
+    const c = k * nx + i;
+    let surf = p.bounds[2], topj = 0, found = false;
+    for (let j = ny - 1; j >= 0; j--) {
+      if (p.density[lin(p, i, j, k)] >= ISO) {
+        const here = p.density[lin(p, i, j, k)];
+        if (j + 1 < ny) {
+          const above = p.density[lin(p, i, j + 1, k)];
+          const t = Math.min(1, Math.max(0, (ISO - here) / (above - here || 1)));
+          surf = worldY(p, j) + t * dy;
+        } else surf = worldY(p, j);
+        topj = j; found = true; break;
+      }
+    }
+    H[c] = surf;
+    surfMat[c] = found ? p.material[lin(p, i, topj, k)] : 1;
+    const dj = Math.max(0, topj - 3);
+    subMat[c] = found ? p.material[lin(p, i, dj, k)] : 2;
+  }
+  return { ...p, H, surfMat, subMat, build, liq, dirty,
+           origDensity: p.density, origMaterial: p.material, dy };
+}
+
+// ---- rendering ----
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let img = null;
+
+function render() {
+  if (!M) return;
+  const { nx, nz } = M;
+  if (cv.width !== nx || cv.height !== nz) { cv.width = nx; cv.height = nz; img = ctx.createImageData(nx, nz); }
+  let lo = Infinity, hi = -Infinity;
+  for (let c = 0; c < M.H.length; c++) { if (M.H[c] < lo) lo = M.H[c]; if (M.H[c] > hi) hi = M.H[c]; }
+  const span = (hi - lo) || 1;
+  const d = img.data;
+  for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
+    const c = k * nx + i;
+    // hillshade from height gradient
+    const hx = M.H[c < c + 1 && i < nx - 1 ? c + 1 : c] - M.H[i > 0 ? c - 1 : c];
+    const hz = M.H[k < nz - 1 ? c + nx : c] - M.H[k > 0 ? c - nx : c];
+    const sh = Math.max(0.25, Math.min(1.2, 0.7 + (-hx - hz) * 0.05));
+    const t = (M.H[c] - lo) / span;
+    // hypsometric ramp (low blue-grey -> high pale)
+    let r = 40 + t * 180, g = 55 + t * 170, b = 70 + t * 150;
+    if (ui.overlay === "mat") {
+      const mc = MAT[Math.min(4, M.surfMat[c])].col; r = mc[0]; g = mc[1]; b = mc[2];
+    }
+    r *= sh; g *= sh; b *= sh;
+    if (ui.overlay === "build" && M.build[c]) { r = r * 0.4 + 60; g = g * 0.4 + 160; b = b * 0.4 + 70; }
+    if (ui.overlay === "liq" && M.liq[c]) { r = r * 0.3 + 30; g = g * 0.3 + 90; b = b * 0.3 + 170; }
+    if (ui.overlay !== "liq" && M.liq[c]) { r = r * 0.55 + 25; g = g * 0.55 + 60; b = b * 0.55 + 120; }
+    const o = c * 4;
+    d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  // fit canvas to stage
+  const stage = document.getElementById("stage");
+  const s = Math.max(1, Math.floor(Math.min(stage.clientWidth, stage.clientHeight) / nx));
+  cv.style.width = (nx * s) + "px"; cv.style.height = (nz * s) + "px";
+}
+
+// ---- editing ----
+function colAtEvent(e) {
+  const r = cv.getBoundingClientRect();
+  const i = Math.floor((e.clientX - r.left) / r.width * M.nx);
+  const k = Math.floor((e.clientY - r.top) / r.height * M.nz);
+  return [Math.max(0, Math.min(M.nx - 1, i)), Math.max(0, Math.min(M.nz - 1, k))];
+}
+
+function applyBrush(ci, ck) {
+  const rad = ui.radius, str = ui.strength;
+  const r0i = Math.max(0, ci - rad), r1i = Math.min(M.nx - 1, ci + rad);
+  const r0k = Math.max(0, ck - rad), r1k = Math.min(M.nz - 1, ck + rad);
+  let flatTarget = null;
+  if (ui.tool === "flatten") flatTarget = M.H[ck * M.nx + ci];
+  for (let k = r0k; k <= r1k; k++) for (let i = r0i; i <= r1i; i++) {
+    const dd = Math.hypot(i - ci, k - ck) / rad;
+    if (dd > 1) continue;
+    const c = k * M.nx + i;
+    const fall = (1 - dd * dd); // gaussian-ish falloff
+    switch (ui.tool) {
+      case "raise": M.H[c] += str * fall; M.dirty[c] = 1; break;
+      case "lower": M.H[c] -= str * fall; M.dirty[c] = 1; break;
+      case "flatten": M.H[c] += (flatTarget - M.H[c]) * Math.min(1, 0.15 * str * fall); M.dirty[c] = 1; break;
+      case "smooth": {
+        let s = 0, n = 0;
+        for (const [di, dk] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const ni = i + di, nk = k + dk;
+          if (ni >= 0 && ni < M.nx && nk >= 0 && nk < M.nz) { s += M.H[nk * M.nx + ni]; n++; }
+        }
+        if (n) { M.H[c] += (s / n - M.H[c]) * Math.min(1, 0.2 * str * fall); M.dirty[c] = 1; }
+        break;
+      }
+      case "mat": M.surfMat[c] = ui.mat; M.dirty[c] = 1; break;
+      case "build": M.build[c] = ui.buildVal; M.dirty[c] = 1; break;
+      case "liquid": {
+        if (ui.liqErase) { M.liq[c] = 0; }
+        else {
+          const j = Math.max(0, Math.min(M.ny - 1, Math.round((ui.lqlevel - M.bounds[2]) / M.dy)));
+          M.liq[c] = j + 1; M.build[c] = 0;
+        }
+        M.dirty[c] = 1; break;
+      }
+      case "pick":
+        if (dd < 0.001) { ui.lqlevel = Math.round(M.H[c]); syncLqLabel(); setMat(M.surfMat[c]); }
+        break;
+    }
+  }
+  render();
+}
+
+// ---- export ----
+async function exportVxl() {
+  const p = M, { nx, ny, nz } = p, cols = nx * nz, n = nx * ny * nz, dy = p.dy;
+  const slope = 120 / dy, skin = ui.skin;
+  const density = new Uint8Array(n), material = new Uint8Array(n);
+  for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
+    const c = k * nx + i;
+    if (!p.dirty[c]) {
+      for (let j = 0; j < ny; j++) { const o = lin(p, i, j, k); density[o] = p.origDensity[o]; material[o] = p.origMaterial[o]; }
+      continue;
+    }
+    const surf = p.H[c], sm = p.surfMat[c], bm = p.subMat[c];
+    for (let j = 0; j < ny; j++) {
+      const y = worldY(p, j), o = lin(p, i, j, k);
+      density[o] = Math.max(0, Math.min(255, Math.round(128 + (surf - y) * slope)));
+      material[o] = (surf - y) <= skin ? sm : bm;
+    }
+  }
+  // buildable: keep edited mask but force dry-only (matches densitygen)
+  const build = Uint8Array.from(p.build);
+  for (let c = 0; c < cols; c++) if (p.liq[c]) build[c] = 0;
+  let flat = 0; for (let c = 0; c < cols; c++) if (build[c]) flat++;
+  const flatPermil = Math.round(flat / cols * 1000);
+
+  const payload = new Uint8Array(2 * n + 2 * cols);
+  payload.set(density, 0); payload.set(material, n);
+  payload.set(build, 2 * n); payload.set(p.liq, 2 * n + cols);
+  const comp = await deflate(payload);
+
+  const head = new Uint8Array(26); const dv = new DataView(head.buffer);
+  head[0] = 86; head[1] = 88; head[2] = 76; head[3] = 49;
+  dv.setUint16(4, nx, false); dv.setUint16(6, ny, false); dv.setUint16(8, nz, false);
+  for (let q = 0; q < 6; q++) dv.setInt16(10 + q * 2, Math.round(p.bounds[q]), false);
+  dv.setUint16(22, flatPermil, false);
+  dv.setInt16(24, p.sea == null ? -32768 : Math.round(p.sea), false);
+
+  const out = new Uint8Array(head.length + comp.length);
+  out.set(head, 0); out.set(comp, head.length);
+  const blob = new Blob([out], { type: "application/octet-stream" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = (M.key || "map") + ".vxl"; a.click();
+  URL.revokeObjectURL(a.href);
+  status(`exported ${a.download}: ${(out.length / 1024).toFixed(1)} KB, buildable ${(flatPermil / 10).toFixed(1)}%`);
+}
+
+// ---- load ----
+async function loadFromBuffer(buf, key) {
+  const p = await parseVxl(buf);
+  M = buildModel(p); M.key = key || M.key || "map";
+  document.getElementById("dims").textContent =
+    `${M.nx} x ${M.ny} x ${M.nz}  bounds y[${M.bounds[2]},${M.bounds[3]}]  buildable ${(M.flat / 10).toFixed(1)}%`;
+  document.getElementById("lqlevel").min = M.bounds[2];
+  document.getElementById("lqlevel").max = M.bounds[3];
+  render();
+  status(`loaded ${M.key}`);
+}
+async function loadPreset(key) {
+  try {
+    const res = await fetch(`../../assets/maps/${key}.vxl`);
+    if (!res.ok) throw new Error(res.status);
+    await loadFromBuffer(await res.arrayBuffer(), key);
+  } catch (err) {
+    status(`could not fetch preset (${err}); serve over http, or use "Load .vxl file"`);
+  }
+}
+
+// ---- ui wiring ----
+function status(s) { document.getElementById("status").textContent = s; }
+function setActive(sel, attr, val) {
+  document.querySelectorAll(sel).forEach((b) => b.classList.toggle("on", b.getAttribute(attr) === val));
+}
+function setMat(id) { ui.mat = id; setActive("#mats [data-mat]", "data-mat", String(id)); }
+function syncLqLabel() { document.getElementById("lqv").textContent = ui.lqlevel; document.getElementById("lqlevel").value = ui.lqlevel; }
+
+function initUi() {
+  const presetSel = document.getElementById("preset");
+  presetSel.innerHTML = `<option value="">- choose preset -</option>` +
+    MAPS.map((k) => `<option value="${k}">${k}</option>`).join("");
+  presetSel.onchange = () => presetSel.value && loadPreset(presetSel.value);
+  document.getElementById("file").onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const key = f.name.replace(/\.vxl$/i, "");
+    f.arrayBuffer().then((buf) => loadFromBuffer(buf, key));
+  };
+  document.querySelectorAll("[data-ov]").forEach((b) => b.onclick = () => {
+    ui.overlay = b.getAttribute("data-ov"); setActive("[data-ov]", "data-ov", ui.overlay); render();
+  });
+  document.querySelectorAll("[data-tool]").forEach((b) => b.onclick = () => {
+    ui.tool = b.getAttribute("data-tool"); setActive("[data-tool]", "data-tool", ui.tool);
+  });
+  const mats = document.getElementById("mats");
+  mats.innerHTML = MAT.map((m) => {
+    const c = `rgb(${m.col[0]},${m.col[1]},${m.col[2]})`;
+    return `<button data-mat="${m.id}"><span class="sw" style="background:${c}"></span>${m.name}</button>`;
+  }).join("");
+  mats.querySelectorAll("[data-mat]").forEach((b) => b.onclick = () => setMat(+b.getAttribute("data-mat")));
+  setMat(2);
+  const rad = document.getElementById("radius"), str = document.getElementById("strength"),
+        skin = document.getElementById("skin"), lq = document.getElementById("lqlevel");
+  rad.oninput = () => { ui.radius = +rad.value; document.getElementById("rv").textContent = rad.value; };
+  str.oninput = () => { ui.strength = +str.value; document.getElementById("sv").textContent = str.value; };
+  skin.oninput = () => { ui.skin = +skin.value; document.getElementById("skv").textContent = skin.value; };
+  lq.oninput = () => { ui.lqlevel = +lq.value; document.getElementById("lqv").textContent = lq.value; };
+  document.getElementById("buildon").onclick = (e) => {
+    ui.buildVal = ui.buildVal ? 0 : 1; e.target.textContent = `Build = ${ui.buildVal ? "on" : "off"}`;
+    e.target.classList.toggle("on", !!ui.buildVal);
+  };
+  document.getElementById("liqerase").onclick = (e) => {
+    ui.liqErase = !ui.liqErase; e.target.textContent = `Liquid = ${ui.liqErase ? "erase" : "fill"}`;
+    e.target.classList.toggle("on", ui.liqErase);
+  };
+  document.getElementById("export").onclick = () => M ? exportVxl() : status("load a map first");
+
+  let down = false;
+  cv.addEventListener("mousedown", (e) => { if (!M) return; down = true; applyBrush(...colAtEvent(e)); });
+  window.addEventListener("mouseup", () => down = false);
+  cv.addEventListener("mousemove", (e) => {
+    if (!M) return;
+    const [i, k] = colAtEvent(e);
+    document.getElementById("status").textContent =
+      `col ${i},${k}  y=${M.H[k * M.nx + i].toFixed(1)}  mat=${MAT[Math.min(4, M.surfMat[k * M.nx + i])].name}` +
+      `${M.liq[k * M.nx + i] ? "  liquid" : ""}${M.build[k * M.nx + i] ? "  buildable" : ""}`;
+    if (down) applyBrush(i, k);
+  });
+  window.addEventListener("resize", render);
+
+  // capability check (Compression Streams)
+  if (typeof CompressionStream === "undefined") {
+    document.getElementById("caps").textContent =
+      "This browser lacks CompressionStream; export is disabled. Use a recent Chrome/Firefox/Safari.";
+  }
+}
+initUi();
+</script>
+</body>
+</html>

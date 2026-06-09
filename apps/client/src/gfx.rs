@@ -57,14 +57,15 @@ struct CameraUniform {
     params: [f32; 4], // time, map_half, sea_level, _
 }
 
-/// One voxel-terrain vertex: position, normal, and the material id the shader
-/// textures from (triplanar).
+/// One voxel-terrain vertex: position, normal, and soft texture blend weights
+/// (four tile slots + a hazard channel) the shader triplanar-blends from.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct VoxelVertex {
     pos: [f32; 3],
     normal: [f32; 3],
-    mat: f32,
+    weights: [f32; 4],
+    haz: f32,
 }
 
 /// Per-world appearance uniform (group 2): terrain tint + liquid body colour.
@@ -1200,7 +1201,7 @@ impl Gfx {
         let voxel_vbl = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<VoxelVertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32],
         };
         let inst = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<InstanceRaw>() as u64,
@@ -1481,7 +1482,8 @@ impl Gfx {
             .map(|v| VoxelVertex {
                 pos: v.pos,
                 normal: v.normal,
-                mat: v.mat,
+                weights: v.weights,
+                haz: v.haz,
             })
             .collect();
         let buf = vbuf(

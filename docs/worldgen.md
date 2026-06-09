@@ -102,8 +102,10 @@ per-world **subsurface** that a cut exposes. Ice bodies show clean bright ice
 underneath; everything else shows bedrock. So crater walls, Europa's fissures,
 Mars's canyon, Io's volcano flanks and any carved cave reveal what is under the
 skin, and flats carry a little position (not height) driven albedo mottle. This
-is stored in the existing `material[nx*ny*nz]` array and textured straight from
-the mesh, so it costs no format or renderer change.
+is stored in the existing `material[nx*ny*nz]` array (no format change); the
+renderer triplanar-blends the four tiles by **soft per-vertex weights** sampled
+from that field, so the skin fades into the exposed subsurface across a boundary
+instead of switching abruptly.
 
 ## The full catalog (buildable % and map hazards)
 
@@ -159,9 +161,15 @@ payload = zlib( density[nx*ny*nz] + material[nx*ny*nz]
           buildable: uint8 mask,  liquid: uint8 per-column surface (j+1, 0 = dry)
 ```
 
-The 22 maps total about 1.1 MB (~50 KB each). Edit later with the ops on `VoxelGrid`
-(`fill_box`, `carve_sphere`, ...), `python3 assets/worldgen/voxel.py <map.vxl>`
-to inspect, or any tool that speaks VXL1.
+Each map is **257 x 128 x 257** samples: 256 x 256 cells of exactly **4.0 world
+units** over the **1024 x 1024** world (`HALF = 512`), so the grid divides cleanly
+into the sim's integer logical units and lines up 1:1 with the 256-cell fog grid
+(`apps/client` `gfx::FOW_RES`). Keep `densitygen.HALF` and `terrain::HALF` in step.
+The 22 maps total about **11 MB** (~0.5 MB each), embedded in the build. Edit
+later with the ops on `VoxelGrid` (`fill_box`, `carve_sphere`, ...),
+`python3 assets/worldgen/voxel.py <map.vxl>` to inspect, the browser
+[map editor](../tools/mapeditor/) (load a preset, tinker, export a `.vxl`), or
+any tool that speaks VXL1.
 
 ## Engine integration
 
@@ -173,11 +181,13 @@ baked `buildable` mask on a 2.5D plane**. Implemented in
 - Parses the embedded `.vxl` maps (zlib via `miniz_oxide`, wasm-friendly), runs
   marching cubes to a coloured mesh, and exposes `surface_height(x, z)`.
 - The **lobby map picker** chooses a battlefield: `voxel::set_active(idx)` selects
-  it and `Gfx::set_world` rebuilds the marching-cubes mesh (drawn via the
-  vertex-coloured unit pipeline instead of the heightmap terrain + ocean);
-  `terrain.rs` then sits units on `surface_height`. Each world is tinted from its
-  swatch so it reads in its own colour. Tests parse and mesh all 22 maps; CI
-  (fmt / clippy / test / wasm) is green.
+  it and `Gfx::set_world` rebuilds the marching-cubes mesh, drawn by a dedicated
+  **triplanar voxel pipeline** that samples the world's four tiles and blends them
+  by per-vertex soft material weights (so the surface skin fades into the exposed
+  subsurface), tinted per world, with an emissive hazard (lava) channel; the
+  per-world liquid surface is drawn by the water pipeline. `terrain.rs` then sits
+  units on `surface_height`. Tests parse and mesh all 22 maps and naga-validate
+  the shader; CI (fmt / clippy / test / wasm) is green.
 - With no selection (the native dev build, which skips the menu) the existing
   Earthlike map is used, so that path is unchanged.
 

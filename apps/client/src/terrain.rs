@@ -1,7 +1,7 @@
 //! Shared terrain height field for the (large) map. Used by the renderer to
 //! build the mesh and by the game to sit units on the surface. Presentation `f32`.
 
-pub const HALF: f32 = 600.0;
+pub const HALF: f32 = 512.0;
 pub const SEA_LEVEL: f32 = 0.0;
 /// The seabed never drops below this - shallow water (~10 m deep) instead of a
 /// bottomless bowl, so the floor reads cleanly under the surface.

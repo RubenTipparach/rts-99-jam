@@ -14,13 +14,17 @@ use std::cell::{Cell, RefCell};
 
 pub const ISO: u8 = 128;
 
-/// One terrain mesh vertex for the voxel pipeline. `mat` is the material id
-/// (0 low, 1 mid, 2 high, 3 accent, 4 hazard); the shader textures from it.
+/// One terrain mesh vertex for the voxel pipeline. `weights` are soft texture
+/// blend weights across the four tile slots (`x` mid/base, `y` low, `z` high,
+/// `w` accent) and `haz` is the hazard (lava) channel; together they partition
+/// unity. Computed by trilinearly sampling the material field, so the shader can
+/// blend tiles smoothly across material boundaries instead of switching hard.
 #[derive(Clone, Copy)]
 pub struct MeshVertex {
     pub pos: [f32; 3],
     pub normal: [f32; 3],
-    pub mat: f32,
+    pub weights: [f32; 4],
+    pub haz: f32,
 }
 
 pub struct VoxelGrid {
@@ -158,8 +162,42 @@ impl VoxelGrid {
         }
     }
 
+    /// Soft texture blend weights at a world point: trilinearly interpolate the
+    /// (one-hot) material of the eight surrounding voxels, so a vertex sitting
+    /// between a skin cell and a subsurface cell gets a mix of both. Returns the
+    /// four tile weights (mid, low, high, accent) and the hazard weight; the five
+    /// sum to 1.
+    fn weights_at(&self, p: [f32; 3]) -> ([f32; 4], f32) {
+        let fi = ((p[0] - self.bounds[0]) / self.dx()).clamp(0.0, self.nx as f32 - 1.001);
+        let fj = ((p[1] - self.bounds[2]) / self.dy()).clamp(0.0, self.ny as f32 - 1.001);
+        let fk = ((p[2] - self.bounds[4]) / self.dz()).clamp(0.0, self.nz as f32 - 1.001);
+        let (i0, j0, k0) = (
+            fi.floor() as usize,
+            fj.floor() as usize,
+            fk.floor() as usize,
+        );
+        let (tx, ty, tz) = (fi - i0 as f32, fj - j0 as f32, fk - k0 as f32);
+        let mut acc = [0.0f32; 5];
+        for dj in 0..2 {
+            for dk in 0..2 {
+                for di in 0..2 {
+                    let cx = if di == 1 { tx } else { 1.0 - tx };
+                    let cy = if dj == 1 { ty } else { 1.0 - ty };
+                    let cz = if dk == 1 { tz } else { 1.0 - tz };
+                    let m = self.material[self.lin(i0 + di, j0 + dj, k0 + dk)].min(4);
+                    // material id -> tile channel: 0 low->1, 1 mid->0, 2 high->2,
+                    // 3 accent->3, 4 hazard->4.
+                    let ch = [1usize, 0, 2, 3, 4][m as usize];
+                    acc[ch] += cx * cy * cz;
+                }
+            }
+        }
+        ([acc[0], acc[1], acc[2], acc[3]], acc[4])
+    }
+
     /// Marching cubes (tetrahedral) -> a triangle soup for the voxel pipeline.
-    /// Each vertex carries the cell's material id; the shader does the texturing.
+    /// Each vertex carries soft material blend weights; the shader does the
+    /// texturing.
     pub fn build_mesh(&self) -> Vec<MeshVertex> {
         // Cube corners and the six tetrahedra around the 0-6 diagonal.
         const C: [[usize; 3]; 8] = [
@@ -196,11 +234,13 @@ impl VoxelGrid {
             ]
         };
 
-        let emit = |p: [f32; 3], mat: f32, out: &mut Vec<MeshVertex>| {
+        let emit = |p: [f32; 3], out: &mut Vec<MeshVertex>| {
+            let (weights, haz) = self.weights_at(p);
             out.push(MeshVertex {
                 pos: p,
                 normal: self.normal(p),
-                mat,
+                weights,
+                haz,
             });
         };
 
@@ -220,7 +260,6 @@ impl VoxelGrid {
                     if mn >= iso || mx < iso {
                         continue;
                     }
-                    let matf = self.material[self.lin(i, j, k)].min(4) as f32;
                     for tet in TETS.iter() {
                         let mut solids = [0usize; 4];
                         let mut ns = 0;
@@ -245,9 +284,9 @@ impl VoxelGrid {
                             let a = interp(cp[odd], cv[odd], cp[rest[0]], cv[rest[0]]);
                             let b = interp(cp[odd], cv[odd], cp[rest[1]], cv[rest[1]]);
                             let c = interp(cp[odd], cv[odd], cp[rest[2]], cv[rest[2]]);
-                            emit(a, matf, &mut out);
-                            emit(b, matf, &mut out);
-                            emit(c, matf, &mut out);
+                            emit(a, &mut out);
+                            emit(b, &mut out);
+                            emit(c, &mut out);
                         } else {
                             let (s0, s1) = (solids[0], solids[1]);
                             let (a0, a1) = (airs[0], airs[1]);
@@ -255,12 +294,12 @@ impl VoxelGrid {
                             let pb = interp(cp[s0], cv[s0], cp[a1], cv[a1]);
                             let pc = interp(cp[s1], cv[s1], cp[a1], cv[a1]);
                             let pd = interp(cp[s1], cv[s1], cp[a0], cv[a0]);
-                            emit(pa, matf, &mut out);
-                            emit(pb, matf, &mut out);
-                            emit(pc, matf, &mut out);
-                            emit(pa, matf, &mut out);
-                            emit(pc, matf, &mut out);
-                            emit(pd, matf, &mut out);
+                            emit(pa, &mut out);
+                            emit(pb, &mut out);
+                            emit(pc, &mut out);
+                            emit(pa, &mut out);
+                            emit(pc, &mut out);
+                            emit(pd, &mut out);
                         }
                     }
                 }
@@ -503,7 +542,16 @@ mod tests {
                 let n = v.normal;
                 let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
                 assert!((len - 1.0).abs() < 1e-3, "map {i} non-unit normal");
-                assert!(v.mat >= 0.0 && v.mat <= 4.0, "map {i} bad material id");
+                let sum = v.weights[0] + v.weights[1] + v.weights[2] + v.weights[3] + v.haz;
+                assert!(
+                    (sum - 1.0).abs() < 1e-3,
+                    "map {i} weights not partition of unity"
+                );
+                assert!(
+                    v.weights.iter().all(|&w| (-1e-4..=1.0001).contains(&w))
+                        && (-1e-4..=1.0001).contains(&v.haz),
+                    "map {i} weight out of range"
+                );
             }
         }
     }
