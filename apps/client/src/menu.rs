@@ -16,8 +16,9 @@ pub enum Screen {
     InGame,
 }
 
-/// Skirmish setup chosen in the lobby. `bots` and `map` are UI flavor for now;
-/// `faction` is applied to the match on Start.
+/// Skirmish setup chosen in the lobby. `faction` and `map` (an index into the
+/// voxel battlefields, `crate::voxel`) are applied to the match on Start; `bots`
+/// is UI flavor for now.
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub struct Lobby {
@@ -46,12 +47,10 @@ pub enum Click {
     AddBot,
     RemoveBot,
     NextMap,
+    PrevMap,
     Back,
     Start,
 }
-
-#[cfg(target_arch = "wasm32")]
-pub const MAPS: [&str; 2] = ["RUINS OF AETHER", "FROZEN EXPANSE"];
 
 #[cfg(target_arch = "wasm32")]
 pub fn faction_name(f: Faction) -> &'static str {
@@ -171,14 +170,15 @@ mod web {
                     "+",
                     lobby.bots < 3,
                 ));
-                // Map preview thumbnail is drawn at y=336 (h=190); button below.
+                // Map preview thumbnail is drawn at y=336 (h=190); prev/next below.
+                v.push(btn(Click::PrevMap, rx, 548.0, 185.0, 44.0, "< PREV", true));
                 v.push(btn(
                     Click::NextMap,
-                    rx,
+                    rx + 195.0,
                     548.0,
-                    380.0,
+                    185.0,
                     44.0,
-                    "NEXT MAP",
+                    "NEXT >",
                     true,
                 ));
                 // Back / Start.
@@ -233,50 +233,95 @@ mod web {
         let _ = ctx.fill_text(&b.label, b.x + b.w / 2.0, b.y + b.h / 2.0);
     }
 
-    /// A stylized thumbnail of the chosen map: sea/space backdrop, landmasses,
-    /// and the player (blue) vs enemy (red) start positions. Placeholder art, one
-    /// arrangement per map index.
-    fn draw_map_preview(ctx: &Ctx, x: f64, y: f64, w: f64, h: f64, map: usize) {
+    /// A top-down thumbnail of the chosen world: its surface colour plus the
+    /// landform that defines it (craters, methane/water seas, or volcanoes), and
+    /// the player (blue) vs enemy (red) start positions. Deterministic per world.
+    fn draw_map_preview(ctx: &Ctx, x: f64, y: f64, w: f64, h: f64, idx: usize) {
         use std::f64::consts::TAU;
-        // Frame + sea.
-        ctx.set_fill_style_str("#0a1426");
+        let sw = crate::voxel::MAP_SWATCH[idx];
+        let name = crate::voxel::MAP_NAMES[idx];
+        let shade = |m: f64| {
+            format!(
+                "rgb({},{},{})",
+                (sw[0] as f64 * m) as u8,
+                (sw[1] as f64 * m) as u8,
+                (sw[2] as f64 * m) as u8
+            )
+        };
+        // Space backdrop, then the world's surface fills the panel.
+        ctx.set_fill_style_str("#05080f");
         ctx.fill_rect(x, y, w, h);
-        // Clip the contents to the box so landmasses don't spill over the panel.
         ctx.save();
         ctx.begin_path();
         ctx.rect(x, y, w, h);
         ctx.clip();
-        // Landmasses + base markers, per map.
-        let land = "#2a3a30";
-        let blob = |cx: f64, cy: f64, r: f64, col: &str| {
+        ctx.set_fill_style_str(&shade(1.0));
+        ctx.fill_rect(x, y, w, h);
+
+        // Deterministic positions from the world index (small LCG).
+        let mut s: u64 = idx as u64 * 0x9E37_79B9_7F4A_7C15 + 1;
+        let mut rnd = || {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((s >> 33) & 0xFFFF) as f64 / 65535.0
+        };
+        let dot = |cx: f64, cy: f64, r: f64, col: &str| {
             ctx.set_fill_style_str(col);
             ctx.begin_path();
-            let _ = ctx.ellipse(cx, cy, r, r * 0.78, 0.0, 0.0, TAU);
+            let _ = ctx.arc(cx, cy, r, 0.0, TAU);
             ctx.fill();
         };
-        if map == 0 {
-            // Ruins of Aether: one central island, bases NW / SE.
-            blob(x + w * 0.5, y + h * 0.5, w * 0.34, land);
-            blob(x + w * 0.5, y + h * 0.5, w * 0.22, "#33463a");
+
+        if name == "EARTH" {
+            for _ in 0..5 {
+                dot(
+                    x + rnd() * w,
+                    y + rnd() * h,
+                    h * (0.12 + rnd() * 0.16),
+                    "#2f6dab",
+                );
+            }
+            dot(x + w * 0.62, y + h * 0.4, h * 0.1, "#e8eef4"); // a snowy peak
+        } else if name == "TITAN" {
+            for _ in 0..4 {
+                dot(
+                    x + rnd() * w,
+                    y + rnd() * h,
+                    h * (0.1 + rnd() * 0.16),
+                    "#23252f",
+                );
+            }
+        } else if name == "IO" {
+            for _ in 0..4 {
+                let (vx, vy) = (x + 0.2 * w + rnd() * 0.6 * w, y + 0.2 * h + rnd() * 0.6 * h);
+                dot(vx, vy, h * 0.12, &shade(1.15));
+                dot(vx, vy, h * 0.05, "#ec7a2c"); // lava summit
+            }
         } else {
-            // Frozen Expanse: two icy shelves, bases W / E.
-            blob(x + w * 0.28, y + h * 0.5, w * 0.22, "#2f3f4c");
-            blob(x + w * 0.72, y + h * 0.5, w * 0.22, "#2f3f4c");
-            blob(x + w * 0.5, y + h * 0.5, w * 0.12, "#33414c");
+            // Rocky / icy: scattered impact craters (dark floor, light rim).
+            let n = if matches!(name, "ENCELADUS" | "TRITON" | "PLUTO" | "MARS") {
+                5
+            } else {
+                11
+            };
+            for _ in 0..n {
+                let (cx, cy) = (x + rnd() * w, y + rnd() * h);
+                let r = h * (0.05 + rnd() * 0.1);
+                ctx.set_stroke_style_str(&shade(1.25));
+                ctx.set_line_width(2.0);
+                ctx.begin_path();
+                let _ = ctx.arc(cx, cy, r, 0.0, TAU);
+                ctx.stroke();
+                dot(cx, cy, r * 0.7, &shade(0.7));
+            }
         }
-        let bases = if map == 0 {
-            [(0.30, 0.30, "#4aa3ff"), (0.70, 0.70, "#ff5a4a")]
-        } else {
-            [(0.22, 0.5, "#4aa3ff"), (0.78, 0.5, "#ff5a4a")]
-        };
-        for (fx, fy, col) in bases {
-            ctx.set_fill_style_str(col);
-            ctx.begin_path();
-            let _ = ctx.arc(x + w * fx, y + h * fy, 6.0, 0.0, TAU);
-            ctx.fill();
-        }
+
+        // Start positions: player (blue) NW, enemy (red) SE.
+        dot(x + w * 0.26, y + h * 0.28, 6.0, "#4aa3ff");
+        dot(x + w * 0.74, y + h * 0.72, 6.0, "#ff5a4a");
         ctx.restore();
-        // Border.
+
         ctx.set_stroke_style_str("rgba(120,160,210,0.9)");
         ctx.set_line_width(1.5);
         ctx.stroke_rect(x, y, w, h);
@@ -338,16 +383,14 @@ mod web {
                 ctx.set_fill_style_str("#9ab2d8");
                 ctx.set_font("bold 16px monospace");
                 let _ = ctx.fill_text(&format!("BOTS: {}", lobby.bots), rx + 70.0, 278.0);
-                let map = MAPS[lobby.map as usize % MAPS.len()];
-                let _ = ctx.fill_text(&format!("MAP:  {map}"), rx, 326.0);
-                draw_map_preview(
-                    &ctx,
+                let mi = lobby.map as usize % crate::voxel::MAP_COUNT;
+                let map = crate::voxel::MAP_NAMES[mi];
+                let _ = ctx.fill_text(
+                    &format!("MAP:  {map}   ({}/{})", mi + 1, crate::voxel::MAP_COUNT),
                     rx,
-                    336.0,
-                    380.0,
-                    190.0,
-                    lobby.map as usize % MAPS.len(),
+                    326.0,
                 );
+                draw_map_preview(&ctx, rx, 336.0, 380.0, 190.0, mi);
             }
             Screen::InGame => {}
         }

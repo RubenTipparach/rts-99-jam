@@ -163,12 +163,14 @@ baked `buildable` mask on a 2.5D plane**. Implemented in
 
 - Parses the embedded `.vxl` maps (zlib via `miniz_oxide`, wasm-friendly), runs
   marching cubes to a coloured mesh, and exposes `surface_height(x, z)`.
-- When a map is selected (`voxel::ACTIVE`, default none), `gfx.rs` draws that
-  mesh (via the vertex-coloured unit pipeline) instead of the heightmap terrain
-  and ocean, and `terrain.rs` sits units on `surface_height`. Tests parse and
-  mesh all 21 maps; CI (fmt / clippy / test / wasm) is green.
-- The default keeps the existing Earthlike map, so the live build is unchanged
-  until a battlefield is selected.
+- The **lobby map picker** chooses a battlefield: `voxel::set_active(idx)` selects
+  it and `Gfx::set_world` rebuilds the marching-cubes mesh (drawn via the
+  vertex-coloured unit pipeline instead of the heightmap terrain + ocean);
+  `terrain.rs` then sits units on `surface_height`. Each world is tinted from its
+  swatch so it reads in its own colour. Tests parse and mesh all 22 maps; CI
+  (fmt / clippy / test / wasm) is green.
+- With no selection (the native dev build, which skips the menu) the existing
+  Earthlike map is used, so that path is unchanged.
 
 Remaining, determinism-sensitive follow-up: feeding the buildable mask and a 3D
 surface into the deterministic sim for in-sim pathing/building. Anything the sim

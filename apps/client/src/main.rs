@@ -553,11 +553,21 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.lobby.bots = self.lobby.bots.saturating_sub(1).max(1)
                             }
                             menu::Click::NextMap => {
-                                self.lobby.map = (self.lobby.map + 1) % menu::MAPS.len() as u8
+                                let n = crate::voxel::MAP_COUNT as u8;
+                                self.lobby.map = (self.lobby.map + 1) % n;
+                            }
+                            menu::Click::PrevMap => {
+                                let n = crate::voxel::MAP_COUNT as u8;
+                                self.lobby.map = (self.lobby.map + n - 1) % n;
                             }
                             menu::Click::Back => self.screen = menu::Screen::Menu,
                             menu::Click::Start => {
                                 self.game.set_player_faction(self.lobby.faction);
+                                // Load the chosen battlefield and rebuild its terrain.
+                                crate::voxel::set_active(Some(self.lobby.map as usize));
+                                if let Some(g) = self.gfx.as_mut() {
+                                    g.set_world();
+                                }
                                 self.screen = menu::Screen::InGame;
                                 self.apply_cursor_grab();
                             }

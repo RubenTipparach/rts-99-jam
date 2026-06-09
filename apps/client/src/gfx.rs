@@ -847,6 +847,29 @@ pub struct Gfx {
     pub height: u32,
 }
 
+/// Mesh the active voxel battlefield (if any) into a vertex buffer for the unit
+/// pipeline. Returns `None` for the Earthlike heightmap default.
+fn build_voxel_terrain(device: &wgpu::Device, queue: &wgpu::Queue) -> Option<(wgpu::Buffer, u32)> {
+    let grid = crate::voxel::active()?;
+    let mesh = grid.build_mesh(crate::voxel::active_tint(), 1.0);
+    let verts: Vec<UnitVertex> = mesh
+        .iter()
+        .map(|v| UnitVertex {
+            pos: v.pos,
+            normal: v.normal,
+            color: [v.color[0], v.color[1], v.color[2], 0.0],
+        })
+        .collect();
+    let buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("voxel-terrain"),
+        size: (verts.len() * std::mem::size_of::<UnitVertex>()) as u64,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buf, 0, bytemuck::cast_slice(&verts));
+    Some((buf, verts.len() as u32))
+}
+
 impl Gfx {
     pub async fn new(window: Arc<Window>) -> Gfx {
         let size = window.inner_size();
@@ -1273,25 +1296,9 @@ impl Gfx {
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
 
-        // If a voxel battlefield is selected, mesh it once (marching cubes) into
+        // If a voxel battlefield is selected, mesh it (marching cubes) into
         // vertex-coloured triangles drawn via the unit pipeline. Default: none.
-        let voxel_terrain = crate::voxel::active().map(|grid| {
-            let mesh = grid.build_mesh([1.0, 1.0, 1.0], 1.0);
-            let verts: Vec<UnitVertex> = mesh
-                .iter()
-                .map(|v| UnitVertex {
-                    pos: v.pos,
-                    normal: v.normal,
-                    color: [v.color[0], v.color[1], v.color[2], 0.0],
-                })
-                .collect();
-            let buf = mkbuf(
-                "voxel-terrain",
-                bytemuck::cast_slice(&verts),
-                wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            );
-            (buf, verts.len() as u32)
-        });
+        let voxel_terrain = build_voxel_terrain(&device, &queue);
         let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instances"),
             size: (MAX_INSTANCES * std::mem::size_of::<InstanceRaw>()) as u64,
@@ -1362,6 +1369,14 @@ impl Gfx {
 
     pub fn aspect(&self) -> f32 {
         self.width as f32 / self.height as f32
+    }
+
+    /// Rebuild the terrain for the currently selected voxel map (call after
+    /// `voxel::set_active`, e.g. when starting a match from the lobby). With no
+    /// map selected this clears back to the Earthlike heightmap.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // driven by the web lobby
+    pub fn set_world(&mut self) {
+        self.voxel_terrain = build_voxel_terrain(&self.device, &self.queue);
     }
 
     #[allow(clippy::too_many_arguments)]

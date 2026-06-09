@@ -7,10 +7,10 @@
 //! robust tetrahedral scheme as the Python previewer) for the renderer.
 //!
 //! Presentation-side `f32`; nothing here touches the deterministic sim. The
-//! active map is chosen by [`ACTIVE`] (default: none, so the heightmap terrain in
-//! `terrain.rs` stays in use).
+//! active map is chosen at runtime via [`set_active`] (from the lobby map
+//! picker); with none selected the heightmap terrain in `terrain.rs` is used.
 
-use std::sync::OnceLock;
+use std::cell::{Cell, RefCell};
 
 pub const ISO: u8 = 128;
 
@@ -309,17 +309,107 @@ const MAPS: [&[u8]; 22] = [
     include_bytes!("../../../assets/maps/earth.vxl"),
 ];
 
-/// Index into [`MAPS`] of the battlefield to load, or out of range for none
-/// (keep the Earthlike heightmap in `terrain.rs`). Set e.g. to `7` to load Io.
-pub const ACTIVE: usize = usize::MAX;
+/// Number of selectable battlefields, and their display names + a representative
+/// thumbnail colour, all in [`MAPS`] order (used by the lobby map picker).
+pub const MAP_COUNT: usize = MAPS.len();
 
-static ACTIVE_GRID: OnceLock<Option<VoxelGrid>> = OnceLock::new();
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // used by the web lobby
+pub const MAP_NAMES: [&str; MAP_COUNT] = [
+    "LUNA",
+    "CERES",
+    "VESTA",
+    "MARS",
+    "CALLISTO",
+    "GANYMEDE",
+    "EUROPA",
+    "IO",
+    "TITAN",
+    "ENCELADUS",
+    "TRITON",
+    "RHEA",
+    "IAPETUS",
+    "DIONE",
+    "TITANIA",
+    "OBERON",
+    "UMBRIEL",
+    "ARIEL",
+    "MIRANDA",
+    "PLUTO",
+    "CHIRON",
+    "EARTH",
+];
 
-/// The active voxel map, if [`ACTIVE`] selects one (parsed once).
+/// A representative surface colour per world, for the lobby thumbnail.
+pub const MAP_SWATCH: [[u8; 3]; MAP_COUNT] = [
+    [150, 148, 142],
+    [78, 76, 76],
+    [150, 140, 120],
+    [170, 96, 60],
+    [120, 112, 104],
+    [150, 156, 168],
+    [220, 210, 196],
+    [210, 190, 90],
+    [180, 120, 60],
+    [225, 236, 244],
+    [210, 180, 170],
+    [180, 188, 196],
+    [120, 112, 100],
+    [170, 178, 188],
+    [150, 148, 150],
+    [120, 112, 108],
+    [78, 76, 80],
+    [180, 196, 212],
+    [150, 156, 168],
+    [180, 140, 100],
+    [80, 80, 86],
+    [80, 150, 90],
+];
+
+thread_local! {
+    /// Index into [`MAPS`] of the active battlefield, or `None` for the Earthlike
+    /// heightmap in `terrain.rs`. Chosen at runtime from the lobby.
+    static SELECTED: Cell<Option<usize>> = const { Cell::new(None) };
+    /// Parsed maps, leaked to `'static` and cached by index (only a handful are
+    /// ever loaded in a session).
+    static CACHE: RefCell<Vec<Option<&'static VoxelGrid>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Select the active battlefield (`None` = Earthlike default). Call before
+/// `Gfx::set_world`.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // driven by the web lobby
+pub fn set_active(idx: Option<usize>) {
+    SELECTED.with(|s| s.set(idx.filter(|&i| i < MAP_COUNT)));
+}
+
+/// The active voxel map, if one is selected (parsed + cached on first use).
 pub fn active() -> Option<&'static VoxelGrid> {
-    ACTIVE_GRID
-        .get_or_init(|| MAPS.get(ACTIVE).map(|b| VoxelGrid::parse(b)))
-        .as_ref()
+    let i = SELECTED.with(|s| s.get())?;
+    CACHE.with(|c| {
+        let mut v = c.borrow_mut();
+        if v.is_empty() {
+            v.resize(MAP_COUNT, None);
+        }
+        if v[i].is_none() {
+            v[i] = Some(Box::leak(Box::new(VoxelGrid::parse(MAPS[i]))));
+        }
+        v[i]
+    })
+}
+
+/// Per-world tint for the marching-cubes material palette, derived from the
+/// world's swatch so each loaded battlefield reads in its own colour.
+pub fn active_tint() -> [f32; 3] {
+    match SELECTED.with(|s| s.get()) {
+        Some(i) => {
+            let s = MAP_SWATCH[i];
+            [
+                s[0] as f32 / 150.0,
+                s[1] as f32 / 150.0,
+                s[2] as f32 / 150.0,
+            ]
+        }
+        None => [1.0, 1.0, 1.0],
+    }
 }
 
 #[cfg(test)]
