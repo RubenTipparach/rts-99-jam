@@ -26,8 +26,12 @@ Needs a current browser (Chrome / Edge / Firefox / Safari) for `CompressionStrea
 
 ## What you can edit
 
-A top-down view with **Relief / Material / Buildable / Liquid** overlays. Tools
-(brush radius + strength):
+A top-down view with **Relief / Material / Buildable / Liquid** overlays, and a
+**2D edit / 3D view** toggle: 3D is a WebGL orbit preview of the current surface
+(drag to rotate, wheel to zoom, with a height-exaggeration slider); switch back
+to 2D edit to paint. The game itself renders the real shaded terrain.
+
+Tools (brush radius + strength):
 
 - **Raise / Lower / Smooth / Flatten** the surface height.
 - **Paint mat** - set the surface material (low / mid / high / accent / hazard).
@@ -54,3 +58,7 @@ for surface tinkering and quick fixes.
 
 Exported files are byte-compatible with the engine loader and the Python tools, so
 a load -> export round-trip of an unedited map reproduces an equivalent map.
+
+To open or port a map as **text** (e.g. for another editor), convert it with
+`python3 assets/worldgen/voxel.py <map.vxl> --json` and back with `--from-json`
+(a lossless round-trip). The `.vxl` itself stays binary only for size.

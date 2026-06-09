@@ -38,6 +38,8 @@
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #stage { flex: 1; display: grid; place-items: center; overflow: hidden; background: #06090f; }
   canvas { image-rendering: pixelated; background: #000; box-shadow: 0 0 0 1px #1d2433; cursor: crosshair; }
+  #cv3 { image-rendering: auto; box-shadow: none; cursor: grab; width: 100%; height: 100%; }
+  #cv3:active { cursor: grabbing; }
   h1 { font-size: 14px; margin: 0 0 2px; color: #e7eefa; letter-spacing: .04em; }
   .sub { color: #6c7d99; margin: 0 0 12px; font-size: 11px; }
   h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #7f93b8; margin: 16px 0 6px; }
@@ -76,11 +78,18 @@
 
   <h2>View</h2>
   <div class="row">
+    <button id="mode2d" class="on">2D edit</button>
+    <button id="mode3d">3D view</button>
+  </div>
+  <div class="row" style="margin-top:6px">
     <button data-ov="hill" class="on">Relief</button>
     <button data-ov="mat">Material</button>
     <button data-ov="build">Buildable</button>
     <button data-ov="liq">Liquid</button>
   </div>
+  <label>3D height exaggeration <span class="val" id="exv">3.0</span></label>
+  <input id="exag" type="range" min="1" max="8" step="0.5" value="3">
+  <p class="note">3D is an orbit preview (drag to rotate, wheel to zoom). Switch to 2D edit to paint. The game renders the real shaded terrain.</p>
 
   <h2>Tool</h2>
   <div class="row" id="tools">
@@ -120,7 +129,10 @@
 </div>
 
 <div id="main">
-  <div id="stage"><canvas id="cv" width="256" height="256"></canvas></div>
+  <div id="stage">
+    <canvas id="cv" width="256" height="256"></canvas>
+    <canvas id="cv3" width="900" height="640" hidden></canvas>
+  </div>
   <div id="status">load a map to begin</div>
 </div>
 
@@ -162,6 +174,7 @@ let M = null; // loaded map model
 const ui = {
   overlay: "hill", tool: "raise", radius: 14, strength: 6,
   mat: 2, lqlevel: 0, buildVal: 1, liqErase: false, skin: 7,
+  view3d: false, exag: 3,
 };
 
 // ---- VXL1 parse ----
@@ -380,6 +393,134 @@ async function loadPreset(key) {
   }
 }
 
+// ---- 3D orbit preview (WebGL2) ----
+// A read-only orbit view of the current heightfield, lit and coloured by
+// material. Edit in 2D; this previews what the surface looks like in 3D (it is
+// a heightfield view, so it shows the same single-surface model the editor edits
+// and exports, not carved caves). The game itself draws the real shaded terrain.
+const cv3 = document.getElementById("cv3");
+let gl = null, prog3 = null, vao = null, glbufs = null, idxCount = 0;
+const cam3 = { yaw: 0.9, pitch: 0.85, dist: 1500 };
+
+const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm3 = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+function perspective(fov, a, n, f) {
+  const t = 1 / Math.tan(fov / 2);
+  return new Float32Array([t / a, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / (n - f), -1, 0, 0, 2 * f * n / (n - f), 0]);
+}
+function lookAt(e, c, u) {
+  const z = norm3(sub3(e, c)), x = norm3(cross3(u, z)), y = cross3(z, x);
+  return new Float32Array([
+    x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+    -dot3(x, e), -dot3(y, e), -dot3(z, e), 1,
+  ]);
+}
+function mul(a, b) {
+  const o = new Float32Array(16);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+    let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k]; o[i * 4 + j] = s;
+  }
+  return o;
+}
+
+function initGL() {
+  gl = cv3.getContext("webgl2", { antialias: true });
+  if (!gl) { status("WebGL2 unavailable; the 3D view needs a current browser"); return false; }
+  const vs = `#version 300 es
+    in vec3 a_pos; in vec3 a_norm; in vec3 a_col;
+    uniform mat4 u_mvp; out vec3 v_n; out vec3 v_c;
+    void main(){ v_n = a_norm; v_c = a_col; gl_Position = u_mvp * vec4(a_pos, 1.0); }`;
+  const fs = `#version 300 es
+    precision highp float;
+    in vec3 v_n; in vec3 v_c; uniform vec3 u_light; out vec4 o;
+    void main(){ float d = max(dot(normalize(v_n), normalize(u_light)), 0.0);
+      o = vec4(v_c * (0.35 + 0.75 * d), 1.0); }`;
+  const mk = (t, s) => {
+    const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+    return sh;
+  };
+  prog3 = gl.createProgram();
+  gl.attachShader(prog3, mk(gl.VERTEX_SHADER, vs));
+  gl.attachShader(prog3, mk(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(prog3);
+  gl.enable(gl.DEPTH_TEST);
+  vao = gl.createVertexArray();
+  glbufs = { pos: gl.createBuffer(), norm: gl.createBuffer(), col: gl.createBuffer(), idx: gl.createBuffer() };
+  return true;
+}
+
+function resize3d() {
+  const stage = document.getElementById("stage");
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv3.width = Math.max(1, Math.floor(stage.clientWidth * dpr));
+  cv3.height = Math.max(1, Math.floor(stage.clientHeight * dpr));
+}
+
+function buildMesh3d() {
+  const { nx, nz } = M, ex = ui.exag, H = M.H;
+  const dx = (M.bounds[1] - M.bounds[0]) / (nx - 1), dz = (M.bounds[5] - M.bounds[4]) / (nz - 1);
+  const x0 = M.bounds[0], z0 = M.bounds[4];
+  let sum = 0; for (let c = 0; c < H.length; c++) sum += H[c];
+  const my = sum / H.length * ex; // centre the terrain vertically
+  const V = nx * nz, pos = new Float32Array(V * 3), nor = new Float32Array(V * 3), col = new Float32Array(V * 3);
+  for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
+    const c = k * nx + i, o = c * 3;
+    pos[o] = x0 + i * dx; pos[o + 1] = H[c] * ex - my; pos[o + 2] = z0 + k * dz;
+    const hl = H[k * nx + Math.max(0, i - 1)], hr = H[k * nx + Math.min(nx - 1, i + 1)];
+    const hu = H[Math.max(0, k - 1) * nx + i], hd = H[Math.min(nz - 1, k + 1) * nx + i];
+    const n = norm3([-(hr - hl) * ex, 2 * dx, -(hd - hu) * ex]);
+    nor[o] = n[0]; nor[o + 1] = n[1]; nor[o + 2] = n[2];
+    const cc = M.liq[c] ? [40, 90, 170] : MAT[Math.min(4, M.surfMat[c])].col;
+    col[o] = cc[0] / 255; col[o + 1] = cc[1] / 255; col[o + 2] = cc[2] / 255;
+  }
+  const idx = new Uint32Array((nx - 1) * (nz - 1) * 6); let p = 0;
+  for (let k = 0; k < nz - 1; k++) for (let i = 0; i < nx - 1; i++) {
+    const a = k * nx + i, b = a + 1, d = a + nx, e = d + 1;
+    idx[p++] = a; idx[p++] = b; idx[p++] = e; idx[p++] = a; idx[p++] = e; idx[p++] = d;
+  }
+  idxCount = idx.length;
+  gl.bindVertexArray(vao);
+  const bind = (buf, data, name) => {
+    const loc = gl.getAttribLocation(prog3, name);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  };
+  bind(glbufs.pos, pos, "a_pos"); bind(glbufs.norm, nor, "a_norm"); bind(glbufs.col, col, "a_col");
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glbufs.idx);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+  gl.bindVertexArray(null);
+}
+
+function render3d() {
+  if (!gl || !M) return;
+  gl.viewport(0, 0, cv3.width, cv3.height);
+  gl.clearColor(0.02, 0.03, 0.06, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  const proj = perspective(Math.PI / 4, cv3.width / cv3.height, 1, 9000);
+  const cp = Math.cos(cam3.pitch), sp = Math.sin(cam3.pitch), cy = Math.cos(cam3.yaw), sy = Math.sin(cam3.yaw);
+  const eye = [cam3.dist * cp * cy, cam3.dist * sp, cam3.dist * cp * sy];
+  const mvp = mul(proj, lookAt(eye, [0, 0, 0], [0, 1, 0]));
+  gl.useProgram(prog3);
+  gl.uniformMatrix4fv(gl.getUniformLocation(prog3, "u_mvp"), false, mvp);
+  gl.uniform3f(gl.getUniformLocation(prog3, "u_light"), -0.5, 0.8, 0.4);
+  gl.bindVertexArray(vao);
+  gl.drawElements(gl.TRIANGLES, idxCount, gl.UNSIGNED_INT, 0);
+  gl.bindVertexArray(null);
+}
+
+function setView3d(on) {
+  if (on && !M) { status("load a map first"); return; }
+  if (on && !gl && !initGL()) return;
+  ui.view3d = on;
+  document.getElementById("mode2d").classList.toggle("on", !on);
+  document.getElementById("mode3d").classList.toggle("on", on);
+  cv.hidden = on; cv3.hidden = !on;
+  if (on) { resize3d(); buildMesh3d(); render3d(); status("3D view: drag to orbit, wheel to zoom"); }
+  else render();
+}
+
 // ---- ui wiring ----
 function status(s) { document.getElementById("status").textContent = s; }
 function setActive(sel, attr, val) {
@@ -427,6 +568,30 @@ function initUi() {
   };
   document.getElementById("export").onclick = () => M ? exportVxl() : status("load a map first");
 
+  // 3D view toggle + exaggeration
+  document.getElementById("mode2d").onclick = () => setView3d(false);
+  document.getElementById("mode3d").onclick = () => setView3d(true);
+  const exag = document.getElementById("exag");
+  exag.oninput = () => {
+    ui.exag = +exag.value; document.getElementById("exv").textContent = (+exag.value).toFixed(1);
+    if (ui.view3d && M) { buildMesh3d(); render3d(); }
+  };
+  // orbit controls (active in 3D mode)
+  let drag = false, mx = 0, mz = 0;
+  cv3.addEventListener("mousedown", (e) => { drag = true; mx = e.clientX; mz = e.clientY; });
+  window.addEventListener("mouseup", () => drag = false);
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    cam3.yaw += (e.clientX - mx) * 0.01;
+    cam3.pitch = Math.max(0.12, Math.min(1.52, cam3.pitch + (e.clientY - mz) * 0.01));
+    mx = e.clientX; mz = e.clientY; render3d();
+  });
+  cv3.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    cam3.dist = Math.max(300, Math.min(5000, cam3.dist * Math.exp(e.deltaY * 0.001)));
+    render3d();
+  }, { passive: false });
+
   let down = false;
   cv.addEventListener("mousedown", (e) => { if (!M) return; down = true; applyBrush(...colAtEvent(e)); });
   window.addEventListener("mouseup", () => down = false);
@@ -438,7 +603,9 @@ function initUi() {
       `${M.liq[k * M.nx + i] ? "  liquid" : ""}${M.build[k * M.nx + i] ? "  buildable" : ""}`;
     if (down) applyBrush(i, k);
   });
-  window.addEventListener("resize", render);
+  window.addEventListener("resize", () => {
+    if (ui.view3d) { resize3d(); render3d(); } else render();
+  });
 
   // capability check (Compression Streams)
   if (typeof CompressionStream === "undefined") {

@@ -168,8 +168,15 @@ into the sim's integer logical units and lines up 1:1 with the 256-cell fog grid
 The 22 maps total about **11 MB** (~0.5 MB each), embedded in the build. Edit
 later with the ops on `VoxelGrid` (`fill_box`, `carve_sphere`, ...),
 `python3 assets/worldgen/voxel.py <map.vxl>` to inspect, the browser
-[map editor](../tools/mapeditor/) (load a preset, tinker, export a `.vxl`), or
-any tool that speaks VXL1.
+[map editor](../tools/mapeditor/) (load a preset, tinker, 2D edit or 3D orbit
+view, export a `.vxl`), or any tool that speaks VXL1.
+
+The format is binary (zlib) only for size: a map is a full voxel volume, so the
+same data as text is ~40 MB. It is not locked in. To open or port a map as text,
+`python3 assets/worldgen/voxel.py <map.vxl> --json [out.json]` writes a plain,
+readable JSON (metadata + the raw arrays as flat integer lists), and
+`python3 assets/worldgen/voxel.py --from-json <in.json> [out.vxl]` converts it
+back (a lossless, byte-identical round-trip).
 
 ## Engine integration
 
