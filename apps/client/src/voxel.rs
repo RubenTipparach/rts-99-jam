@@ -342,7 +342,10 @@ mod tests {
             );
             // marching cubes produces a non-trivial, well-formed mesh
             let mesh = g.build_mesh([1.0, 1.0, 1.0], 1.0);
-            assert!(mesh.len() >= 3 && mesh.len().is_multiple_of(3), "map {i} bad mesh");
+            assert!(
+                mesh.len() >= 3 && mesh.len().is_multiple_of(3),
+                "map {i} bad mesh"
+            );
             for v in mesh.iter().take(2000) {
                 let n = v.normal;
                 let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
