@@ -35,16 +35,31 @@ pub fn train_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
     )
 }
 
-/// Minimap rect in physical pixels `(x0, y0, x1, y1)`, for click-to-jump.
+/// Minimap panel geometry in CSS pixels `(mx, my, mm)`: its own square box in the
+/// bottom-right corner, floating above the command bar so the two do not share
+/// space. Single source of truth for both the draw and the hit-test.
+#[cfg(target_arch = "wasm32")]
+fn minimap_css(w: f32, h: f32) -> (f64, f64, f64) {
+    let bar = 96.0_f64;
+    let mm = 160.0_f64; // 2x the old 80px panel
+    let margin = 12.0_f64;
+    let gap = 10.0_f64; // clear the command bar below it
+    let mx = w as f64 - mm - margin;
+    let my = h as f64 - bar - mm - gap;
+    (mx, my, mm)
+}
+
+/// Minimap rect in physical pixels `(x0, y0, x1, y1)`, for click/drag-to-look.
 #[cfg(target_arch = "wasm32")]
 pub fn minimap_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
     let d = dpr();
-    let (w, h) = (w_phys / d, h_phys / d);
-    let bar = 96.0_f32;
-    let mm = bar - 16.0;
-    let mx = w - mm - 12.0;
-    let my = h - bar + 8.0;
-    (mx * d, my * d, (mx + mm) * d, (my + mm) * d)
+    let (mx, my, mm) = minimap_css(w_phys / d, h_phys / d);
+    (
+        mx as f32 * d,
+        my as f32 * d,
+        (mx + mm) as f32 * d,
+        (my + mm) as f32 * d,
+    )
 }
 
 // Cached terrain thumbnail for the minimap (built once; terrain is static).
@@ -225,7 +240,7 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
     ctx.set_fill_style_str("#8aa3cc");
     ctx.set_font("12px monospace");
     let _ = ctx.fill_text(
-        "left: select / drag-box    right: move / attack    wheel: zoom    WASD: pan    (scout north to find the enemy)",
+        "left: select / drag-box    right: move / attack    middle-drag or WASD: pan    wheel: zoom    minimap: click/drag to look",
         14.0,
         hf - bar + 22.0,
     );
@@ -237,7 +252,7 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
     ctx.set_font("12px monospace");
     let _ = ctx.fill_text(
         &format!(
-            "DEBUG   [1] unexplored fog: {}    [2] explored fog: {}    (click minimap to jump)",
+            "DEBUG   [1] unexplored fog: {}    [2] explored fog: {}    (drag the minimap to look around)",
             on(fog_u),
             on(fog_e)
         ),
@@ -275,14 +290,19 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
         }
     }
 
-    // Minimap (terrain + fog), bottom-right of the command bar.
-    let mm = bar - 16.0;
-    let mx = wf - mm - 12.0;
-    let my = hf - bar + 8.0;
+    // Minimap: its own framed panel, bottom-right, floating above the command
+    // bar (so the bar is free to be its own thing).
+    let (mx, my, mm) = minimap_css(w, h);
+    let pad = 6.0_f64;
+    ctx.set_fill_style_str("rgba(8,14,26,0.92)");
+    ctx.fill_rect(mx - pad, my - pad, mm + pad * 2.0, mm + pad * 2.0);
     draw_minimap(&ctx, game, dpr, mx, my, mm);
     ctx.set_stroke_style_str("rgba(120,160,210,0.95)");
-    ctx.set_line_width(1.5);
+    ctx.set_line_width(2.0);
+    ctx.stroke_rect(mx - pad, my - pad, mm + pad * 2.0, mm + pad * 2.0);
+    ctx.set_line_width(1.0);
     ctx.stroke_rect(mx, my, mm, mm);
+
     let half = terrain::HALF as f64;
     for u in game.unit_infos() {
         let nx = (u.wx as f64 + half) / (2.0 * half);
@@ -293,7 +313,30 @@ pub fn draw(camera: &Camera, game: &Game, w: f32, h: f32, drag: Option<(f32, f32
             (_, true) => "#ff9a78",
             (_, false) => "#ff5a4a",
         });
-        let s = if u.barracks { 5.0 } else { 2.6 };
+        let s = if u.barracks { 6.0 } else { 3.0 };
         ctx.fill_rect(mx + nx * mm - s / 2.0, my + nz * mm - s / 2.0, s, s);
+    }
+
+    // Camera view box: project the four screen corners onto the ground and map
+    // them into the minimap, so you can see where the camera is looking.
+    let corners = [(0.0_f32, 0.0_f32), (w, 0.0), (w, h), (0.0, h)];
+    let mut view: Vec<(f64, f64)> = Vec::with_capacity(4);
+    for (sx, sy) in corners {
+        if let Some((wx, wz)) = camera.ground_pick(sx, sy, w, h) {
+            let nx = ((wx as f64 + half) / (2.0 * half)).clamp(0.0, 1.0);
+            let nz = ((wz as f64 + half) / (2.0 * half)).clamp(0.0, 1.0);
+            view.push((mx + nx * mm, my + nz * mm));
+        }
+    }
+    if view.len() == 4 {
+        ctx.set_stroke_style_str("rgba(255,255,255,0.9)");
+        ctx.set_line_width(1.5);
+        ctx.begin_path();
+        ctx.move_to(view[0].0, view[0].1);
+        ctx.line_to(view[1].0, view[1].1);
+        ctx.line_to(view[2].0, view[2].1);
+        ctx.line_to(view[3].0, view[3].1);
+        ctx.close_path();
+        ctx.stroke();
     }
 }
