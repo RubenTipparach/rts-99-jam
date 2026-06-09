@@ -42,19 +42,26 @@ def disc(cv, cx, cy, rx, ry, col, clip):
                 cv.set(xx, yy, col)
 
 
-def map_preview(cv, x, y, w, h, mp):
-    border_rect(cv, x, y, w, h, (10, 20, 38), (120, 160, 210))
+def map_preview(cv, x, y, w, h, name, swatch):
+    """Per-world thumbnail: the surface colour plus its defining landform, like
+    the live lobby in menu.rs (here showing one world, Io)."""
+    border_rect(cv, x, y, w, h, (8, 12, 20), (120, 160, 210))
     clip = (int(x + 2 * SS), int(y + 2 * SS), int(x + w - 2 * SS), int(y + h - 2 * SS))
-    if mp == 0:
-        disc(cv, x + w * 0.5, y + h * 0.5, w * 0.30, h * 0.42, (42, 58, 48), clip)
-        disc(cv, x + w * 0.5, y + h * 0.5, w * 0.19, h * 0.27, (51, 70, 58), clip)
-        disc(cv, x + w * 0.30, y + h * 0.30, 6 * SS, 6 * SS, (74, 163, 255), clip)
-        disc(cv, x + w * 0.70, y + h * 0.70, 6 * SS, 6 * SS, (255, 90, 74), clip)
-    else:
-        disc(cv, x + w * 0.28, y + h * 0.5, w * 0.20, h * 0.34, (47, 63, 76), clip)
-        disc(cv, x + w * 0.72, y + h * 0.5, w * 0.20, h * 0.34, (47, 63, 76), clip)
-        disc(cv, x + w * 0.22, y + h * 0.5, 6 * SS, 6 * SS, (74, 163, 255), clip)
-        disc(cv, x + w * 0.78, y + h * 0.5, 6 * SS, 6 * SS, (255, 90, 74), clip)
+    cv.fill_rect(clip[0], clip[1], clip[2], clip[3], swatch)
+
+    def sc(m):
+        return tuple(min(255, max(0, int(c * m))) for c in swatch)
+
+    if name == "IO":  # giant volcanoes on a smooth sulfur plain
+        for fx, fy in [(0.40, 0.44), (0.62, 0.62), (0.30, 0.72)]:
+            disc(cv, x + w * fx, y + h * fy, 18 * SS, 15 * SS, sc(1.15), clip)
+            disc(cv, x + w * fx, y + h * fy, 6 * SS, 5 * SS, (236, 122, 44), clip)
+    else:  # rocky/icy: scattered craters
+        for fx, fy in [(0.25, 0.3), (0.5, 0.55), (0.7, 0.35), (0.4, 0.75), (0.78, 0.7)]:
+            disc(cv, x + w * fx, y + h * fy, 10 * SS, 9 * SS, sc(1.2), clip)
+            disc(cv, x + w * fx, y + h * fy, 6 * SS, 5 * SS, sc(0.7), clip)
+    disc(cv, x + w * 0.26, y + h * 0.28, 5 * SS, 5 * SS, (74, 163, 255), clip)
+    disc(cv, x + w * 0.74, y + h * 0.72, 5 * SS, 5 * SS, (255, 90, 74), clip)
 
 
 def panel_bg(cv, x0, y0, x1, y1):
@@ -100,9 +107,10 @@ def lobby(cv, ox, oy, w, h):
     text(cv, rx + 70 * SS, oy + 196 * SS, "BOTS: 1", 2 * SS, (154, 178, 216))
     button(cv, rx, oy + 184 * SS, 56 * SS, 44 * SS, "-", DISABLED)
     button(cv, rx + 320 * SS, oy + 184 * SS, 56 * SS, 44 * SS, "+", NORMAL)
-    text(cv, rx, oy + 250 * SS, "MAP:  RUINS OF AETHER", 2 * SS, (220, 230, 246))
-    map_preview(cv, rx, oy + 264 * SS, 360 * SS, 150 * SS, 0)
-    button(cv, rx, oy + 264 * SS + 162 * SS, 360 * SS, 44 * SS, "NEXT MAP", NORMAL)
+    text(cv, rx, oy + 238 * SS, "MAP:  IO   (8/22)", 2 * SS, (220, 230, 246))
+    map_preview(cv, rx, oy + 264 * SS, 360 * SS, 150 * SS, "IO", (210, 190, 90))
+    button(cv, rx, oy + 264 * SS + 162 * SS, 175 * SS, 44 * SS, "< PREV", NORMAL)
+    button(cv, rx + 185 * SS, oy + 264 * SS + 162 * SS, 175 * SS, 44 * SS, "NEXT >", NORMAL)
 
     button(cv, ox + 30 * SS, oy + h - 86 * SS, 200 * SS, 56 * SS, "BACK", NORMAL)
     button(cv, ox + w - 230 * SS, oy + h - 86 * SS, 200 * SS, 56 * SS, "START", SELECTED)
