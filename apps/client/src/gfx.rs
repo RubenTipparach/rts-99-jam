@@ -225,6 +225,105 @@ fn push_roof(
     push_tri(out, rb, fr, br, c, col); // gable +x
 }
 
+/// A horizontal ring of `n` points (a regular polygon) at height `y`.
+fn poly_ring(n: usize, cx: f32, cz: f32, r: f32, y: f32, rot: f32) -> Vec<[f32; 3]> {
+    (0..n)
+        .map(|k| {
+            let a = rot + std::f32::consts::TAU * k as f32 / n as f32;
+            [cx + r * a.cos(), y, cz + r * a.sin()]
+        })
+        .collect()
+}
+
+/// A vertical n-gon prism (cylinder-ish) from `y0` to `y1`, optional top cap.
+#[allow(clippy::too_many_arguments)]
+fn push_prism(
+    out: &mut Vec<UnitVertex>,
+    cx: f32,
+    cz: f32,
+    r: f32,
+    y0: f32,
+    y1: f32,
+    rgb: [f32; 3],
+    team: f32,
+    n: usize,
+    rot: f32,
+    top: bool,
+) {
+    let center = [cx, (y0 + y1) * 0.5, cz];
+    let col = [rgb[0], rgb[1], rgb[2], team];
+    let lo = poly_ring(n, cx, cz, r, y0, rot);
+    let hi = poly_ring(n, cx, cz, r, y1, rot);
+    for k in 0..n {
+        let j = (k + 1) % n;
+        push_quad(out, lo[k], lo[j], hi[j], hi[k], center, col);
+    }
+    if top {
+        let cap = [cx, y1, cz];
+        for k in 0..n {
+            let j = (k + 1) % n;
+            push_tri(out, hi[k], hi[j], cap, center, col);
+        }
+    }
+}
+
+/// A tapered n-gon frustum from radius `r0`@`y0` to `r1`@`y1`, optional top cap.
+#[allow(clippy::too_many_arguments)]
+fn push_frustum(
+    out: &mut Vec<UnitVertex>,
+    cx: f32,
+    cz: f32,
+    r0: f32,
+    r1: f32,
+    y0: f32,
+    y1: f32,
+    rgb: [f32; 3],
+    team: f32,
+    n: usize,
+    rot: f32,
+    top: bool,
+) {
+    let center = [cx, (y0 + y1) * 0.5, cz];
+    let col = [rgb[0], rgb[1], rgb[2], team];
+    let lo = poly_ring(n, cx, cz, r0, y0, rot);
+    let hi = poly_ring(n, cx, cz, r1, y1, rot);
+    for k in 0..n {
+        let j = (k + 1) % n;
+        push_quad(out, lo[k], lo[j], hi[j], hi[k], center, col);
+    }
+    if top {
+        let cap = [cx, y1, cz];
+        for k in 0..n {
+            let j = (k + 1) % n;
+            push_tri(out, hi[k], hi[j], cap, center, col);
+        }
+    }
+}
+
+/// An n-gon pyramid: base ring at `y0`, apex at `y1`.
+#[allow(clippy::too_many_arguments)]
+fn push_pyramid(
+    out: &mut Vec<UnitVertex>,
+    cx: f32,
+    cz: f32,
+    r: f32,
+    y0: f32,
+    y1: f32,
+    rgb: [f32; 3],
+    team: f32,
+    n: usize,
+    rot: f32,
+) {
+    let center = [cx, (y0 + y1) * 0.5, cz];
+    let col = [rgb[0], rgb[1], rgb[2], team];
+    let base = poly_ring(n, cx, cz, r, y0, rot);
+    let apex = [cx, y1, cz];
+    for k in 0..n {
+        let j = (k + 1) % n;
+        push_tri(out, base[k], base[j], apex, center, col);
+    }
+}
+
 /// A low-poly infantry soldier, ~2.4 units tall, facing -z.
 fn infantry_mesh() -> Vec<UnitVertex> {
     let mut m = Vec::new();
@@ -295,44 +394,94 @@ fn infantry_mesh() -> Vec<UnitVertex> {
     m
 }
 
-/// A low-poly barracks, ~11 wide, facing -z; door + banners on the +z face.
-fn barracks_mesh() -> Vec<UnitVertex> {
+// Placeholder faction buildings (see assets/concepts/buildings.png and
+// docs/building-design-language.md). Authored at world scale, ~11 wide, facing
+// -z. The team-tint channel (a = 1.0) rides the faction's signature element: the
+// Astromancer core/spire and the Hollowmen banner/window.
+
+/// Astromancer production building: a grown, hovering faceted tower with a
+/// team-tinted energy core and a gold-tipped spire. A short root hangs in the
+/// air gap below so it reads as floating.
+fn barracks_mesh_astro() -> Vec<UnitVertex> {
     let mut m = Vec::new();
-    let stone = [0.52, 0.50, 0.46];
-    let base = [0.38, 0.37, 0.34];
-    let roof = [0.42, 0.22, 0.18];
-    let door = [0.20, 0.14, 0.09];
-    let pole = [0.26, 0.22, 0.2];
-    // Foundation trim + walls.
-    push_box(&mut m, [-5.8, 0.0, -4.8], [5.8, 0.6, 4.8], base, 0.0);
-    push_box(&mut m, [-5.5, 0.5, -4.5], [5.5, 4.0, 4.5], stone, 0.0);
-    // Overhanging gable roof.
-    push_roof(&mut m, 0.0, 0.0, 6.0, 5.0, 4.0, 3.0, roof);
-    // Door + flanking team banners on the +z face.
-    push_box(&mut m, [-1.2, 0.0, 4.45], [1.2, 2.7, 4.65], door, 0.0);
+    let shell = [0.86, 0.84, 0.76];
+    let shell2 = [0.74, 0.72, 0.64];
+    let gold = [0.86, 0.75, 0.45];
+    let rot = std::f32::consts::FRAC_PI_8; // flat face toward -z
+                                           // Hanging grown root (does not touch the ground -> visible hover gap).
+    push_frustum(
+        &mut m, 0.0, 0.0, 4.0, 0.5, 1.6, 0.5, shell2, 0.0, 8, rot, false,
+    );
+    // Octagonal body, tapering, with a gold belt.
+    push_prism(&mut m, 0.0, 0.0, 4.4, 1.6, 5.0, shell, 0.0, 8, rot, false);
+    push_prism(&mut m, 0.0, 0.0, 4.5, 3.0, 3.5, gold, 0.0, 8, rot, false);
+    push_frustum(
+        &mut m, 0.0, 0.0, 4.4, 2.8, 5.0, 7.6, shell2, 0.0, 8, rot, false,
+    );
+    // Crowning spire + team-tinted energy core running up the middle.
+    push_pyramid(&mut m, 0.0, 0.0, 2.8, 7.6, 11.6, gold, 0.0, 8, rot);
+    push_prism(
+        &mut m,
+        0.0,
+        0.0,
+        1.2,
+        2.2,
+        8.2,
+        [0.5, 0.5, 0.5],
+        1.0,
+        6,
+        rot,
+        true,
+    );
+    // Two hovering shards flanking the door side (+z).
+    for sx in [-3.2_f32, 3.2] {
+        push_prism(&mut m, sx, 3.4, 0.5, 1.4, 2.4, shell, 0.0, 6, 0.0, false);
+        push_pyramid(&mut m, sx, 3.4, 0.5, 2.4, 3.4, [0.5, 0.5, 0.5], 1.0, 6, 0.0);
+    }
+    m
+}
+
+/// Hollowmen production building: a grounded, armored hangar with a sawtooth
+/// roof, a blast door, a smokestack, a roof turret (the built-in gun), a
+/// team-tinted window band, and a hazard skirt.
+fn barracks_mesh_hollow() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let steel = [0.46, 0.49, 0.53];
+    let steel2 = [0.58, 0.61, 0.65];
+    let dark = [0.24, 0.26, 0.30];
+    let haz = [0.80, 0.58, 0.20];
+    let gun = [0.17, 0.19, 0.22];
+    // Foundation slab + plated body.
+    push_box(&mut m, [-5.6, 0.0, -4.6], [5.6, 0.5, 4.6], dark, 0.0);
+    push_box(&mut m, [-5.2, 0.5, -4.2], [5.2, 4.0, 4.2], steel, 0.0);
+    push_box(&mut m, [-5.2, 0.5, -4.2], [5.2, 1.0, 4.2], haz, 0.0); // hazard skirt
+                                                                    // Sawtooth roof (three gables along x).
+    for cx in [-3.4_f32, 0.0, 3.4] {
+        push_roof(&mut m, cx, 0.0, 1.7, 4.4, 4.0, 1.4, steel2);
+    }
+    // Blast door + team-tinted window band on the +z face.
+    push_box(&mut m, [-1.6, 0.0, 4.15], [1.6, 2.8, 4.35], gun, 0.0);
+    push_box(&mut m, [-1.7, 0.2, 4.2], [1.7, 0.7, 4.4], haz, 0.0);
     push_box(
         &mut m,
-        [-3.0, 1.0, 4.52],
-        [-2.3, 3.6, 4.66],
+        [-4.6, 2.4, 4.2],
+        [-2.2, 3.2, 4.34],
         [0.5, 0.5, 0.5],
         1.0,
     );
     push_box(
         &mut m,
-        [2.3, 1.0, 4.52],
-        [3.0, 3.6, 4.66],
+        [2.2, 2.4, 4.2],
+        [4.6, 3.2, 4.34],
         [0.5, 0.5, 0.5],
         1.0,
     );
-    // Rooftop flagpole + team flag.
-    push_box(&mut m, [-0.07, 7.0, -0.07], [0.07, 8.7, 0.07], pole, 0.0);
-    push_box(
-        &mut m,
-        [0.07, 7.85, -0.05],
-        [1.2, 8.55, 0.05],
-        [0.5, 0.5, 0.5],
-        1.0,
-    );
+    // Smokestack.
+    push_prism(&mut m, -4.0, -2.8, 0.7, 4.0, 7.2, steel2, 0.0, 6, 0.0, true);
+    push_prism(&mut m, -4.0, -2.8, 0.72, 6.8, 7.2, dark, 0.0, 6, 0.0, true);
+    // Roof turret with a barrel (the built-in gun).
+    push_box(&mut m, [2.4, 4.0, -1.0], [4.0, 5.0, 0.6], gun, 0.0);
+    push_box(&mut m, [2.9, 4.3, 0.5], [3.5, 4.7, 3.2], gun, 0.0);
     m
 }
 
@@ -501,8 +650,10 @@ pub struct Gfx {
     water_buf: wgpu::Buffer,
     infantry_buf: wgpu::Buffer,
     infantry_len: u32,
-    barracks_buf: wgpu::Buffer,
-    barracks_len: u32,
+    barracks_astro_buf: wgpu::Buffer,
+    barracks_astro_len: u32,
+    barracks_hollow_buf: wgpu::Buffer,
+    barracks_hollow_len: u32,
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
@@ -890,10 +1041,16 @@ impl Gfx {
             bytemuck::cast_slice(&infantry),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let barracks = barracks_mesh();
-        let barracks_buf = mkbuf(
-            "barracks",
-            bytemuck::cast_slice(&barracks),
+        let barracks_astro = barracks_mesh_astro();
+        let barracks_astro_buf = mkbuf(
+            "barracks-astro",
+            bytemuck::cast_slice(&barracks_astro),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let barracks_hollow = barracks_mesh_hollow();
+        let barracks_hollow_buf = mkbuf(
+            "barracks-hollow",
+            bytemuck::cast_slice(&barracks_hollow),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
         let walls = water_walls();
@@ -940,8 +1097,10 @@ impl Gfx {
             water_buf,
             infantry_buf,
             infantry_len: infantry.len() as u32,
-            barracks_buf,
-            barracks_len: barracks.len() as u32,
+            barracks_astro_buf,
+            barracks_astro_len: barracks_astro.len() as u32,
+            barracks_hollow_buf,
+            barracks_hollow_len: barracks_hollow.len() as u32,
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
@@ -976,17 +1135,20 @@ impl Gfx {
     pub fn render(
         &mut self,
         infantry: &[InstanceRaw],
-        barracks: &[InstanceRaw],
+        barracks_astro: &[InstanceRaw],
+        barracks_hollow: &[InstanceRaw],
         rings: &[RingRaw],
         fow: &[u8],
         view_proj: [[f32; 4]; 4],
         eye: [f32; 3],
         time: f32,
     ) {
-        // Infantry and barracks share one instance buffer: infantry in [0..ni),
-        // barracks in [ni..ni+nb). Each mesh is drawn over its own range.
+        // All three meshes share one instance buffer, packed in order: infantry
+        // in [0..ni), Astromancer buildings in [ni..ni+na), Hollowmen buildings
+        // in [ni+na..ni+na+nh). Each mesh is drawn over its own range.
         let ni = infantry.len().min(MAX_INSTANCES);
-        let nb = barracks.len().min(MAX_INSTANCES - ni);
+        let na = barracks_astro.len().min(MAX_INSTANCES - ni);
+        let nh = barracks_hollow.len().min(MAX_INSTANCES - ni - na);
         let ring_verts = ring_decals(rings);
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
         self.queue.write_buffer(
@@ -1020,16 +1182,23 @@ impl Gfx {
                 },
             );
         }
+        let stride = std::mem::size_of::<InstanceRaw>() as u64;
         if ni > 0 {
             self.queue
                 .write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&infantry[..ni]));
         }
-        if nb > 0 {
-            let off = (ni * std::mem::size_of::<InstanceRaw>()) as u64;
+        if na > 0 {
             self.queue.write_buffer(
                 &self.instance_buf,
-                off,
-                bytemuck::cast_slice(&barracks[..nb]),
+                ni as u64 * stride,
+                bytemuck::cast_slice(&barracks_astro[..na]),
+            );
+        }
+        if nh > 0 {
+            self.queue.write_buffer(
+                &self.instance_buf,
+                (ni + na) as u64 * stride,
+                bytemuck::cast_slice(&barracks_hollow[..nh]),
             );
         }
         if nrv > 0 {
@@ -1094,15 +1263,22 @@ impl Gfx {
             pass.set_vertex_buffer(0, self.walls_buf.slice(..));
             pass.set_vertex_buffer(1, self.wall_inst_buf.slice(..));
             pass.draw(0..self.walls_len, 0..1);
-            if ni > 0 || nb > 0 {
+            if ni > 0 || na > 0 || nh > 0 {
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                 if ni > 0 {
                     pass.set_vertex_buffer(0, self.infantry_buf.slice(..));
                     pass.draw(0..self.infantry_len, 0..ni as u32);
                 }
-                if nb > 0 {
-                    pass.set_vertex_buffer(0, self.barracks_buf.slice(..));
-                    pass.draw(0..self.barracks_len, ni as u32..(ni + nb) as u32);
+                if na > 0 {
+                    pass.set_vertex_buffer(0, self.barracks_astro_buf.slice(..));
+                    pass.draw(0..self.barracks_astro_len, ni as u32..(ni + na) as u32);
+                }
+                if nh > 0 {
+                    pass.set_vertex_buffer(0, self.barracks_hollow_buf.slice(..));
+                    pass.draw(
+                        0..self.barracks_hollow_len,
+                        (ni + na) as u32..(ni + na + nh) as u32,
+                    );
                 }
             }
 
@@ -1150,6 +1326,7 @@ mod tests {
     #[test]
     fn unit_meshes_are_well_formed() {
         check_mesh(&infantry_mesh(), "infantry");
-        check_mesh(&barracks_mesh(), "barracks");
+        check_mesh(&barracks_mesh_astro(), "barracks-astro");
+        check_mesh(&barracks_mesh_hollow(), "barracks-hollow");
     }
 }

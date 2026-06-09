@@ -671,12 +671,13 @@ impl ApplicationHandler<UserEvent> for App {
                     self.game.skip_tick();
                     if let Some(gfx) = self.gfx.as_mut() {
                         let aspect = gfx.aspect();
-                        let (infantry, barracks, rings) = self.game.render_data();
+                        let (infantry, b_astro, b_hollow, rings) = self.game.render_data();
                         let fow = self.game.fow_bytes();
                         let vp = self.camera.view_proj(aspect);
                         gfx.render(
                             &infantry,
-                            &barracks,
+                            &b_astro,
+                            &b_hollow,
                             &rings,
                             &fow,
                             vp,
@@ -759,12 +760,13 @@ impl ApplicationHandler<UserEvent> for App {
 
                 if let Some(gfx) = self.gfx.as_mut() {
                     let aspect = gfx.aspect();
-                    let (infantry, barracks, rings) = self.game.render_data();
+                    let (infantry, b_astro, b_hollow, rings) = self.game.render_data();
                     let fow = self.game.fow_bytes();
                     let vp = self.camera.view_proj(aspect);
                     gfx.render(
                         &infantry,
-                        &barracks,
+                        &b_astro,
+                        &b_hollow,
                         &rings,
                         &fow,
                         vp,

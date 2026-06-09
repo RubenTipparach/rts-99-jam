@@ -36,6 +36,16 @@ fn team_color(owner: u16) -> [f32; 4] {
     }
 }
 
+/// Which faction a player fields. Drives which placeholder building/unit meshes
+/// are drawn for that player; set from the skirmish lobby. Only the two launch
+/// factions exist so far.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub enum Faction {
+    Astromancer,
+    Hollowmen,
+}
+
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub struct UnitInfo {
@@ -62,6 +72,9 @@ pub struct Game {
     /// Debug toggles: darken unexplored / explored areas (both on by default).
     fog_unexplored: bool,
     fog_explored: bool,
+    /// Faction per side: index 0 = the player (owner 0), index 1 = everyone
+    /// else. Defaults to Hollowmen vs Astromancers; the lobby overrides it.
+    factions: [Faction; 2],
 }
 
 impl Default for Game {
@@ -121,6 +134,7 @@ impl Game {
             explored: vec![false; FOW_RES * FOW_RES],
             fog_unexplored: true,
             fog_explored: true,
+            factions: [Faction::Hollowmen, Faction::Astromancer],
         };
         g.step_now();
         g.prev = g.curr.clone();
@@ -328,12 +342,37 @@ impl Game {
 
     // ---- render + HUD data ----
 
-    /// Instances for the infantry mesh, the barracks mesh, and selection rings.
-    /// Meshes are authored at world scale, so instance scale is ~1.
-    pub fn render_data(&self) -> (Vec<InstanceRaw>, Vec<InstanceRaw>, Vec<RingRaw>) {
+    /// Which faction the given owner fields (owner 0 = the player).
+    pub fn faction_of(&self, owner: u16) -> Faction {
+        self.factions[(owner != 0) as usize]
+    }
+
+    /// Set the player's faction (owner 0); the enemy takes the other launch
+    /// faction. Called from the skirmish lobby before the match starts.
+    #[allow(dead_code)] // wired up by the skirmish lobby (next)
+    pub fn set_player_faction(&mut self, faction: Faction) {
+        self.factions[0] = faction;
+        self.factions[1] = match faction {
+            Faction::Astromancer => Faction::Hollowmen,
+            Faction::Hollowmen => Faction::Astromancer,
+        };
+    }
+
+    /// Instances for the infantry mesh, the two faction barracks meshes
+    /// (Astromancer, Hollowmen), and selection rings. Meshes are authored at
+    /// world scale, so instance scale is ~1.
+    pub fn render_data(
+        &self,
+    ) -> (
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
+        Vec<RingRaw>,
+    ) {
         let sel: HashSet<u32> = self.selected.iter().copied().collect();
         let mut infantry = Vec::new();
-        let mut barracks = Vec::new();
+        let mut barracks_astro = Vec::new();
+        let mut barracks_hollow = Vec::new();
         let mut rings = Vec::new();
         for s in &self.curr {
             let (wx, wz) = self.lerped(s);
@@ -343,11 +382,15 @@ impl Game {
             let ground = terrain::height(wx, wz);
             let tint = team_color(s.owner);
             if s.kind == Kind::Barracks {
-                barracks.push(InstanceRaw {
+                let inst = InstanceRaw {
                     offset: [wx, ground, wz],
                     scale: [1.0, 1.0, 1.0],
                     color: tint,
-                });
+                };
+                match self.faction_of(s.owner) {
+                    Faction::Astromancer => barracks_astro.push(inst),
+                    Faction::Hollowmen => barracks_hollow.push(inst),
+                }
                 if sel.contains(&s.index) {
                     rings.push(RingRaw {
                         center: [wx, ground, wz],
@@ -377,7 +420,7 @@ impl Game {
                 }
             }
         }
-        (infantry, barracks, rings)
+        (infantry, barracks_astro, barracks_hollow, rings)
     }
 
     fn info(&self, s: &Snap) -> UnitInfo {
