@@ -156,6 +156,12 @@ impl Game {
         }
     }
 
+    /// Keep wall-clock bookkeeping current without stepping the sim, used while
+    /// the game is paused so resuming does not fast-forward a backlog of ticks.
+    pub fn skip_tick(&mut self) {
+        self.last = Instant::now();
+    }
+
     pub fn time(&self) -> f32 {
         self.time
     }

@@ -13,7 +13,7 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorGrabMode, Window, WindowId};
 
 use camera::Camera;
 use game::Game;
@@ -182,6 +182,9 @@ struct App {
     /// Set once a touch is seen, so edge-panning (a mouse affordance) is
     /// disabled on touch devices - the d-pad pans there instead.
     pointer_is_touch: bool,
+    /// When set, the sim is frozen and the pause menu is shown; the cursor is
+    /// also released from the window (it is confined again on resume).
+    paused: bool,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     last_css: (u32, u32),
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -200,6 +203,7 @@ impl App {
             input: Input::default(),
             last_frame: Instant::now(),
             pointer_is_touch: false,
+            paused: false,
             last_css: (0, 0),
             first_frame_done: false,
             proxy,
@@ -211,6 +215,36 @@ impl App {
             .as_ref()
             .map(|g| (g.width as f32, g.height as f32))
             .unwrap_or((1.0, 1.0))
+    }
+
+    /// Confine the cursor to the window while playing and release it while
+    /// paused. Best-effort: native backends honour `Confined`; the web backend
+    /// only supports pointer-lock (which would hide the cursor), so there it is
+    /// a graceful no-op and ESC simply opens the pause menu.
+    fn apply_cursor_grab(&self) {
+        if let Some(win) = &self.window {
+            let mode = if self.paused {
+                CursorGrabMode::None
+            } else {
+                CursorGrabMode::Confined
+            };
+            let _ = win.set_cursor_grab(mode);
+        }
+    }
+
+    /// Toggle the pause state, syncing the cursor grab and dropping any
+    /// in-progress drags so they do not resume mid-gesture.
+    fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
+        if paused {
+            self.input.left_press = None;
+            self.input.middle_down = false;
+            #[cfg(target_arch = "wasm32")]
+            {
+                self.input.minimap_drag = false;
+            }
+        }
+        self.apply_cursor_grab();
     }
 
     /// If a building is selected and the point is on its Train button, queue a
@@ -261,10 +295,19 @@ impl App {
         if x1 <= x0 || y1 <= y0 {
             return;
         }
-        let nx = ((cx - x0) / (x1 - x0)).clamp(0.0, 1.0);
-        let nz = ((cy - y0) / (y1 - y0)).clamp(0.0, 1.0);
-        let wx = nx * 2.0 * terrain::HALF - terrain::HALF;
-        let wz = nz * 2.0 * terrain::HALF - terrain::HALF;
+        // Minimap-local coords in [-1, 1] (u right, v down from centre), clamped
+        // into the radar disc, then inverse-rotated by the camera yaw - the exact
+        // inverse of the transform the HUD draws the rotated map with.
+        let mut u = ((cx - x0) / (x1 - x0)) * 2.0 - 1.0;
+        let mut v = ((cy - y0) / (y1 - y0)) * 2.0 - 1.0;
+        let len = (u * u + v * v).sqrt();
+        if len > 1.0 {
+            u /= len;
+            v /= len;
+        }
+        let (s, c) = camera::YAW.sin_cos();
+        let wx = (u * s + v * c) * terrain::HALF;
+        let wz = (-u * c + v * s) * terrain::HALF;
         self.camera.look_at(wx, wz);
     }
 }
@@ -341,6 +384,20 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 let down = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
+                    // Esc toggles pause (and releases the confined cursor).
+                    if code == KeyCode::Escape && down {
+                        let paused = !self.paused;
+                        self.set_paused(paused);
+                        return;
+                    }
+                    // While paused, swallow gameplay keys (and stop any held pan).
+                    if self.paused {
+                        self.input.fwd = false;
+                        self.input.back = false;
+                        self.input.left = false;
+                        self.input.right = false;
+                        return;
+                    }
                     match code {
                         KeyCode::KeyW | KeyCode::ArrowUp => self.input.fwd = down,
                         KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
@@ -356,6 +413,20 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 let (w, h) = self.dims();
                 let (cx, cy) = self.input.cursor;
+                // While paused, only the Resume button responds; everything else
+                // is inert so clicks can't leak into the frozen game.
+                if self.paused {
+                    #[cfg(target_arch = "wasm32")]
+                    if button == MouseButton::Left && state == ElementState::Pressed {
+                        let (x0, y0, x1, y1) = hud::resume_button_rect(w, h);
+                        if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
+                            self.set_paused(false);
+                        }
+                    }
+                    return;
+                }
+                // A click is a user gesture: (re)confine the cursor to the window.
+                self.apply_cursor_grab();
                 match button {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
@@ -419,7 +490,11 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::CursorEntered { .. } => self.input.cursor_in = true,
             WindowEvent::CursorLeft { .. } => self.input.cursor_in = false,
+            WindowEvent::Focused(true) => self.apply_cursor_grab(),
             WindowEvent::MouseWheel { delta, .. } => {
+                if self.paused {
+                    return;
+                }
                 let units = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 50.0,
@@ -492,6 +567,31 @@ impl ApplicationHandler<UserEvent> for App {
                 let now = Instant::now();
                 let dt = (now - self.last_frame).as_secs_f32().min(0.1);
                 self.last_frame = now;
+
+                // While paused, freeze the sim and the camera; still render and
+                // draw the HUD so the pause menu shows. `skip_tick` keeps the
+                // sim's clock current so resuming doesn't replay a backlog.
+                if self.paused {
+                    self.game.skip_tick();
+                    if let Some(gfx) = self.gfx.as_mut() {
+                        let aspect = gfx.aspect();
+                        let (infantry, barracks, rings) = self.game.render_data();
+                        let fow = self.game.fow_bytes();
+                        let vp = self.camera.view_proj(aspect);
+                        gfx.render(
+                            &infantry,
+                            &barracks,
+                            &rings,
+                            &fow,
+                            vp,
+                            self.camera.eye(),
+                            self.game.time(),
+                        );
+                    }
+                    let (w, h) = self.dims();
+                    hud::draw(&self.camera, &self.game, w, h, None, true);
+                    return;
+                }
 
                 let mut fwd = (self.input.fwd as i32 - self.input.back as i32) as f32;
                 let mut right = (self.input.right as i32 - self.input.left as i32) as f32;
@@ -566,7 +666,7 @@ impl ApplicationHandler<UserEvent> for App {
                     );
                 }
                 let (w, h) = self.dims();
-                hud::draw(&self.camera, &self.game, w, h, drag_rect);
+                hud::draw(&self.camera, &self.game, w, h, drag_rect, false);
 
                 // Remove the loading overlay once the first frame is on screen.
                 #[cfg(target_arch = "wasm32")]

@@ -4,7 +4,9 @@
 use glam::{Mat4, Vec2, Vec3, Vec4Swizzles};
 
 // Fixed isometric-ish viewing angle (StarCraft/WC3 style).
-const YAW: f32 = 0.9;
+/// Camera yaw around +Y. Public so the minimap can rotate its world by the same
+/// angle, keeping the camera's view box upright (north = into the screen).
+pub const YAW: f32 = 0.9;
 const PITCH: f32 = 0.95;
 
 pub struct Camera {
@@ -66,6 +68,38 @@ impl Camera {
         }
         let hit = near + dir * t;
         Some((hit.x, hit.z))
+    }
+
+    /// Ground point under a screen pixel, or - when the ray meets the horizon
+    /// (or points above it) and never touches the ground - a point shot far
+    /// along the ray's horizontal heading. Unlike `ground_pick` this always
+    /// returns something, so the minimap's view box stays a four-corner quad
+    /// even when the camera looks off the edge of the world; the minimap then
+    /// clips that quad to its disc rather than letting a corner fly to infinity.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn ground_pick_or_far(&self, sx: f32, sy: f32, w: f32, h: f32) -> (f32, f32) {
+        if w <= 0.0 || h <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let inv = self.mat(w / h).inverse();
+        let nx = sx / w * 2.0 - 1.0;
+        let ny = 1.0 - sy / h * 2.0;
+        let near = inv.project_point3(Vec3::new(nx, ny, 0.0));
+        let far = inv.project_point3(Vec3::new(nx, ny, 1.0));
+        let dir = far - near;
+        if dir.y < -1e-6 {
+            let t = -near.y / dir.y;
+            if t >= 0.0 {
+                let hit = near + dir * t;
+                return (hit.x, hit.z);
+            }
+        }
+        // At or above the horizon: there is no ground hit, so head far along the
+        // ray's horizontal direction. `FAR` is several map-widths out, so the
+        // edge of the quad lands well outside the disc and gets clipped there.
+        const FAR: f32 = 3600.0;
+        let horiz = Vec2::new(dir.x, dir.z).normalize_or_zero();
+        (near.x + horiz.x * FAR, near.z + horiz.y * FAR)
     }
 
     pub fn project(&self, world: Vec3, w: f32, h: f32) -> Option<(f32, f32)> {
