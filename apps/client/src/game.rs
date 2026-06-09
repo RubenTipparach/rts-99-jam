@@ -172,6 +172,8 @@ impl Game {
             fog_explored: true,
             factions: [Faction::Hollowmen, Faction::Astromancer],
         };
+        // The enemy is driven by the in-sim bot commander (mines, builds, trains).
+        g.world.set_bot(1, true);
         g.step_now();
         g.prev = g.curr.clone();
         g.recompute_fow();

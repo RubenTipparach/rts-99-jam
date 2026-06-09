@@ -58,6 +58,13 @@ pub enum Command {
     SpawnResource { kind: ResourceKind, x: Fx, y: Fx },
     /// Send a worker to harvest a resource node (mine, then return to deposit).
     Harvest { unit: u32, node: u32 },
+    /// Send a worker to construct a building at a point (costs ore on arrival).
+    Build {
+        unit: u32,
+        kind: BuildingKind,
+        x: Fx,
+        y: Fx,
+    },
     /// Move to a point (no auto-engage on the way).
     Move { unit: u32, x: Fx, y: Fx },
     /// Move to a point, attacking any enemy encountered.
