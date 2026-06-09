@@ -165,6 +165,11 @@ struct Input {
     cursor: (f32, f32),
     cursor_in: bool,
     left_press: Option<(f32, f32)>,
+    /// Middle mouse button held: dragging grabs the ground and pans the camera.
+    middle_down: bool,
+    /// Left button is scrubbing the camera around on the minimap (web HUD only).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    minimap_drag: bool,
 }
 
 struct App {
@@ -225,19 +230,42 @@ impl App {
     }
 
     /// If the point is on the minimap, recenter the camera there and report the
-    /// click consumed (web HUD only).
+    /// click consumed (web HUD only). Used by touch (tap to jump).
     #[cfg(target_arch = "wasm32")]
     fn minimap_jump(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
         let (x0, y0, x1, y1) = hud::minimap_rect(w, h);
         if x1 <= x0 || y1 <= y0 || cx < x0 || cx > x1 || cy < y0 || cy > y1 {
             return false;
         }
+        self.minimap_drag_to(cx, cy, w, h);
+        true
+    }
+
+    /// Begin a minimap left-drag: if the press lands on the minimap, recenter
+    /// there and start scrubbing. Returns whether the click was consumed.
+    #[cfg(target_arch = "wasm32")]
+    fn minimap_press(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
+        if self.minimap_jump(cx, cy, w, h) {
+            self.input.minimap_drag = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Recenter the camera on the world point under `(cx, cy)`, clamped to the
+    /// minimap so dragging past its edge still scrubs to the border.
+    #[cfg(target_arch = "wasm32")]
+    fn minimap_drag_to(&mut self, cx: f32, cy: f32, w: f32, h: f32) {
+        let (x0, y0, x1, y1) = hud::minimap_rect(w, h);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
         let nx = ((cx - x0) / (x1 - x0)).clamp(0.0, 1.0);
         let nz = ((cy - y0) / (y1 - y0)).clamp(0.0, 1.0);
         let wx = nx * 2.0 * terrain::HALF - terrain::HALF;
         let wz = nz * 2.0 * terrain::HALF - terrain::HALF;
         self.camera.look_at(wx, wz);
-        true
     }
 }
 
@@ -333,20 +361,29 @@ impl ApplicationHandler<UserEvent> for App {
                         if state == ElementState::Pressed {
                             #[cfg(target_arch = "wasm32")]
                             let consumed = self.train_button_hit(cx, cy, w, h)
-                                || self.minimap_jump(cx, cy, w, h);
+                                || self.minimap_press(cx, cy, w, h);
                             #[cfg(not(target_arch = "wasm32"))]
                             let consumed = false;
                             if !consumed {
                                 self.input.left_press = Some((cx, cy));
                             }
-                        } else if let Some((px, py)) = self.input.left_press.take() {
-                            if (px - cx).hypot(py - cy) < 8.0 {
-                                self.game.select_single(&self.camera, w, h, cx, cy);
-                            } else {
-                                let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
-                                self.game.select_box_screen(&self.camera, w, h, rect);
+                        } else {
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                self.input.minimap_drag = false;
+                            }
+                            if let Some((px, py)) = self.input.left_press.take() {
+                                if (px - cx).hypot(py - cy) < 8.0 {
+                                    self.game.select_single(&self.camera, w, h, cx, cy);
+                                } else {
+                                    let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
+                                    self.game.select_box_screen(&self.camera, w, h, rect);
+                                }
                             }
                         }
+                    }
+                    MouseButton::Middle => {
+                        self.input.middle_down = state == ElementState::Pressed;
                     }
                     MouseButton::Right if state == ElementState::Pressed => {
                         if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
@@ -357,8 +394,28 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                self.input.cursor = (position.x as f32, position.y as f32);
+                let (nx, ny) = (position.x as f32, position.y as f32);
+                let (ox, oy) = self.input.cursor;
+                self.input.cursor = (nx, ny);
                 self.input.cursor_in = true;
+                // Middle-drag pan: grab the ground point under the cursor and
+                // keep it there. Both picks use the current (un-moved) camera, so
+                // there's no feedback loop and the drag tracks the mouse 1:1.
+                if self.input.middle_down {
+                    let (w, h) = self.dims();
+                    if let (Some((ax, az)), Some((bx, bz))) = (
+                        self.camera.ground_pick(ox, oy, w, h),
+                        self.camera.ground_pick(nx, ny, w, h),
+                    ) {
+                        self.camera.pan_world(ax - bx, az - bz);
+                    }
+                }
+                // Left-drag on the minimap scrubs the camera across the map.
+                #[cfg(target_arch = "wasm32")]
+                if self.input.minimap_drag {
+                    let (w, h) = self.dims();
+                    self.minimap_drag_to(nx, ny, w, h);
+                }
             }
             WindowEvent::CursorEntered { .. } => self.input.cursor_in = true,
             WindowEvent::CursorLeft { .. } => self.input.cursor_in = false,
@@ -441,11 +498,20 @@ impl ApplicationHandler<UserEvent> for App {
                 // Edge panning: scroll the camera when the mouse rests near a
                 // screen edge. Disabled on touch (the d-pad pans there) so a
                 // resting finger position can't make the camera drift forever.
-                if self.input.cursor_in && !self.pointer_is_touch {
+                if self.input.cursor_in && !self.pointer_is_touch && !self.input.middle_down {
                     let (sw, sh) = self.dims();
                     let (cx, cy) = self.input.cursor;
+                    // The minimap now lives at the screen edge, so a cursor over
+                    // it (or actively scrubbing it) must not also edge-pan.
+                    #[cfg(target_arch = "wasm32")]
+                    let blocked = self.input.minimap_drag || {
+                        let (x0, y0, x1, y1) = hud::minimap_rect(sw, sh);
+                        cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1
+                    };
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let blocked = false;
                     const EDGE: f32 = 28.0;
-                    if sw > 1.0 && sh > 1.0 {
+                    if !blocked && sw > 1.0 && sh > 1.0 {
                         if cx <= EDGE {
                             right -= 1.0;
                         } else if cx >= sw - EDGE {

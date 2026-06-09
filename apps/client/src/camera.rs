@@ -100,4 +100,13 @@ impl Camera {
         self.target.x = self.target.x.clamp(-lim, lim);
         self.target.y = self.target.y.clamp(-lim, lim);
     }
+
+    /// Shift the look-at target directly in world units. Used by middle-mouse
+    /// drag panning, which grabs the ground point under the cursor and keeps it
+    /// there as the mouse moves.
+    pub fn pan_world(&mut self, dx: f32, dz: f32) {
+        let lim = 560.0;
+        self.target.x = (self.target.x + dx).clamp(-lim, lim);
+        self.target.y = (self.target.y + dz).clamp(-lim, lim);
+    }
 }
