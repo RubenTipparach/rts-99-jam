@@ -159,7 +159,7 @@ payload = zlib( density[nx*ny*nz] + material[nx*ny*nz]
           buildable: uint8 mask,  liquid: uint8 per-column surface (j+1, 0 = dry)
 ```
 
-The 22 maps total well under 1 MB. Edit later with the ops on `VoxelGrid`
+The 22 maps total about 1.1 MB (~50 KB each). Edit later with the ops on `VoxelGrid`
 (`fill_box`, `carve_sphere`, ...), `python3 assets/worldgen/voxel.py <map.vxl>`
 to inspect, or any tool that speaks VXL1.
 
