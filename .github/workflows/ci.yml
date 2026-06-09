@@ -1,9 +1,18 @@
 name: ci
 
+# Commit (push) builds only, on every branch. Pull-request events do not trigger
+# a separate run (push-triggered runs still show as checks on the PR), so a commit
+# to a PR branch builds once, not twice.
 on:
   push:
-    branches: [main]
-  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+# A newer push to the same branch cancels an in-flight run, so rapid pushes do not
+# stack up concurrent builds.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
