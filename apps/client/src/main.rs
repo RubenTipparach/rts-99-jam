@@ -5,6 +5,7 @@ mod camera;
 mod game;
 mod gfx;
 mod hud;
+mod menu;
 mod terrain;
 
 use std::sync::Arc;
@@ -236,6 +237,12 @@ struct App {
     /// the pause menu in response.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     was_locked: bool,
+    /// Front-end screen (web): main menu / lobby / in match. Native skips the
+    /// menus and starts in the match.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    screen: menu::Screen,
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    lobby: menu::Lobby,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     last_css: (u32, u32),
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -257,6 +264,12 @@ impl App {
             paused: false,
             cursor_locked: false,
             was_locked: false,
+            // Web shows the menu first; the native dev build jumps into the match.
+            #[cfg(target_arch = "wasm32")]
+            screen: menu::Screen::Menu,
+            #[cfg(not(target_arch = "wasm32"))]
+            screen: menu::Screen::InGame,
+            lobby: menu::Lobby::default(),
             last_css: (0, 0),
             first_frame_done: false,
             proxy,
@@ -278,15 +291,16 @@ impl App {
     /// from a user gesture, so this is called from clicks and on resume.
     fn apply_cursor_grab(&self) {
         let Some(win) = &self.window else { return };
+        // Only confine during the match; the menus need a free cursor.
         #[cfg(target_arch = "wasm32")]
-        let mode = if self.paused {
-            CursorGrabMode::None
-        } else {
-            CursorGrabMode::Locked
-        };
+        let in_game = self.screen == menu::Screen::InGame;
         #[cfg(not(target_arch = "wasm32"))]
-        let mode = if self.paused {
+        let in_game = true;
+        let confine = in_game && !self.paused;
+        let mode = if !confine {
             CursorGrabMode::None
+        } else if cfg!(target_arch = "wasm32") {
+            CursorGrabMode::Locked
         } else {
             CursorGrabMode::Confined
         };
@@ -480,10 +494,26 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 let down = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    // Esc toggles pause (and releases the confined cursor).
+                    // Esc: in the lobby step back to the menu; otherwise (in a
+                    // match) toggle pause and release the confined cursor.
                     if code == KeyCode::Escape && down {
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            if self.screen == menu::Screen::Lobby {
+                                self.screen = menu::Screen::Menu;
+                                return;
+                            }
+                            if self.screen == menu::Screen::Menu {
+                                return;
+                            }
+                        }
                         let paused = !self.paused;
                         self.set_paused(paused);
+                        return;
+                    }
+                    // Swallow gameplay keys while a front-end screen is up.
+                    #[cfg(target_arch = "wasm32")]
+                    if self.screen != menu::Screen::InGame {
                         return;
                     }
                     // While paused, swallow gameplay keys (and stop any held pan).
@@ -509,6 +539,31 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 let (w, h) = self.dims();
                 let (cx, cy) = self.input.cursor;
+                // Front-end screens (web): clicks drive the menu/lobby, not the game.
+                #[cfg(target_arch = "wasm32")]
+                if self.screen != menu::Screen::InGame {
+                    if button == MouseButton::Left && state == ElementState::Pressed {
+                        match menu::hit(self.screen, &self.lobby, cx, cy) {
+                            menu::Click::Skirmish => self.screen = menu::Screen::Lobby,
+                            menu::Click::SetFaction(f) => self.lobby.faction = f,
+                            menu::Click::AddBot => self.lobby.bots = (self.lobby.bots + 1).min(3),
+                            menu::Click::RemoveBot => {
+                                self.lobby.bots = self.lobby.bots.saturating_sub(1).max(1)
+                            }
+                            menu::Click::NextMap => {
+                                self.lobby.map = (self.lobby.map + 1) % menu::MAPS.len() as u8
+                            }
+                            menu::Click::Back => self.screen = menu::Screen::Menu,
+                            menu::Click::Start => {
+                                self.game.set_player_faction(self.lobby.faction);
+                                self.screen = menu::Screen::InGame;
+                                self.apply_cursor_grab();
+                            }
+                            menu::Click::None => {}
+                        }
+                    }
+                    return;
+                }
                 // While paused, only the Resume button responds; everything else
                 // is inert so clicks can't leak into the frozen game.
                 if self.paused {
@@ -645,6 +700,38 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                     }
+                }
+                // Front-end screens (web): freeze the sim and draw the menu/lobby
+                // over a static render of the scene, then skip the game loop.
+                #[cfg(target_arch = "wasm32")]
+                if self.screen != menu::Screen::InGame {
+                    self.game.skip_tick();
+                    if let Some(gfx) = self.gfx.as_mut() {
+                        let aspect = gfx.aspect();
+                        let (infantry, b_astro, b_hollow, acolytes, engineers, rings) =
+                            self.game.render_data();
+                        let fow = self.game.fow_bytes();
+                        let vp = self.camera.view_proj(aspect);
+                        gfx.render(
+                            &infantry,
+                            &b_astro,
+                            &b_hollow,
+                            &acolytes,
+                            &engineers,
+                            &rings,
+                            &fow,
+                            vp,
+                            self.camera.eye(),
+                            self.game.time(),
+                        );
+                    }
+                    menu::draw(self.screen, &self.lobby);
+                    #[cfg(target_arch = "wasm32")]
+                    if self.gfx.is_some() && !self.first_frame_done {
+                        self.first_frame_done = true;
+                        hide_loading();
+                    }
+                    return;
                 }
                 // Track pointer-lock (web): if the lock was lost while playing
                 // (the user pressed Esc, which the browser reserves to exit the
