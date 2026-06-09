@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Build a per-world voxel density field that is buildable, not spiky.
+"""Build a per-world voxel density field: buildable, not spiky, with the right
+landforms for each body.
 
-Design goals (from the brief):
-  - a guaranteed per-world fraction of relatively FLAT, buildable ground,
-  - crisp PLATEAUS and CLIFFS rather than high-frequency noise spikes,
-  - some genuinely 3D features (caves / overhangs) that a heightmap cannot do.
+Base shaping (all worlds): a smooth low-frequency surface terraced into a few big
+elevation tiers, so gentle slopes become flat buildable plateau tops separated by
+short cliff risers (kills noise spikes, guarantees build space). Then each world
+gets the features that actually define it, driven by how it is eroded:
 
-How: start from a smooth, low-frequency base surface (no fine noise), drop in a
-few wide shallow craters (flat floors, not spikes), then TERRACE the surface into
-discrete levels. Terracing is the key trick: it turns gentle slopes into flat
-plateau tops separated by short cliff risers, which both kills spikes and creates
-buildable area. The terrace step is tuned per world to hit its flat target. The
-field is then voxelized (with a thin vertical iso-band so the mesh is clean) and
-a few caves/arches are carved for 3D interest. A per-column buildable mask marks
-the flat tops.
+  - Airless rocky/dusty bodies (no erosion): LOTS of impact cratering
+    (Moon, Ceres, Vesta, Callisto, Rhea, Dione, Iapetus, the Uranian moons, ...).
+  - Ice-resurfaced: few craters, plus their signature -
+    Europa long deep fissures, Enceladus mini geysers, Triton cantaloupe.
+  - Volcanic (Io): few craters, GIANT volcanoes (cones + summit calderas + lava).
+  - Atmospheric: Mars is fairly plain with one big central canyon; Titan has
+    oceans of liquid methane; Earth has oceans, lakes and rivers.
+
+Genuinely 3D features (caves/overhangs) are carved into steep ground where it
+won't eat build space. A per-column buildable mask marks the flat, dry tops.
 """
 
 import math
@@ -24,58 +27,40 @@ import voxel as vox
 HALF = 600
 NXZ = 128
 NY = 48
-YMIN, YMAX = -30.0, 150.0
+YMIN, YMAX = -40.0, 150.0
 
 MAT_LOW, MAT_MID, MAT_HIGH, MAT_ACCENT, MAT_HAZARD = 0, 1, 2, 3, 4
 
 # Per-world buildable target (fraction of map that should be relatively flat).
-# Plains/resurfaced worlds are flatter; cratered/chaotic ones rougher.
 FLAT_TARGET = {
-    "pluto": 0.60, "triton": 0.55, "europa": 0.55, "enceladus": 0.52,
-    "titan": 0.50, "moon": 0.45, "mars": 0.45, "ceres": 0.42, "rhea": 0.42,
-    "dione": 0.42, "ganymede": 0.40, "io": 0.42, "ariel": 0.40, "titania": 0.38,
-    "iapetus": 0.38, "chiron": 0.36, "vesta": 0.34, "oberon": 0.33,
-    "umbriel": 0.33, "callisto": 0.32, "miranda": 0.28,
+    "earth": 0.50, "pluto": 0.60, "triton": 0.55, "europa": 0.58, "enceladus": 0.55,
+    "titan": 0.55, "mars": 0.60, "moon": 0.42, "ceres": 0.40, "rhea": 0.40,
+    "dione": 0.40, "ganymede": 0.42, "io": 0.46, "ariel": 0.42, "titania": 0.36,
+    "iapetus": 0.36, "chiron": 0.36, "vesta": 0.34, "oberon": 0.33,
+    "umbriel": 0.34, "callisto": 0.32, "miranda": 0.30,
 }
 CAVES = {
-    "miranda": 7, "ariel": 5, "titania": 4, "ganymede": 4, "vesta": 4,
-    "europa": 2, "enceladus": 2, "io": 3, "callisto": 4, "oberon": 4,
+    "miranda": 7, "ariel": 5, "titania": 4, "ganymede": 4, "vesta": 3,
+    "europa": 1, "enceladus": 1, "io": 2, "callisto": 3, "oberon": 3, "earth": 1,
 }
 
 
 def _base_height(world, amp, freq):
-    """Smooth, low-frequency surface height (world units), plus wide craters."""
-    t = world["terrain"]
-    seed = t["seed"]
+    """Smooth, low-frequency surface height in world units (no fine noise)."""
+    seed = world["terrain"]["seed"]
     h = [[0.0] * NXZ for _ in range(NXZ)]
     for kk in range(NXZ):
         v = kk / (NXZ - 1)
         for ii in range(NXZ):
             u = ii / (NXZ - 1)
-            n = fbm(u * freq, v * freq, seed, octaves=3)        # smooth, no fine noise
+            n = fbm(u * freq, v * freq, seed, octaves=3)
             roll = fbm(u * freq * 0.4 + 3, v * freq * 0.4 + 7, seed + 9, 2)
             h[kk][ii] = (n - 0.5) * 2.0 * amp + (roll - 0.5) * amp * 0.5
-
-    # A few wide, shallow craters: flat floors (buildable) and gentle rims, no spikes.
-    rng = Rng(seed * 131 + 5)
-    n_craters = int(6 * t["crater_density"])
-    for _ in range(n_craters):
-        cx, cz = rng.uniform(0, NXZ), rng.uniform(0, NXZ)
-        rad = rng.uniform(0.08, 0.20) * NXZ
-        depth = rad * 0.10
-        for kk in range(max(0, int(cz - rad)), min(NXZ, int(cz + rad) + 1)):
-            for ii in range(max(0, int(cx - rad)), min(NXZ, int(cx + rad) + 1)):
-                d = math.hypot(ii - cx, kk - cz) / rad
-                if d <= 1.0:
-                    floor = -depth * (1.0 - (d / 0.8) ** 2) if d < 0.8 else 0.0
-                    rim = depth * 0.5 * math.exp(-((d - 0.9) / 0.12) ** 2)
-                    h[kk][ii] += floor + rim
     return h
 
 
 def _terrace(h, step):
-    out = [[round(h[k][i] / step) * step for i in range(NXZ)] for k in range(NXZ)]
-    return out
+    return [[round(h[k][i] / step) * step for i in range(NXZ)] for k in range(NXZ)]
 
 
 def _flat_fraction(ht, tol):
@@ -94,21 +79,212 @@ def _flat_fraction(ht, tol):
     return flat / (NXZ * NXZ)
 
 
+# --------------------------------------------------------------------------- #
+# erosion-driven features (operate on the terraced height field `ht`)
+# --------------------------------------------------------------------------- #
+def _crater_count(world):
+    """Impact craters scale with how *un*-eroded (airless, ancient) a world is."""
+    a = world["archetype"]
+    k = world["key"]
+    if k == "mars":
+        return 16            # eroded, but still visibly cratered
+    if a in ("regolith_grey", "regolith_dark", "dirty_ice"):
+        return 70            # airless rock / ancient dirty ice: saturated craters
+    if a == "grooved_ice":
+        return 24            # partially resurfaced
+    if a == "pluto_tholin":
+        return 14
+    return 3                 # ice/volcanic/water resurfaced: nearly crater-free
+
+
+def _craters(ht, mat, seed, count):
+    rng = Rng(seed * 131 + 5)
+    for _ in range(count):
+        cx, cz = rng.uniform(0, NXZ), rng.uniform(0, NXZ)
+        big = rng.rand() < 0.16
+        rad = rng.uniform(0.06, 0.12) * NXZ if big else rng.uniform(0.02, 0.06) * NXZ
+        depth = rad * 0.45
+        i0, i1 = max(0, int(cx - rad * 1.5)), min(NXZ, int(cx + rad * 1.5) + 1)
+        k0, k1 = max(0, int(cz - rad * 1.5)), min(NXZ, int(cz + rad * 1.5) + 1)
+        for kk in range(k0, k1):
+            for ii in range(i0, i1):
+                d = math.hypot(ii - cx, kk - cz) / rad
+                if d > 1.5:
+                    continue
+                bowl = -depth * (1.0 - d * d) if d < 1.0 else 0.0
+                rim = depth * 0.4 * math.exp(-((d - 1.0) / 0.16) ** 2)
+                ht[kk][ii] += bowl + rim
+                if d < 0.55:
+                    mat[kk][ii] = MAT_LOW                 # dark crater floor
+                elif 1.0 < d < 1.35 and big:
+                    mat[kk][ii] = MAT_ACCENT              # bright ejecta rays
+
+
+def _fissures(ht, mat, seed, n, depth, halfw):
+    """Europa-style long, deep, narrow fissures (lineae) carved across the map.
+
+    Accumulate a max-depth cut map (so overlapping steps do not stack into a
+    bottomless trench), then apply it once.
+    """
+    rng = Rng(seed * 17 + 1)
+    cut = [[0.0] * NXZ for _ in range(NXZ)]
+    for _ in range(n):
+        x, z = rng.uniform(0, NXZ), rng.uniform(0, NXZ)
+        ang = rng.uniform(0, 2 * math.pi)
+        length = int(NXZ * rng.uniform(0.8, 1.4))
+        for _ in range(length):
+            x += math.cos(ang)
+            z += math.sin(ang)
+            ang += (rng.rand() - 0.5) * 0.18
+            if not (0 <= x < NXZ and 0 <= z < NXZ):
+                break
+            for dk in range(-halfw, halfw + 1):
+                for di in range(-halfw, halfw + 1):
+                    ii, kk = int(x + di), int(z + dk)
+                    if 0 <= ii < NXZ and 0 <= kk < NXZ:
+                        dd = math.hypot(di, dk) / (halfw + 0.5)
+                        if dd < 1.0:
+                            cut[kk][ii] = max(cut[kk][ii], depth * (1.0 - dd * dd))
+                            mat[kk][ii] = MAT_ACCENT
+    for k in range(NXZ):
+        for i in range(NXZ):
+            ht[k][i] -= cut[k][i]
+
+
+def _canyon(ht, mat, seed, depth, halfw):
+    """One big meandering canyon across the middle (Mars: Valles Marineris)."""
+    for ii in range(NXZ):
+        u = ii / (NXZ - 1)
+        cz = NXZ * 0.5 + math.sin(u * math.pi * 1.6) * NXZ * 0.06 \
+            + (fbm(u * 3.0, 0.5, seed + 4, 2) - 0.5) * NXZ * 0.14
+        for kk in range(NXZ):
+            dd = abs(kk - cz) / halfw
+            if dd < 1.0:
+                ht[kk][ii] -= depth * (1.0 - dd * dd)
+                mat[kk][ii] = MAT_HIGH if dd > 0.6 else MAT_LOW
+
+
+def _volcanoes(ht, mat, seed, n, height, base_r):
+    """Io-style giant volcanoes: tall cones with a summit caldera + lava."""
+    rng = Rng(seed * 23 + 4)
+    vents = []
+    for _ in range(n):
+        cx = rng.uniform(base_r, NXZ - base_r)
+        cz = rng.uniform(base_r, NXZ - base_r)
+        i0, i1 = int(cx - base_r), int(cx + base_r) + 1
+        k0, k1 = int(cz - base_r), int(cz + base_r) + 1
+        for kk in range(max(0, k0), min(NXZ, k1)):
+            for ii in range(max(0, i0), min(NXZ, i1)):
+                d = math.hypot(ii - cx, kk - cz) / base_r
+                if d >= 1.0:
+                    continue
+                ht[kk][ii] += height * (1.0 - d) ** 1.6
+                if d < 0.16:
+                    ht[kk][ii] -= height * 0.3           # summit caldera
+                    mat[kk][ii] = MAT_HAZARD             # lava
+                elif d < 0.24:
+                    mat[kk][ii] = MAT_HAZARD
+        vents.append((int(cx), int(cz), "volcano"))
+    return vents
+
+
+def _geysers(ht, mat, seed, n):
+    """Enceladus-style mini geysers: small vents along south-polar fractures."""
+    rng = Rng(seed * 29 + 6)
+    vents = []
+    for _ in range(n):
+        i = rng.randint(8, NXZ - 9)
+        k = rng.randint(int(NXZ * 0.55), NXZ - 9)   # toward the "south"
+        for dk in (-1, 0, 1):
+            for di in (-1, 0, 1):
+                ii, kk = i + di, k + dk
+                if 0 <= ii < NXZ and 0 <= kk < NXZ:
+                    ht[kk][ii] -= 2.0
+                    mat[kk][ii] = MAT_HAZARD
+        vents.append((i, k, "geyser"))
+    return vents
+
+
+def _liquid(grid, ht, world, dy):
+    """Fill oceans (Titan methane, Earth seas), Earth lakes and rivers.
+
+    Writes grid.liquid (per-column j+1 of the liquid surface) and grid.sea_level.
+    Returns the set of liquid columns so they can be excluded from buildable.
+    """
+    key = world["key"]
+    wet = set()
+    if key not in ("titan", "earth"):
+        return wet
+
+    flat = [ht[k][i] for k in range(NXZ) for i in range(NXZ)]
+    flat.sort()
+    frac = 0.46 if key == "earth" else 0.42
+    sea = flat[int(len(flat) * frac)]
+    grid.sea_level = YMIN + 0.0  # set below after mapping to world y
+    sea_y = sea  # ht is already in world-y units after shift
+
+    def set_liquid(i, k, surf_y):
+        j = int(round((surf_y - YMIN) / dy))
+        j = max(0, min(NY - 1, j))
+        grid.liquid[k * NXZ + i] = j + 1
+        wet.add((i, k))
+
+    # oceans / seas
+    for k in range(NXZ):
+        for i in range(NXZ):
+            if ht[k][i] < sea_y:
+                set_liquid(i, k, sea_y)
+    grid.sea_level = sea_y
+
+    if key == "earth":
+        rng = Rng(world["terrain"]["seed"] * 41 + 9)
+        # a few inland lakes: fill a small basin above sea level
+        for _ in range(5):
+            ci = rng.randint(16, NXZ - 17)
+            ck = rng.randint(16, NXZ - 17)
+            if (ci, ck) in wet:
+                continue
+            level = ht[ck][ci] + rng.uniform(3.0, 7.0)
+            r = rng.uniform(6, 12)
+            for kk in range(max(0, int(ck - r)), min(NXZ, int(ck + r) + 1)):
+                for ii in range(max(0, int(ci - r)), min(NXZ, int(ci + r) + 1)):
+                    if math.hypot(ii - ci, kk - ck) <= r and ht[kk][ii] < level:
+                        set_liquid(ii, kk, level)
+        # rivers: greedy downhill walk from highlands to water
+        for _ in range(7):
+            x = rng.randint(8, NXZ - 9)
+            z = rng.randint(8, NXZ - 9)
+            for _ in range(NXZ):
+                if (x, z) in wet:
+                    break
+                # step to the lowest 4-neighbour
+                best = None
+                for dk, di in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    nx_, nz_ = x + di, z + dk
+                    if 0 <= nx_ < NXZ and 0 <= nz_ < NXZ:
+                        if best is None or ht[nz_][nx_] < ht[best[1]][best[0]]:
+                            best = (nx_, nz_)
+                if best is None or ht[best[1]][best[0]] >= ht[z][x]:
+                    break  # local minimum (let it pond, stop)
+                set_liquid(x, z, ht[z][x] - 0.5)
+                x, z = best
+    return wet
+
+
+# --------------------------------------------------------------------------- #
 def build(world):
     """Return (VoxelGrid, stats) for `world`."""
     key = world["key"]
     t = world["terrain"]
     target = FLAT_TARGET.get(key, 0.40)
     rough = 1.0 - target
-    # Low frequency -> a few big contiguous plateaus (mesas), not contour rings.
-    # Rougher worlds get taller relief and a few more tiers (more cliffs).
     amp = min(70.0, t["relief"] * (34.0 + rough * 44.0))
+    if key == "mars":
+        amp *= 0.55           # Mars is fairly plain; the canyon is its feature
     freq = 1.7 + rough * 2.0
     hbase = _base_height(world, amp, freq)
     span0 = max(1.0, max(max(r) for r in hbase) - min(min(r) for r in hbase))
 
-    # Quantize into a few elevation tiers: fewer tiers -> bigger plateaus (more
-    # flat). Pick the tier count whose flat fraction lands closest to target.
     dy = (YMAX - YMIN) / (NY - 1)
     tol = dy * 0.6
     best = None
@@ -118,50 +294,67 @@ def build(world):
         f = _flat_fraction(ht, tol)
         if best is None or abs(f - target) < abs(best[2] - target):
             best = (ht, step, f)
-    ht, step, flat = best
+    ht, step, _ = best
 
-    # Shift so the lowest terrace sits at 0 (solid fills down to YMIN for caves).
+    # Material overrides + vents collected by the feature passes.
+    mat = [[None] * NXZ for _ in range(NXZ)]
+    vents = []
+
+    _craters(ht, mat, t["seed"], _crater_count(world))
+    if key == "europa":
+        _fissures(ht, mat, t["seed"], 7, depth=16.0, halfw=2)
+    if key == "ariel":
+        _fissures(ht, mat, t["seed"], 4, depth=12.0, halfw=2)
+    if key == "mars":
+        _canyon(ht, mat, t["seed"], depth=22.0, halfw=NXZ * 0.07)
+    if key == "io":
+        vents += _volcanoes(ht, mat, t["seed"], 5, height=58.0, base_r=NXZ * 0.16)
+    if key == "enceladus":
+        vents += _geysers(ht, mat, t["seed"], 9)
+    if key == "triton":
+        vents += _geysers(ht, mat, t["seed"], 4)
+
+    # Shift so the lowest point sits at 0, then voxelize.
     lo0 = min(min(r) for r in ht)
     ht = [[ht[k][i] - lo0 for i in range(NXZ)] for k in range(NXZ)]
 
     grid = vox.VoxelGrid(NXZ, NY, NXZ, (-HALF, HALF, YMIN, YMAX, -HALF, HALF))
-    lo = 0.0
     hi = max(max(r) for r in ht)
     span = hi or 1.0
-    slope_per_unit = 120.0 / dy  # ~1.3-voxel iso band -> clean surface
+    slope_per_unit = 120.0 / dy
 
-    # Column material + buildable mask from the terraced surface.
+    wet = _liquid(grid, ht, world, dy)
+
     for k in range(NXZ):
         for i in range(NXZ):
             surf = ht[k][i]
-            # local height delta -> slope/cliff classification
             mx = 0.0
             for dk, di in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nk, ni = k + dk, i + di
                 if 0 <= nk < NXZ and 0 <= ni < NXZ:
                     mx = max(mx, abs(ht[nk][ni] - surf))
-            en = (surf - lo) / span
-            if mx > step * 0.5:
-                mat = MAT_HIGH            # cliff face / steep -> rock/ridge
+            en = surf / span
+            override = mat[k][i]
+            if override is not None:
+                m = override
+            elif mx > step * 0.5:
+                m = MAT_HIGH
             elif en < 0.28:
-                mat = MAT_LOW            # basins
+                m = MAT_LOW
             elif en > 0.74:
-                mat = MAT_ACCENT         # high ground accent (rays / ridges)
+                m = MAT_ACCENT
             else:
-                mat = MAT_MID
-            buildable = 1 if mx <= tol else 0
-            grid.buildable[k * NXZ + i] = buildable
-
-            # Fill the column's density with a thin vertical transition at surf.
-            base = i  # x index
+                m = MAT_MID
+            # buildable: flat, and dry land (not under ocean/lake/river)
+            grid.buildable[k * NXZ + i] = 1 if (mx <= tol and (i, k) not in wet) else 0
             for j in range(NY):
                 y = YMIN + j * dy
                 d = 128.0 + (surf - y) * slope_per_unit
                 grid.density[grid.lin(i, j, k)] = int(clamp(d, 0, 255))
-                grid.material[grid.lin(i, j, k)] = mat
+                grid.material[grid.lin(i, j, k)] = m
 
-    # 3D features: carve caves/arches into cliffy (non-buildable) ground.
-    rng = Rng(world["terrain"]["seed"] * 977 + 3)
+    # 3D caves/arches into steep, dry, non-buildable ground.
+    rng = Rng(t["seed"] * 977 + 3)
     holes = CAVES.get(key, 2)
     placed = 0
     attempts = 0
@@ -169,26 +362,27 @@ def build(world):
         attempts += 1
         i = rng.randint(6, NXZ - 7)
         k = rng.randint(6, NXZ - 7)
-        if grid.buildable[k * NXZ + i]:
-            continue  # keep build space intact
+        if grid.buildable[k * NXZ + i] or (i, k) in wet:
+            continue
         x, _, z = grid.world(i, 0, k)
-        surf = ht[k][i]
-        r = rng.uniform(14, 30)
-        cy = YMIN + (surf - YMIN) * rng.uniform(0.45, 0.8)
-        grid.carve_sphere(x, cy, z, r)
+        cy = YMIN + (ht[k][i] - YMIN) * rng.uniform(0.45, 0.8)
+        grid.carve_sphere(x, cy, z, rng.uniform(14, 28))
         placed += 1
 
     flat_final = sum(grid.buildable) / (NXZ * NXZ)
     grid.flat_permil = int(round(flat_final * 1000))
-    stats = dict(flat=flat_final, step=step, caves=placed, lo=lo, hi=hi)
+    stats = dict(flat=flat_final, step=step, caves=placed, hi=hi,
+                 vents=vents, wet=len(wet), sea=grid.sea_level)
     return grid, stats
 
 
 if __name__ == "__main__":
     import sys
     import worlds as cat
-    keys = sys.argv[1:] or [w["key"] for w in cat.WORLDS]
+    keys = [a for a in sys.argv[1:] if not a.startswith("-")] or [w["key"] for w in cat.WORLDS]
     for key in keys:
         g, s = build(cat.by_key(key))
-        print(f"{key:10s} flat={s['flat']*100:4.1f}%  step={s['step']:5.1f}  "
-              f"caves={s['caves']}  hrange=[{s['lo']:.0f},{s['hi']:.0f}]")
+        liq = f" wet={s['wet']}" if s["wet"] else ""
+        vent = f" vents={len(s['vents'])}" if s["vents"] else ""
+        print(f"{key:10s} flat={s['flat']*100:4.1f}%  step={s['step']:4.1f}  "
+              f"caves={s['caves']}  hi={s['hi']:3.0f}{liq}{vent}")

@@ -50,6 +50,7 @@ QUERIES = {
     # Chiron itself has no resolved NASA surface image (it is a distant centaur);
     # a comet nucleus is the closest visual analog for its icy-rock, outgassing look.
     "chiron": "comet nucleus",
+    "earth": "earth blue marble",
 }
 
 

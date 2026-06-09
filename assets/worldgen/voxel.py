@@ -15,9 +15,11 @@ documented container:
     nx ny nz                             3 x uint16 (grid dims; y is up)
     x0 x1 y0 y1 z0 z1                    6 x int16  (world-space bounds)
     flat_permil                          uint16     (measured buildable fraction * 1000)
-    reserved                             uint16
-    payload = zlib( density[nx*ny*nz] + material[nx*ny*nz] + buildable[nx*nz] )
-              density, material: uint8;  buildable: uint8 column mask (0/1)
+    sea_level                            int16      (liquid plane world-y; -32768 = none)
+    payload = zlib( density[nx*ny*nz] + material[nx*ny*nz]
+                    + buildable[nx*nz] + liquid[nx*nz] )
+              density, material: uint8;  buildable: uint8 column mask (0/1);
+              liquid: uint8 per-column liquid surface = (j layer + 1), 0 = dry
 
 `density`/`material` are indexed `lin(i,j,k) = (j*nz + k)*nx + i`. Editing later
 is supported by the ops on `VoxelGrid` (raise/lower/flatten/carve) and the small
@@ -39,7 +41,9 @@ class VoxelGrid:
         self.density = bytearray(nx * ny * nz)      # 0 = deep air, 255 = deep rock
         self.material = bytearray(nx * ny * nz)      # palette slot id (see densitygen)
         self.buildable = bytearray(nx * nz)          # per-column flat/buildable mask
+        self.liquid = bytearray(nx * nz)             # per-column liquid surface (j+1), 0=dry
         self.flat_permil = 0
+        self.sea_level = None                        # world-y of the liquid plane, or None
 
     # --- indexing & world<->grid mapping ---
     def lin(self, i, j, k):
@@ -134,12 +138,13 @@ class VoxelGrid:
     def save(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         x0, x1, y0, y1, z0, z1 = (int(round(b)) for b in self.bounds)
+        sea = -32768 if self.sea_level is None else max(-32768, min(32767, int(round(self.sea_level))))
         head = b"VXL1" + struct.pack(
-            ">HHHhhhhhhHH", self.nx, self.ny, self.nz,
-            x0, x1, y0, y1, z0, z1, self.flat_permil, 0,
+            ">HHHhhhhhhHh", self.nx, self.ny, self.nz,
+            x0, x1, y0, y1, z0, z1, self.flat_permil, sea,
         )
         payload = zlib.compress(bytes(self.density) + bytes(self.material)
-                                + bytes(self.buildable), 9)
+                                + bytes(self.buildable) + bytes(self.liquid), 9)
         with open(path, "wb") as f:
             f.write(head + payload)
 
@@ -148,14 +153,18 @@ class VoxelGrid:
         with open(path, "rb") as f:
             data = f.read()
         assert data[:4] == b"VXL1", "not a VXL1 file"
-        nx, ny, nz, x0, x1, y0, y1, z0, z1, flat, _ = struct.unpack(">HHHhhhhhhHH", data[4:26])
+        nx, ny, nz, x0, x1, y0, y1, z0, z1, flat, sea = struct.unpack(">HHHhhhhhhHh", data[4:26])
         raw = zlib.decompress(data[26:])
         n = nx * ny * nz
+        cols = nx * nz
         g = VoxelGrid(nx, ny, nz, (x0, x1, y0, y1, z0, z1))
         g.density = bytearray(raw[:n])
         g.material = bytearray(raw[n:2 * n])
-        g.buildable = bytearray(raw[2 * n:2 * n + nx * nz])
+        g.buildable = bytearray(raw[2 * n:2 * n + cols])
+        if len(raw) >= 2 * n + 2 * cols:
+            g.liquid = bytearray(raw[2 * n + cols:2 * n + 2 * cols])
         g.flat_permil = flat
+        g.sea_level = None if sea == -32768 else sea
         return g
 
 

@@ -86,6 +86,12 @@ ARCHETYPES = {
         "low": (110, 78, 60), "mid": (172, 132, 100), "high": (226, 208, 180),
         "accent": (134, 76, 54), "dark": (84, 58, 44), "scale": 5.0,
     },
+    # UNIQUE: Earth. Green continents, rock highlands, snow peaks (oceans/lakes
+    # are drawn as liquid, not a material slot).
+    "earth": {
+        "low": (96, 132, 72), "mid": (74, 112, 58), "high": (120, 112, 96),
+        "accent": (236, 240, 244), "dark": (58, 86, 48), "scale": 4.0,
+    },
 }
 
 
@@ -145,7 +151,7 @@ WORLDS = [
     dict(
         key="mars", name="Mars", archetype="mars_rust",
         tint=(1.0, 1.0, 1.0), bright=1.0,
-        terrain=_terrain(seed=43, relief=1.4, crater_density=0.6,
+        terrain=_terrain(seed=43, relief=0.75, crater_density=0.6,
                          dunes=0.7, dune_dir=0.5, rifts=0.4, smoothness=0.15),
         hazards=[_hazard("dust_storm", 0.7), _hazard("frost", 0.5, note="polar CO2/H2O ice"),
                  _hazard("scarp", 0.5, note="Valles Marineris")],
@@ -319,6 +325,17 @@ WORLDS = [
                  _hazard("rays", 0.2)],
         nasa="ground-based / Hubble (centaur, comet 95P)",
         blurb="A dark icy-rock centaur that flares with cometary activity near perihelion.",
+    ),
+    dict(
+        key="earth", name="Earth", archetype="earth",
+        tint=(1.0, 1.0, 1.0), bright=1.0,
+        terrain=_terrain(seed=200, relief=1.0, crater_density=0.15,
+                         smoothness=0.4, rifts=0.2),
+        hazards=[_hazard("ocean", 0.9, note="seas and coasts"),
+                 _hazard("river", 0.6, note="rivers and lakes"),
+                 _hazard("dust_storm", 0.3, note="weather systems")],
+        nasa="Landsat / Blue Marble (NASA Earth Observatory)",
+        blurb="Home: blue oceans, green continents, mountain ranges, lakes and rivers.",
     ),
 ]
 

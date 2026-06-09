@@ -3,10 +3,11 @@
 [← Back to ARCHITECTURE.md](ARCHITECTURE.md) · See also [Ch.08 Procedural Map Generation](architecture/08-procedural-generation.md)
 
 The game can be fought over real Solar System bodies. This page documents the
-**21 battlefield worlds**, the **texture archetypes** they share, the **map
-hazards** on each, and the **marching-cubes voxel terrain** that builds them.
-Everything here is presentation-side (floats / assets); none of it touches the
-deterministic sim (see [`CLAUDE.md`](../CLAUDE.md), "two worlds, one wall").
+**22 battlefield worlds** (the 21 listed bodies plus **Earth**), the **texture
+archetypes** they share, the **map hazards** and **landforms** on each, and the
+**marching-cubes voxel terrain** that builds them. Everything here is
+presentation-side (floats / assets); none of it touches the deterministic sim
+(see [`CLAUDE.md`](../CLAUDE.md), "two worlds, one wall").
 
 - Catalog + generator: [`assets/worldgen/`](../assets/worldgen/) (pure Python stdlib)
 - Baked map files: [`assets/maps/<key>.vxl`](../assets/maps/) (static, editable)
@@ -40,9 +41,31 @@ cliffs are good; spikes are not. The recipe (`densitygen.py`):
    interest, leaving build space intact.
 5. Mark a per-column **buildable mask** (the flat tops) and store it in the map.
 
-Buildable fractions land between ~58% (rough, cratered worlds like Miranda) and
-~90% (smooth resurfaced ice like Europa), so every map has ample base-building
-room while staying visually distinct.
+Buildable fractions stay generous (rough cratered worlds in the low-to-mid 30s%,
+smooth resurfaced ice up to ~87%), so every map has base-building room while
+staying visually distinct. (Earth is lower, ~33%, because roughly half of it is
+ocean.)
+
+### Landforms by erosion
+
+What carves each world depends on how it is eroded, which drives both cratering
+and its signature feature:
+
+- **Airless rock/dust (no erosion): heavy cratering.** Moon, Ceres, Vesta,
+  Callisto, Rhea, Dione, Iapetus, Titania, Oberon, Umbriel, Chiron - saturated
+  with impact craters (bowls + raised rims + bright ejecta rays), plateaus left
+  buildable between them.
+- **Ice-resurfaced (few craters):** Europa gets long, deep **fissures** (lineae);
+  Enceladus and Triton get **mini cryo-geysers**; Triton also gets cantaloupe
+  terrain; Ganymede / Ariel / Miranda get grooves and rifts.
+- **Volcanic:** Io gets **giant volcanoes** - tall cones with summit calderas and
+  glowing lava (and eruption plumes).
+- **Atmospheric:** Mars is fairly plain with one big central **canyon** (Valles
+  Marineris); Titan has **oceans of liquid methane**; **Earth** has **oceans,
+  lakes and rivers** over green continents and mountain ranges.
+
+Liquid (methane on Titan, water on Earth) is stored per-column in the map and
+drawn as a flat liquid surface; columns under liquid are not buildable.
 
 ## Texture archetypes
 
@@ -65,35 +88,37 @@ stripes.
 | `titan_haze` | UNIQUE: orange organic haze, dark dunes, methane lakes | titan |
 | `triton_ice` | UNIQUE: pinkish nitrogen ice, cantaloupe terrain | triton |
 | `pluto_tholin` | UNIQUE: tan tholins beside bright nitrogen plains | pluto |
+| `earth` | UNIQUE: green continents + rock highlands + snow, with blue oceans/lakes/rivers | earth |
 
 Each archetype ships four tileable tiles (`base`, `low`, `high`, `accent`) for
 texturing the mesh; the previews colour the mesh from the same palettes.
 
 ## The full catalog (buildable % and map hazards)
 
-| world | archetype | buildable | map hazards | NASA reference |
-| ----- | --------- | --------- | ----------- | -------------- |
-| Luna (Moon) | `regolith_grey` | 68% | basalt maria; ray craters | LRO (PIA23237) |
-| Ceres | `regolith_dark` | 66% | brine eruptions (faculae); ray craters | Dawn (PIA21078) |
-| Vesta | `regolith_grey` | 63% | cliffs/scarps; ray craters | Dawn (PIA15140) |
-| Mars | `mars_rust` | 66% | dust storms; polar frost; canyon scarps | Viking / MRO (PIA00565) |
-| Callisto | `dirty_ice` | 66% | radiation; ray craters | Galileo (PIA03456) |
-| Ganymede | `grooved_ice` | 63% | radiation; ice rifts | Galileo / Juno (PIA05077) |
-| Europa | `europa_ice` | 90% | ice rifts (lineae); chaos terrain; radiation | Galileo (PIA00294) |
-| Io | `io_sulfur` | 71% | lava lakes; radiation; volcanic plumes | Galileo / Voyager 1 (PIA02509) |
-| Titan | `titan_haze` | 80% | methane seas; organic haze; cryo-geysers | Cassini / Huygens (PIA12778) |
-| Enceladus | `bright_ice` | 85% | cryo-geysers (tiger stripes); ice rifts | Cassini (PIA03551) |
-| Triton | `triton_ice` | 85% | cryo-geysers (N2 plumes); polar frost | Voyager 2 (PIA00056) |
-| Rhea | `dirty_ice` | 70% | ray craters; ice cliffs | Cassini (PIA21904) |
-| Iapetus | `dirty_ice` | 64% | equatorial ridge; albedo dichotomy | Cassini (PIA21347) |
-| Dione | `dirty_ice` | 66% | wispy ice cliffs (chasmata); ray craters | Cassini (PIA21349) |
-| Titania | `regolith_grey` | 59% | fault canyons (Messina); ray craters | Voyager 2 (PIA01361) |
-| Oberon | `regolith_grey` | 66% | dark crater floors; scarps | Voyager 2 (PIA00034) |
-| Umbriel | `regolith_dark` | 65% | bright Wunda ring; radiation | Voyager 2 (PIA00040) |
-| Ariel | `grooved_ice` | 62% | graben rift valleys; scarps | Voyager 2 (PIA00037) |
-| Miranda | `grooved_ice` | 58% | Verona Rupes (~20 km cliff); coronae rifts | Voyager 2 (PIA18185) |
-| Pluto | `pluto_tholin` | 69% | nitrogen glaciers (Sputnik Planitia); frost; cryovolcano | New Horizons (PIA09234) |
-| Chiron | `regolith_dark` | 64% | comet jets (outgassing); ray craters | Deep Space 1 analog (PIA03865) |
+| world | archetype | buildable | landforms / map hazards | NASA reference |
+| ----- | --------- | --------- | ----------------------- | -------------- |
+| Luna (Moon) | `regolith_grey` | 69% | heavy cratering; basalt maria; ray craters | LRO (PIA23237) |
+| Ceres | `regolith_dark` | 66% | heavy cratering; brine eruptions (faculae) | Dawn (PIA21078) |
+| Vesta | `regolith_grey` | 62% | heavy cratering; cliffs/scarps | Dawn (PIA15140) |
+| Mars | `mars_rust` | 81% | one big central canyon; dust storms; polar frost | Viking / MRO (PIA00565) |
+| Callisto | `dirty_ice` | 67% | heavy cratering; radiation | Galileo (PIA03456) |
+| Ganymede | `grooved_ice` | 64% | grooved sulci; radiation; ice rifts | Galileo / Juno (PIA05077) |
+| Europa | `europa_ice` | 72% | long deep fissures (lineae); chaos; radiation | Galileo (PIA00294) |
+| Io | `io_sulfur` | 64% | giant volcanoes; lava; radiation; plumes | Galileo / Voyager 1 (PIA02509) |
+| Titan | `titan_haze` | 55% | oceans of liquid methane; haze; dunes | Cassini / Huygens (PIA12778) |
+| Enceladus | `bright_ice` | 87% | mini cryo-geysers (tiger stripes); ice rifts | Cassini (PIA03551) |
+| Triton | `triton_ice` | 86% | cryo-geysers (N2 plumes); cantaloupe terrain | Voyager 2 (PIA00056) |
+| Rhea | `dirty_ice` | 70% | heavy cratering; ice cliffs | Cassini (PIA21904) |
+| Iapetus | `dirty_ice` | 63% | heavy cratering; equatorial ridge; albedo dichotomy | Cassini (PIA21347) |
+| Dione | `dirty_ice` | 67% | heavy cratering; wispy ice cliffs (chasmata) | Cassini (PIA21349) |
+| Titania | `regolith_grey` | 60% | heavy cratering; fault canyons (Messina) | Voyager 2 (PIA01361) |
+| Oberon | `regolith_grey` | 65% | heavy cratering; dark crater floors | Voyager 2 (PIA00034) |
+| Umbriel | `regolith_dark` | 67% | heavy cratering; bright Wunda ring | Voyager 2 (PIA00040) |
+| Ariel | `grooved_ice` | 57% | rift valleys + fissures; scarps | Voyager 2 (PIA00037) |
+| Miranda | `grooved_ice` | 59% | chaotic grooves/rifts; Verona Rupes cliffs | Voyager 2 (PIA18185) |
+| Pluto | `pluto_tholin` | 71% | nitrogen glaciers (Sputnik Planitia); frost; cryovolcano | New Horizons (PIA09234) |
+| Chiron | `regolith_dark` | 64% | heavy cratering; comet jets (outgassing) | Deep Space 1 analog (PIA03865) |
+| Earth | `earth` | 33% | oceans, lakes and rivers; mountains; weather | Landsat / Blue Marble |
 
 ### Hazard glossary
 
@@ -114,12 +139,15 @@ artifact is the raw density grid:
 magic   "VXL1"                     4 bytes
 nx ny nz                           3 x uint16  (grid dims; y is up)
 x0 x1 y0 y1 z0 z1                  6 x int16   (world-space bounds)
-flat_permil  reserved             2 x uint16   (buildable fraction * 1000)
-payload = zlib( density[nx*ny*nz] + material[nx*ny*nz] + buildable[nx*nz] )
-          density: uint8 (>=128 solid),  material: uint8,  buildable: uint8 mask
+flat_permil                        uint16      (buildable fraction * 1000)
+sea_level                          int16       (liquid plane world-y; -32768 = none)
+payload = zlib( density[nx*ny*nz] + material[nx*ny*nz]
+                + buildable[nx*nz] + liquid[nx*nz] )
+          density: uint8 (>=128 solid),  material: uint8,
+          buildable: uint8 mask,  liquid: uint8 per-column surface (j+1, 0 = dry)
 ```
 
-The 21 maps total under 400 KB. Edit later with the ops on `VoxelGrid`
+The 22 maps total well under 1 MB. Edit later with the ops on `VoxelGrid`
 (`fill_box`, `carve_sphere`, ...), `python3 assets/worldgen/voxel.py <map.vxl>`
 to inspect, or any tool that speaks VXL1.
 

@@ -84,9 +84,9 @@ const fn world(
 // Indices (also the order in docs/worldgen): 0 moon, 1 ceres, 2 vesta, 3 mars,
 // 4 callisto, 5 ganymede, 6 europa, 7 io, 8 titan, 9 enceladus, 10 triton,
 // 11 rhea, 12 iapetus, 13 dione, 14 titania, 15 oberon, 16 umbriel, 17 ariel,
-// 18 miranda, 19 pluto, 20 chiron.
+// 18 miranda, 19 pluto, 20 chiron, 21 earth.
 #[rustfmt::skip]
-pub const WORLDS: [WorldDef; 21] = [
+pub const WORLDS: [WorldDef; 22] = [
     //     seed relief rough warp cdens cmin  cmax  smth  groove gdir rift dune ddir cald cant plain ridge
     world(  11, 0.90, 1.0, 0.6, 1.6, 0.010, 0.090, 0.00, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // moon
     world(  23, 0.80, 1.0, 0.6, 1.4, 0.012, 0.060, 0.00, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // ceres
@@ -109,6 +109,7 @@ pub const WORLDS: [WorldDef; 21] = [
     world( 173, 1.50, 1.0, 0.6, 0.9, 0.012, 0.060, 0.00, 0.9, 0.4, 0.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // miranda
     world( 181, 1.00, 1.0, 0.6, 0.5, 0.012, 0.060, 0.20, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.7, 0.0), // pluto
     world( 191, 0.90, 1.0, 0.6, 1.0, 0.012, 0.120, 0.00, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), // chiron
+    world( 200, 1.00, 1.0, 0.6, 0.15, 0.012, 0.060, 0.40, 0.0, 0.0, 0.2, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0), // earth
 ];
 
 /// Index into [`WORLDS`] of the active battlefield, or out of range (the default)

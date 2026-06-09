@@ -19,6 +19,7 @@ import common as cm
 import worlds as cat
 import densitygen as dg
 import marching_cubes as mcube
+import voxel as vox
 
 IMG_W, IMG_H = 920, 620
 MARGIN = 26
@@ -46,6 +47,9 @@ _UP = _norm(_cross(_DIR, _RIGHT))
 _L = _norm(LIGHT)
 
 
+LIQUID_COLOR = {"earth": (40, 92, 150), "titan": (62, 46, 30)}
+
+
 def _material_color(world, pal, mat):
     if mat == dg.MAT_LOW:
         return pal["low"]
@@ -57,6 +61,10 @@ def _material_color(world, pal, mat):
         return pal["high"]
     if mat == dg.MAT_ACCENT:
         return pal["accent"]
+    if mat == dg.MAT_HAZARD:
+        if world["key"] == "io":
+            return (236, 120, 44)            # lava
+        return (206, 228, 242)               # geyser ice
     return pal["mid"]
 
 
@@ -67,26 +75,20 @@ def render_world(world):
     tint = world["tint"]
     bright = world["bright"]
     nxz = grid.nx
-
-    # Per-vertex lit colour (Gouraud). Buildable columns get a green push so the
-    # flat, build-friendly ground is obvious.
     x0, _, _, _, z0, _ = grid.bounds
     dx, dz = grid.dx(), grid.dz()
-    vcol = [(0, 0, 0)] * len(verts)
-    vbuild = [False] * len(verts)
-    for vi, (vx, vy, vz) in enumerate(verts):
-        ci = int((vx - x0) / dx)
-        ck = int((vz - z0) / dz)
-        ci = 0 if ci < 0 else nxz - 1 if ci >= nxz else ci
-        ck = 0 if ck < 0 else nxz - 1 if ck >= nxz else ck
-        vbuild[vi] = grid.buildable[ck * nxz + ci] == 1
 
-    # Project all verts; auto-fit to the frame.
+    def col_at(vx, vz):
+        ci = max(0, min(nxz - 1, int((vx - x0) / dx)))
+        ck = max(0, min(nxz - 1, int((vz - z0) / dz)))
+        return ci, ck
+
+    # Project all verts; auto-fit to the frame, then expose a reusable to_screen.
     proj = []
     minpx = minpy = 1e18
     maxpx = maxpy = -1e18
     for (vx, vy, vz) in verts:
-        ey = vy * EXAG  # exaggerate height for the preview only
+        ey = vy * EXAG
         px = vx * _RIGHT[0] + ey * _RIGHT[1] + vz * _RIGHT[2]
         py = vx * _UP[0] + ey * _UP[1] + vz * _UP[2]
         d = vx * _DIR[0] + ey * _DIR[1] + vz * _DIR[2]
@@ -96,25 +98,30 @@ def render_world(world):
     scale = min((IMG_W - 2 * MARGIN) / (maxpx - minpx or 1),
                 (IMG_H - TOP - MARGIN) / (maxpy - minpy or 1))
     ox = (IMG_W - (maxpx - minpx) * scale) * 0.5
-    screen = []
-    for (px, py, d) in proj:
-        sx = ox + (px - minpx) * scale
-        sy = TOP + (maxpy - py) * scale
-        screen.append((sx, sy, d))
 
-    # Per-vertex colour after projection (needs material per triangle, so compute
-    # a base albedo per vertex from its column material + elevation).
+    def to_screen(wx, wy, wz):
+        ey = wy * EXAG
+        px = wx * _RIGHT[0] + ey * _RIGHT[1] + wz * _RIGHT[2]
+        py = wx * _UP[0] + ey * _UP[1] + wz * _UP[2]
+        d = wx * _DIR[0] + ey * _DIR[1] + wz * _DIR[2]
+        return (ox + (px - minpx) * scale, TOP + (maxpy - py) * scale, d)
+
+    screen = [to_screen(*v) for v in verts]
+
+    # Per-vertex lit colour (Gouraud). Buildable ground is pushed green; lava glows.
+    vcol = [(0, 0, 0)] * len(verts)
     for vi, (vx, vy, vz) in enumerate(verts):
-        ci = int((vx - x0) / dx); ck = int((vz - z0) / dz)
-        ci = 0 if ci < 0 else nxz - 1 if ci >= nxz else ci
-        ck = 0 if ck < 0 else nxz - 1 if ck >= nxz else ck
+        ci, ck = col_at(vx, vz)
         mat = grid.material[grid.lin(ci, 0, ck)]
         base = _material_color(world, pal, mat)
         n = normals[vi]
         ndl = max(0.0, n[0] * _L[0] + n[1] * _L[1] + n[2] * _L[2])
         sh = 0.32 + 0.85 * ndl
+        emissive = mat == dg.MAT_HAZARD and world["key"] == "io"
+        if emissive:
+            sh = 1.15
         c = (base[0] * tint[0] * bright, base[1] * tint[1] * bright, base[2] * tint[2] * bright)
-        if vbuild[vi]:
+        if grid.buildable[ck * nxz + ci] == 1:
             c = (c[0] * 0.78 + 70 * 0.22, c[1] * 0.78 + 150 * 0.22, c[2] * 0.78 + 80 * 0.22)
         vcol[vi] = (cm.clamp8(c[0] * sh), cm.clamp8(c[1] * sh), cm.clamp8(c[2] * sh))
 
@@ -124,8 +131,64 @@ def render_world(world):
     for (a, b, c) in tris:
         _raster(frame, zbuf, screen[a], screen[b], screen[c], vcol[a], vcol[b], vcol[c])
 
+    _liquid_pass(frame, zbuf, grid, world, to_screen)
+    _plumes(frame, grid, stats, to_screen)
     _overlay(frame, world, stats)
     return frame, stats
+
+
+def _liquid_pass(frame, zbuf, grid, world, to_screen):
+    """Draw oceans / lakes / rivers as flat liquid quads, z-buffered under cliffs."""
+    base = LIQUID_COLOR.get(world["key"])
+    if base is None:
+        return
+    nxz = grid.nx
+    for k in range(nxz - 1):
+        for i in range(nxz - 1):
+            lj = grid.liquid[k * nxz + i]
+            if lj == 0:
+                continue
+            ly = grid.world(i, lj - 1, k)[1]
+            p00 = to_screen(*_xz(grid, i, k, ly))
+            p10 = to_screen(*_xz(grid, i + 1, k, ly))
+            p11 = to_screen(*_xz(grid, i + 1, k + 1, ly))
+            p01 = to_screen(*_xz(grid, i, k + 1, ly))
+            # subtle ripple sparkle so large bodies are not dead flat
+            spark = cm.value_noise(i * 0.7, k * 0.7, 5) * 0.25
+            col = cm.lerp3(base, (205, 222, 240), spark)
+            _raster(frame, zbuf, p00, p10, p11, col, col, col)
+            _raster(frame, zbuf, p00, p11, p01, col, col, col)
+
+
+def _xz(grid, i, k, y):
+    x0, _, _, _, z0, _ = grid.bounds
+    return (x0 + i * grid.dx(), y, z0 + k * grid.dz())
+
+
+def _plumes(frame, grid, stats, to_screen):
+    """Volcanic and geyser plumes rising from their vents."""
+    nxz = grid.nx
+    for (i, k, kind) in stats.get("vents", []):
+        # surface height at the vent column
+        sy_top = grid.bounds[2]
+        for j in range(grid.ny - 1, -1, -1):
+            if grid.density[grid.lin(i, j, k)] >= vox.ISO:
+                sy_top = grid.world(i, j, k)[1]
+                break
+        sx, syy, _ = to_screen(*_xz(grid, i, k, sy_top))
+        sx, syy = int(sx), int(syy)
+        if kind == "volcano":
+            col, height, spread0 = (255, 150, 60), 90, 2.0
+        else:  # geyser (mini)
+            col, height, spread0 = (210, 232, 246), 46, 1.2
+        for t in range(height):
+            f = t / height
+            spread = spread0 + f * (4.0 if kind == "geyser" else 3.0)
+            a = (1.0 - f) ** 1.5 * (0.85 if kind == "volcano" else 0.5)
+            yy = syy - t
+            for dxp in range(-int(spread), int(spread) + 1):
+                fall = 1.0 - abs(dxp) / (spread + 0.5)
+                frame.blend(sx + dxp, yy, col, a * fall)
 
 
 def _raster(frame, zbuf, s0, s1, s2, c0, c1, c2):

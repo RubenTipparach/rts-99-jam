@@ -284,7 +284,7 @@ impl VoxelGrid {
 
 // --- baked maps, embedded for both native and wasm (no fs at runtime) ---------
 // Order matches docs/worldgen and `worlds::WORLDS`.
-const MAPS: [&[u8]; 21] = [
+const MAPS: [&[u8]; 22] = [
     include_bytes!("../../../assets/maps/moon.vxl"),
     include_bytes!("../../../assets/maps/ceres.vxl"),
     include_bytes!("../../../assets/maps/vesta.vxl"),
@@ -306,6 +306,7 @@ const MAPS: [&[u8]; 21] = [
     include_bytes!("../../../assets/maps/miranda.vxl"),
     include_bytes!("../../../assets/maps/pluto.vxl"),
     include_bytes!("../../../assets/maps/chiron.vxl"),
+    include_bytes!("../../../assets/maps/earth.vxl"),
 ];
 
 /// Index into [`MAPS`] of the battlefield to load, or out of range for none
