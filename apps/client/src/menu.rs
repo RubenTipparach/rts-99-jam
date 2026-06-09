@@ -18,13 +18,15 @@ pub enum Screen {
 
 /// Skirmish setup chosen in the lobby. `faction` and `map` (an index into the
 /// voxel battlefields, `crate::voxel`) are applied to the match on Start; `bots`
-/// is UI flavor for now.
+/// is UI flavor for now. `map_open`/`map_scroll` drive the map-select modal.
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub struct Lobby {
     pub faction: Faction,
     pub bots: u8,
     pub map: u8,
+    pub map_open: bool,
+    pub map_scroll: u8,
 }
 
 impl Default for Lobby {
@@ -33,6 +35,8 @@ impl Default for Lobby {
             faction: Faction::Hollowmen,
             bots: 1,
             map: 0,
+            map_open: false,
+            map_scroll: 0,
         }
     }
 }
@@ -46,11 +50,17 @@ pub enum Click {
     SetFaction(Faction),
     AddBot,
     RemoveBot,
-    NextMap,
-    PrevMap,
+    OpenMap,
+    CloseMap,
+    PickMap(u8),
+    ScrollMap(i8),
     Back,
     Start,
 }
+
+/// Rows shown at once in the map-select modal (also bounds `Lobby::map_scroll`).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub const MAP_VIS_ROWS: usize = 9;
 
 #[cfg(target_arch = "wasm32")]
 pub fn faction_name(f: Faction) -> &'static str {
@@ -170,15 +180,14 @@ mod web {
                     "+",
                     lobby.bots < 3,
                 ));
-                // Map preview thumbnail is drawn at y=336 (h=190); prev/next below.
-                v.push(btn(Click::PrevMap, rx, 548.0, 185.0, 44.0, "< PREV", true));
+                // Diamond map preview is drawn at y=336; the picker opens a modal.
                 v.push(btn(
-                    Click::NextMap,
-                    rx + 195.0,
+                    Click::OpenMap,
+                    rx,
                     548.0,
-                    185.0,
+                    380.0,
                     44.0,
-                    "NEXT >",
+                    "SELECT MAP",
                     true,
                 ));
                 // Back / Start.
@@ -233,10 +242,77 @@ mod web {
         let _ = ctx.fill_text(&b.label, b.x + b.w / 2.0, b.y + b.h / 2.0);
     }
 
-    /// A top-down thumbnail of the chosen world: its surface colour plus the
-    /// landform that defines it (craters, methane/water seas, or volcanoes), and
-    /// the player (blue) vs enemy (red) start positions. Deterministic per world.
-    fn draw_map_preview(ctx: &Ctx, x: f64, y: f64, w: f64, h: f64, idx: usize) {
+    const VIS_ROWS: usize = super::MAP_VIS_ROWS;
+    const ROW_H: f64 = 40.0;
+
+    /// The map-select modal's panel rect (mx, my, mw, mh) in CSS pixels.
+    fn modal_rect(w: f64, h: f64) -> (f64, f64, f64, f64) {
+        let mw = 760.0_f64.min(w - 60.0);
+        let mh = 520.0_f64.min(h - 60.0);
+        ((w - mw) / 2.0, (h - mh) / 2.0, mw, mh)
+    }
+
+    /// Interactive elements of the map-select modal: the visible list rows, the
+    /// scrollbar up/down buttons, and DONE. Single source of truth for draw+hit.
+    fn modal_layout(lobby: &Lobby, w: f64, h: f64) -> Vec<Btn> {
+        let (mx, my, mw, mh) = modal_rect(w, h);
+        let (lx, ly, lw) = (mx + 30.0, my + 92.0, 300.0);
+        let count = crate::voxel::MAP_COUNT;
+        let scroll = lobby.map_scroll as usize;
+        let mut v = Vec::new();
+        for r in 0..VIS_ROWS {
+            let i = scroll + r;
+            if i >= count {
+                break;
+            }
+            let mut b = btn(
+                Click::PickMap(i as u8),
+                lx,
+                ly + r as f64 * ROW_H,
+                lw,
+                ROW_H - 6.0,
+                crate::voxel::MAP_NAMES[i],
+                true,
+            );
+            b.selected = i == lobby.map as usize;
+            v.push(b);
+        }
+        let sbx = lx + lw + 8.0;
+        let track = VIS_ROWS as f64 * ROW_H;
+        v.push(btn(
+            Click::ScrollMap(-1),
+            sbx,
+            ly,
+            26.0,
+            30.0,
+            "^",
+            scroll > 0,
+        ));
+        v.push(btn(
+            Click::ScrollMap(1),
+            sbx,
+            ly + track - 30.0,
+            26.0,
+            30.0,
+            "v",
+            scroll + VIS_ROWS < count,
+        ));
+        v.push(btn(
+            Click::CloseMap,
+            mx + mw - 180.0,
+            my + mh - 62.0,
+            150.0,
+            44.0,
+            "DONE",
+            true,
+        ));
+        v
+    }
+
+    /// A diamond (isometric) thumbnail of a world: its surface colour plus the
+    /// landform that defines it (craters / seas / volcanoes) and the player (blue)
+    /// vs enemy (red) starts. Oriented as a diamond to match the in-game camera.
+    fn draw_diamond(ctx: &Ctx, cx: f64, cy: f64, a: f64, b: f64, idx: usize) {
         use std::f64::consts::TAU;
         let sw = crate::voxel::MAP_SWATCH[idx];
         let name = crate::voxel::MAP_NAMES[idx];
@@ -248,17 +324,22 @@ mod web {
                 (sw[2] as f64 * m) as u8
             )
         };
-        // Space backdrop, then the world's surface fills the panel.
-        ctx.set_fill_style_str("#05080f");
-        ctx.fill_rect(x, y, w, h);
-        ctx.save();
-        ctx.begin_path();
-        ctx.rect(x, y, w, h);
-        ctx.clip();
+        // Map the unit square to an iso diamond centred at (cx, cy): the four
+        // square corners become top / right / bottom / left of the diamond.
+        let iso = |u: f64, t: f64| (cx + (u - t) * a, cy + (u + t - 1.0) * b);
+        let corners = [iso(0.0, 0.0), iso(1.0, 0.0), iso(1.0, 1.0), iso(0.0, 1.0)];
+        let path = |c: &[(f64, f64); 4]| {
+            ctx.begin_path();
+            ctx.move_to(c[0].0, c[0].1);
+            for p in &c[1..] {
+                ctx.line_to(p.0, p.1);
+            }
+            ctx.close_path();
+        };
+        path(&corners);
         ctx.set_fill_style_str(&shade(1.0));
-        ctx.fill_rect(x, y, w, h);
+        ctx.fill();
 
-        // Deterministic positions from the world index (small LCG).
         let mut s: u64 = idx as u64 * 0x9E37_79B9_7F4A_7C15 + 1;
         let mut rnd = || {
             s = s
@@ -266,65 +347,112 @@ mod web {
                 .wrapping_add(1442695040888963407);
             ((s >> 33) & 0xFFFF) as f64 / 65535.0
         };
-        let dot = |cx: f64, cy: f64, r: f64, col: &str| {
+        let dot = |u: f64, t: f64, r: f64, col: &str| {
+            let (px, py) = iso(u, t);
             ctx.set_fill_style_str(col);
             ctx.begin_path();
-            let _ = ctx.arc(cx, cy, r, 0.0, TAU);
+            let _ = ctx.ellipse(px, py, r, r * 0.6, 0.0, 0.0, TAU);
             ctx.fill();
         };
-
+        let rr = a * 0.07;
         if name == "EARTH" {
-            for _ in 0..5 {
+            for _ in 0..6 {
                 dot(
-                    x + rnd() * w,
-                    y + rnd() * h,
-                    h * (0.12 + rnd() * 0.16),
+                    0.18 + rnd() * 0.64,
+                    0.18 + rnd() * 0.64,
+                    rr * 1.7,
                     "#2f6dab",
                 );
             }
-            dot(x + w * 0.62, y + h * 0.4, h * 0.1, "#e8eef4"); // a snowy peak
+            dot(0.6, 0.42, rr, "#e8eef4");
         } else if name == "TITAN" {
             for _ in 0..4 {
                 dot(
-                    x + rnd() * w,
-                    y + rnd() * h,
-                    h * (0.1 + rnd() * 0.16),
+                    0.18 + rnd() * 0.64,
+                    0.18 + rnd() * 0.64,
+                    rr * 1.8,
                     "#23252f",
                 );
             }
         } else if name == "IO" {
             for _ in 0..4 {
-                let (vx, vy) = (x + 0.2 * w + rnd() * 0.6 * w, y + 0.2 * h + rnd() * 0.6 * h);
-                dot(vx, vy, h * 0.12, &shade(1.15));
-                dot(vx, vy, h * 0.05, "#ec7a2c"); // lava summit
+                let (u, t) = (0.22 + rnd() * 0.56, 0.22 + rnd() * 0.56);
+                dot(u, t, rr * 1.6, &shade(1.15));
+                dot(u, t, rr * 0.7, "#ec7a2c");
             }
         } else {
-            // Rocky / icy: scattered impact craters (dark floor, light rim).
             let n = if matches!(name, "ENCELADUS" | "TRITON" | "PLUTO" | "MARS") {
                 5
             } else {
                 11
             };
             for _ in 0..n {
-                let (cx, cy) = (x + rnd() * w, y + rnd() * h);
-                let r = h * (0.05 + rnd() * 0.1);
-                ctx.set_stroke_style_str(&shade(1.25));
-                ctx.set_line_width(2.0);
-                ctx.begin_path();
-                let _ = ctx.arc(cx, cy, r, 0.0, TAU);
-                ctx.stroke();
-                dot(cx, cy, r * 0.7, &shade(0.7));
+                let (u, t) = (0.14 + rnd() * 0.72, 0.14 + rnd() * 0.72);
+                dot(u, t, rr * 1.1, &shade(1.25));
+                dot(u, t, rr * 0.7, &shade(0.7));
+            }
+        }
+        dot(0.3, 0.3, rr * 0.9, "#4aa3ff");
+        dot(0.7, 0.7, rr * 0.9, "#ff5a4a");
+
+        path(&corners);
+        ctx.set_stroke_style_str("rgba(120,160,210,0.95)");
+        ctx.set_line_width(1.5);
+        ctx.stroke();
+    }
+
+    /// The scrollable map-select modal: a list (with scrollbar) on the left and a
+    /// live diamond preview of the highlighted world on the right.
+    fn draw_modal(ctx: &Ctx, lobby: &Lobby, w: f64, h: f64) {
+        ctx.set_fill_style_str("rgba(2,4,10,0.6)");
+        ctx.fill_rect(0.0, 0.0, w, h);
+        let (mx, my, mw, mh) = modal_rect(w, h);
+        ctx.set_fill_style_str("rgba(12,18,32,0.98)");
+        ctx.fill_rect(mx, my, mw, mh);
+        ctx.set_stroke_style_str("rgba(120,160,210,0.95)");
+        ctx.set_line_width(2.0);
+        ctx.stroke_rect(mx, my, mw, mh);
+
+        ctx.set_text_align("left");
+        ctx.set_text_baseline("alphabetic");
+        ctx.set_fill_style_str("#e7eefa");
+        ctx.set_font("bold 24px monospace");
+        let _ = ctx.fill_text("SELECT BATTLEFIELD", mx + 30.0, my + 52.0);
+
+        for b in modal_layout(lobby, w, h) {
+            draw_btn(ctx, &b);
+            if let Click::PickMap(i) = b.click {
+                let sw = crate::voxel::MAP_SWATCH[i as usize];
+                ctx.set_fill_style_str(&format!("rgb({},{},{})", sw[0], sw[1], sw[2]));
+                ctx.fill_rect(b.x + 8.0, b.y + 7.0, 18.0, b.h - 14.0);
             }
         }
 
-        // Start positions: player (blue) NW, enemy (red) SE.
-        dot(x + w * 0.26, y + h * 0.28, 6.0, "#4aa3ff");
-        dot(x + w * 0.74, y + h * 0.72, 6.0, "#ff5a4a");
-        ctx.restore();
+        // Scrollbar track + thumb between the up/down buttons.
+        let (lx, ly, lw) = (mx + 30.0, my + 92.0, 300.0);
+        let sbx = lx + lw + 8.0;
+        let track = VIS_ROWS as f64 * ROW_H;
+        let (t0, th) = (ly + 32.0, track - 64.0);
+        ctx.set_fill_style_str("rgba(40,52,74,0.85)");
+        ctx.fill_rect(sbx, t0, 26.0, th);
+        let count = crate::voxel::MAP_COUNT;
+        let max_scroll = count.saturating_sub(VIS_ROWS).max(1) as f64;
+        let thumb_h = (th * VIS_ROWS as f64 / count as f64).max(20.0);
+        let thumb_y = t0 + (lobby.map_scroll as f64 / max_scroll) * (th - thumb_h);
+        ctx.set_fill_style_str("rgba(130,170,220,0.95)");
+        ctx.fill_rect(sbx, thumb_y, 26.0, thumb_h);
 
-        ctx.set_stroke_style_str("rgba(120,160,210,0.9)");
-        ctx.set_line_width(1.5);
-        ctx.stroke_rect(x, y, w, h);
+        // Live preview of the highlighted world, right half of the modal.
+        let mi = lobby.map as usize % count;
+        let px = lx + lw + 56.0;
+        let pcx = (px + mx + mw - 30.0) / 2.0;
+        ctx.set_text_align("center");
+        ctx.set_fill_style_str("#cfe0f5");
+        ctx.set_font("bold 22px monospace");
+        let _ = ctx.fill_text(crate::voxel::MAP_NAMES[mi], pcx, my + 92.0);
+        let pa = (mx + mw - 30.0 - px) * 0.46;
+        draw_diamond(ctx, pcx, my + mh * 0.52, pa, pa * 0.6, mi);
+        ctx.set_text_align("left");
     }
 
     pub fn draw(screen: Screen, lobby: &Lobby) {
@@ -390,13 +518,17 @@ mod web {
                     rx,
                     326.0,
                 );
-                draw_map_preview(&ctx, rx, 336.0, 380.0, 190.0, mi);
+                draw_diamond(&ctx, rx + 190.0, 432.0, 180.0, 95.0, mi);
             }
             Screen::InGame => {}
         }
 
         for b in layout(screen, lobby, w, h) {
             draw_btn(&ctx, &b);
+        }
+        // The map-select modal draws on top of the lobby.
+        if screen == Screen::Lobby && lobby.map_open {
+            draw_modal(&ctx, lobby, w, h);
         }
         // Restore defaults the in-game HUD relies on.
         ctx.set_text_align("left");
@@ -408,8 +540,26 @@ mod web {
             return Click::None;
         };
         let (cx, cy) = ((cx_phys / d) as f64, (cy_phys / d) as f64);
+        let inside =
+            |b: &Btn| b.enabled && cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h;
+
+        // When the map modal is open it owns all input: a click on a control acts;
+        // a click outside the panel dismisses it; a click inside is swallowed.
+        if screen == Screen::Lobby && lobby.map_open {
+            for b in modal_layout(lobby, w, h) {
+                if inside(&b) {
+                    return b.click;
+                }
+            }
+            let (mx, my, mw, mh) = modal_rect(w, h);
+            if cx < mx || cx > mx + mw || cy < my || cy > my + mh {
+                return Click::CloseMap;
+            }
+            return Click::None;
+        }
+
         for b in layout(screen, lobby, w, h) {
-            if b.enabled && cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h {
+            if inside(&b) {
                 return b.click;
             }
         }

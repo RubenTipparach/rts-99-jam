@@ -190,6 +190,12 @@ fn browser_size() -> Option<(u32, u32)> {
     Some((w.max(1.0) as u32, h.max(1.0) as u32))
 }
 
+/// Largest valid `Lobby::map_scroll` so the last row sits at the list bottom.
+#[cfg(target_arch = "wasm32")]
+fn map_scroll_max() -> u8 {
+    crate::voxel::MAP_COUNT.saturating_sub(menu::MAP_VIS_ROWS) as u8
+}
+
 /// Fade out and remove the HTML loading overlay once the game is drawing.
 #[cfg(target_arch = "wasm32")]
 fn hide_loading() {
@@ -552,13 +558,17 @@ impl ApplicationHandler<UserEvent> for App {
                             menu::Click::RemoveBot => {
                                 self.lobby.bots = self.lobby.bots.saturating_sub(1).max(1)
                             }
-                            menu::Click::NextMap => {
-                                let n = crate::voxel::MAP_COUNT as u8;
-                                self.lobby.map = (self.lobby.map + 1) % n;
+                            menu::Click::OpenMap => {
+                                self.lobby.map_open = true;
+                                // Scroll so the current selection is visible.
+                                self.lobby.map_scroll =
+                                    self.lobby.map.saturating_sub(2).min(map_scroll_max());
                             }
-                            menu::Click::PrevMap => {
-                                let n = crate::voxel::MAP_COUNT as u8;
-                                self.lobby.map = (self.lobby.map + n - 1) % n;
+                            menu::Click::CloseMap => self.lobby.map_open = false,
+                            menu::Click::PickMap(i) => self.lobby.map = i,
+                            menu::Click::ScrollMap(d) => {
+                                let s = self.lobby.map_scroll as i32 + d as i32;
+                                self.lobby.map_scroll = s.clamp(0, map_scroll_max() as i32) as u8;
                             }
                             menu::Click::Back => self.screen = menu::Screen::Menu,
                             menu::Click::Start => {
@@ -648,6 +658,13 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseScrollDelta::LineDelta(_, y) => y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 50.0,
                 };
+                // In the map-select modal the wheel scrolls the list, not the zoom.
+                #[cfg(target_arch = "wasm32")]
+                if self.screen == menu::Screen::Lobby && self.lobby.map_open {
+                    let s = self.lobby.map_scroll as i32 - units.signum() as i32;
+                    self.lobby.map_scroll = s.clamp(0, map_scroll_max() as i32) as u8;
+                    return;
+                }
                 self.camera.zoom(units);
             }
             // Touch drives the same select/order path as the mouse, so a phone

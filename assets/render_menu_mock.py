@@ -42,26 +42,39 @@ def disc(cv, cx, cy, rx, ry, col, clip):
                 cv.set(xx, yy, col)
 
 
-def map_preview(cv, x, y, w, h, name, swatch):
-    """Per-world thumbnail: the surface colour plus its defining landform, like
-    the live lobby in menu.rs (here showing one world, Io)."""
-    border_rect(cv, x, y, w, h, (8, 12, 20), (120, 160, 210))
-    clip = (int(x + 2 * SS), int(y + 2 * SS), int(x + w - 2 * SS), int(y + h - 2 * SS))
-    cv.fill_rect(clip[0], clip[1], clip[2], clip[3], swatch)
+def diamond(cv, cx, cy, a, b, swatch, kind="rock"):
+    """Iso (diamond) world thumbnail, matching menu.rs: surface colour + its
+    defining landform (craters / volcanoes) + blue/red start positions."""
+    cx, cy, a, b = int(cx), int(cy), int(a), int(b)
 
     def sc(m):
         return tuple(min(255, max(0, int(c * m))) for c in swatch)
 
-    if name == "IO":  # giant volcanoes on a smooth sulfur plain
-        for fx, fy in [(0.40, 0.44), (0.62, 0.62), (0.30, 0.72)]:
-            disc(cv, x + w * fx, y + h * fy, 18 * SS, 15 * SS, sc(1.15), clip)
-            disc(cv, x + w * fx, y + h * fy, 6 * SS, 5 * SS, (236, 122, 44), clip)
-    else:  # rocky/icy: scattered craters
-        for fx, fy in [(0.25, 0.3), (0.5, 0.55), (0.7, 0.35), (0.4, 0.75), (0.78, 0.7)]:
-            disc(cv, x + w * fx, y + h * fy, 10 * SS, 9 * SS, sc(1.2), clip)
-            disc(cv, x + w * fx, y + h * fy, 6 * SS, 5 * SS, sc(0.7), clip)
-    disc(cv, x + w * 0.26, y + h * 0.28, 5 * SS, 5 * SS, (74, 163, 255), clip)
-    disc(cv, x + w * 0.74, y + h * 0.72, 5 * SS, 5 * SS, (255, 90, 74), clip)
+    for yy in range(cy - b, cy + b + 1):
+        for xx in range(cx - a, cx + a + 1):
+            f = abs((xx - cx) / a) + abs((yy - cy) / b)
+            if f <= 1.0:
+                cv.set(xx, yy, swatch if f < 0.93 else (120, 160, 210))
+
+    clip = (cx - a, cy - b, cx + a + 1, cy + b + 1)
+
+    def iso(u, v):
+        return (cx + (u - v) * a, cy + (u + v - 1) * b)
+
+    if kind == "io":
+        for u, v in [(0.42, 0.46), (0.62, 0.6), (0.32, 0.68)]:
+            px, py = iso(u, v)
+            disc(cv, px, py, 16 * SS, 10 * SS, sc(1.15), clip)
+            disc(cv, px, py, 6 * SS, 4 * SS, (236, 122, 44), clip)
+    else:
+        for u, v in [(0.3, 0.3), (0.55, 0.45), (0.7, 0.6), (0.4, 0.72), (0.62, 0.26)]:
+            px, py = iso(u, v)
+            disc(cv, px, py, 9 * SS, 6 * SS, sc(1.25), clip)
+            disc(cv, px, py, 5 * SS, 3 * SS, sc(0.7), clip)
+    px, py = iso(0.3, 0.3)
+    disc(cv, px, py, 5 * SS, 4 * SS, (74, 163, 255), clip)
+    px, py = iso(0.7, 0.7)
+    disc(cv, px, py, 5 * SS, 4 * SS, (255, 90, 74), clip)
 
 
 def panel_bg(cv, x0, y0, x1, y1):
@@ -107,13 +120,46 @@ def lobby(cv, ox, oy, w, h):
     text(cv, rx + 70 * SS, oy + 196 * SS, "BOTS: 1", 2 * SS, (154, 178, 216))
     button(cv, rx, oy + 184 * SS, 56 * SS, 44 * SS, "-", DISABLED)
     button(cv, rx + 320 * SS, oy + 184 * SS, 56 * SS, 44 * SS, "+", NORMAL)
-    text(cv, rx, oy + 238 * SS, "MAP:  IO   (8/22)", 2 * SS, (220, 230, 246))
-    map_preview(cv, rx, oy + 264 * SS, 360 * SS, 150 * SS, "IO", (210, 190, 90))
-    button(cv, rx, oy + 264 * SS + 162 * SS, 175 * SS, 44 * SS, "< PREV", NORMAL)
-    button(cv, rx + 185 * SS, oy + 264 * SS + 162 * SS, 175 * SS, 44 * SS, "NEXT >", NORMAL)
+    text(cv, rx, oy + 236 * SS, "MAP:  IO   (8/22)", 2 * SS, (220, 230, 246))
+    diamond(cv, rx + 180 * SS, oy + 348 * SS, 168 * SS, 78 * SS, (210, 190, 90), "io")
+    button(cv, rx, oy + 436 * SS, 360 * SS, 44 * SS, "SELECT MAP", NORMAL)
 
     button(cv, ox + 30 * SS, oy + h - 86 * SS, 200 * SS, 56 * SS, "BACK", NORMAL)
     button(cv, ox + w - 230 * SS, oy + h - 86 * SS, 200 * SS, 56 * SS, "START", SELECTED)
+
+
+def modal(cv, ox, oy, w, h):
+    """The map-select modal: scrollable world list + scrollbar + live preview."""
+    text(cv, ox + 16 * SS, oy + 12 * SS, "MAP SELECT MODAL  (SCROLLABLE)", 2 * SS, (110, 140, 180))
+    cv.fill_rect(ox, oy + 26 * SS, ox + w, oy + h, (6, 9, 16))
+    mw, mh = int(w * 0.84), int(h * 0.84)
+    mx, my = ox + (w - mw) // 2, oy + 26 * SS + (h - 26 * SS - mh) // 2
+    border_rect(cv, mx, my, mw, mh, (12, 18, 32), (120, 160, 210))
+    text(cv, mx + 24 * SS, my + 24 * SS, "SELECT BATTLEFIELD", 3 * SS, (231, 238, 250))
+
+    rows = [
+        ("LUNA", (150, 148, 142)), ("CERES", (78, 76, 76)), ("VESTA", (150, 140, 120)),
+        ("MARS", (170, 96, 60)), ("CALLISTO", (120, 112, 104)), ("GANYMEDE", (150, 156, 168)),
+        ("EUROPA", (220, 210, 196)), ("IO", (210, 190, 90)), ("TITAN", (180, 120, 60)),
+    ]
+    lx, ly, lw, rh = mx + 24 * SS, my + 70 * SS, 300 * SS, 40 * SS
+    for i, (nm, sw_) in enumerate(rows):
+        st = SELECTED if nm == "IO" else NORMAL
+        button(cv, lx, ly + i * rh, lw, rh - 6 * SS, nm, st)
+        cv.fill_rect(lx + 8 * SS, ly + i * rh + 7 * SS, lx + 26 * SS, ly + i * rh + rh - 9 * SS, sw_)
+    # scrollbar (more worlds below: 22 total)
+    sbx = lx + lw + 8 * SS
+    button(cv, sbx, ly, 26 * SS, 30 * SS, "^", NORMAL)
+    button(cv, sbx, ly + 9 * rh - 30 * SS, 26 * SS, 30 * SS, "v", NORMAL)
+    cv.fill_rect(sbx, ly + 32 * SS, sbx + 26 * SS, ly + 9 * rh - 32 * SS, (40, 52, 74))
+    cv.fill_rect(sbx, ly + 32 * SS, sbx + 26 * SS, ly + 32 * SS + 130 * SS, (130, 170, 220))
+    # live preview of the highlighted world
+    px = lx + lw + 56 * SS
+    pcx = (px + mx + mw - 24 * SS) // 2
+    text(cv, pcx - text_w("IO", 2 * SS) // 2, my + 52 * SS, "IO", 2 * SS, (207, 224, 245))
+    pa = (mx + mw - 24 * SS - px) // 2 - 12 * SS
+    diamond(cv, pcx, my + mh // 2 + 10 * SS, pa, int(pa * 0.6), (210, 190, 90), "io")
+    button(cv, mx + mw - 180 * SS, my + mh - 62 * SS, 150 * SS, 44 * SS, "DONE", SELECTED)
 
 
 def main():
@@ -122,13 +168,14 @@ def main():
     margin = 24 * SS
     gap = 24 * SS
     W = margin * 2 + sw
-    H = margin * 2 + 2 * sh + gap + 28 * SS
+    H = margin * 2 + 3 * sh + 2 * gap + 28 * SS
     cv = Canvas(W, H)
     cv.fill_rect(0, 0, W, H, (10, 12, 18))
     text(cv, margin, margin, "FRONT-END MOCKUP  (APPROX OF menu.rs)", 2 * SS, (140, 160, 195))
     y0 = margin + 28 * SS
     main_menu(cv, margin, y0, sw, sh)
     lobby(cv, margin, y0 + sh + gap, sw, sh)
+    modal(cv, margin, y0 + 2 * (sh + gap), sw, sh)
     fw, fh, out = downsample(cv)
     path = os.path.join(OUT_DIR, "menu.png")
     write_png(path, fw, fh, out)
