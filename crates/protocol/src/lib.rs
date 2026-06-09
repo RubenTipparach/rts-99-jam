@@ -15,6 +15,9 @@ pub type PlayerId = u16;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum UnitKind {
     Infantry,
+    /// Builder/harvester (Astromancer Acolyte, Hollowmen Engineer): mobile but
+    /// non-combatant. Gathers materials and raises structures.
+    Worker,
 }
 
 /// Kinds of structure.

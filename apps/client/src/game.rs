@@ -101,6 +101,15 @@ impl Game {
                 y: fxi(180),
             });
         }
+        // A starting trio of workers by the player's base.
+        for k in 0..3 {
+            setup.push(Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Worker,
+                x: fxi(-12 + 12 * k),
+                y: fxi(196),
+            });
+        }
         // Two enemy barracks far to the north, each with a guard squad - hidden
         // by fog until you scout up to them.
         for &bx in &[-150i32, 150] {
@@ -116,6 +125,14 @@ impl Game {
                     kind: UnitKind::Infantry,
                     x: fxi(bx - 10 + 4 * k),
                     y: fxi(-165),
+                });
+            }
+            for k in 0..2 {
+                setup.push(Command::SpawnUnit {
+                    owner: 1,
+                    kind: UnitKind::Worker,
+                    x: fxi(bx - 6 + 12 * k),
+                    y: fxi(-178),
                 });
             }
         }
@@ -359,11 +376,15 @@ impl Game {
     }
 
     /// Instances for the infantry mesh, the two faction barracks meshes
-    /// (Astromancer, Hollowmen), and selection rings. Meshes are authored at
-    /// world scale, so instance scale is ~1.
+    /// (Astromancer, Hollowmen), the two faction worker meshes (Acolyte,
+    /// Engineer), and selection rings. Meshes are authored at world scale, so
+    /// instance scale is ~1.
+    #[allow(clippy::type_complexity)]
     pub fn render_data(
         &self,
     ) -> (
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
         Vec<InstanceRaw>,
         Vec<InstanceRaw>,
         Vec<InstanceRaw>,
@@ -373,6 +394,8 @@ impl Game {
         let mut infantry = Vec::new();
         let mut barracks_astro = Vec::new();
         let mut barracks_hollow = Vec::new();
+        let mut acolytes = Vec::new();
+        let mut engineers = Vec::new();
         let mut rings = Vec::new();
         for s in &self.curr {
             let (wx, wz) = self.lerped(s);
@@ -398,6 +421,42 @@ impl Game {
                         color: [0.4, 1.0, 0.5, 0.95],
                     });
                 }
+            } else if s.kind == Kind::Worker {
+                // Workers animate per faction: the Acolyte hovers with a slow
+                // bob; the Engineer plants on the ground and bobs when walking.
+                let phase = s.index as f32 * 1.3;
+                let inst = match self.faction_of(s.owner) {
+                    Faction::Astromancer => {
+                        let y = ground + 1.1 + ((self.time * 2.2) + phase).sin() * 0.18;
+                        InstanceRaw {
+                            offset: [wx, y, wz],
+                            scale: [1.0, 1.0, 1.0],
+                            color: tint,
+                        }
+                    }
+                    Faction::Hollowmen => {
+                        let mut y = ground;
+                        if s.moving {
+                            y += ((self.time * 9.0) + phase).sin().abs() * 0.12;
+                        }
+                        InstanceRaw {
+                            offset: [wx, y, wz],
+                            scale: [1.0, 1.0, 1.0],
+                            color: tint,
+                        }
+                    }
+                };
+                match self.faction_of(s.owner) {
+                    Faction::Astromancer => acolytes.push(inst),
+                    Faction::Hollowmen => engineers.push(inst),
+                }
+                if sel.contains(&s.index) {
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: 2.2,
+                        color: [0.4, 1.0, 0.5, 0.95],
+                    });
+                }
             } else {
                 // A little deterministic size variety plus a march bob.
                 let v = (s.index.wrapping_mul(2_654_435_761) % 1000) as f32 / 1000.0;
@@ -420,7 +479,14 @@ impl Game {
                 }
             }
         }
-        (infantry, barracks_astro, barracks_hollow, rings)
+        (
+            infantry,
+            barracks_astro,
+            barracks_hollow,
+            acolytes,
+            engineers,
+            rings,
+        )
     }
 
     fn info(&self, s: &Snap) -> UnitInfo {
@@ -465,7 +531,7 @@ impl Game {
     pub fn player_units(&self) -> Vec<UnitInfo> {
         self.curr
             .iter()
-            .filter(|s| s.owner == 0 && s.kind == Kind::Infantry)
+            .filter(|s| s.owner == 0 && matches!(s.kind, Kind::Infantry | Kind::Worker))
             .map(|s| self.info(s))
             .collect()
     }
@@ -483,6 +549,8 @@ impl Game {
                 (_, Kind::Infantry) => c.1 += 1,
                 (0, Kind::Barracks) => c.2 += 1,
                 (_, Kind::Barracks) => c.3 += 1,
+                // Workers are not part of the army/building tally shown here.
+                (_, Kind::Worker) => {}
             }
         }
         c
@@ -521,10 +589,10 @@ impl Game {
         self.selected.clear();
         let mut best: Option<(u32, f32)> = None;
 
-        // Nearest infantry within a click radius.
+        // Nearest selectable unit within a click radius.
         let unit_r = (h * 0.03).max(18.0);
         for s in &self.curr {
-            if s.owner != 0 || s.kind != Kind::Infantry {
+            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker) {
                 continue;
             }
             let (wx, wz) = self.lerped(s);
@@ -609,7 +677,7 @@ impl Game {
         let (x0, y0, x1, y1) = rect;
         self.selected.clear();
         for s in &self.curr {
-            if s.owner != 0 || s.kind != Kind::Infantry {
+            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker) {
                 continue;
             }
             let (wx, wz) = self.lerped(s);

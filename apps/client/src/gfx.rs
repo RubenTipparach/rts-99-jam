@@ -485,6 +485,94 @@ fn barracks_mesh_hollow() -> Vec<UnitVertex> {
     m
 }
 
+// Placeholder faction workers (see assets/concepts/units_resources.png). ~2.7
+// tall, facing -z. Team tint rides the Astromancer focus-core and the Hollowmen
+// visor/shoulder. The Acolyte is authored to sit just above y=0 and is lifted
+// into a hover by the instance offset.
+
+/// Astromancer Acolyte: a hooded caster that hovers, with a team-tinted focus
+/// core and glowing eyes; grows structures and draws motes of matter.
+fn acolyte_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let shell = [0.86, 0.84, 0.76];
+    let shell2 = [0.78, 0.76, 0.68];
+    let gold = [0.86, 0.75, 0.45];
+    let eyes = [0.55, 0.92, 0.86];
+    let team = [0.5, 0.5, 0.5];
+    // Trailing robe point flaring up into the body.
+    push_frustum(
+        &mut m, 0.0, 0.0, 0.18, 0.62, 0.30, 0.95, shell2, 0.0, 6, 0.0, false,
+    );
+    push_frustum(
+        &mut m, 0.0, 0.0, 0.62, 0.46, 0.95, 1.90, shell, 0.0, 6, 0.0, false,
+    );
+    push_box(&mut m, [-0.5, 1.3, -0.14], [0.5, 1.5, 0.14], gold, 0.0); // sash
+                                                                       // Shoulder mantle + hood.
+    push_frustum(
+        &mut m, 0.0, 0.0, 0.46, 0.34, 1.90, 2.25, shell2, 0.0, 6, 0.0, false,
+    );
+    push_frustum(
+        &mut m, 0.0, 0.0, 0.34, 0.26, 2.25, 2.55, shell, 0.0, 6, 0.0, false,
+    );
+    push_pyramid(&mut m, 0.0, 0.0, 0.32, 2.40, 2.95, shell2, 0.0, 6, 0.0);
+    push_box(&mut m, [-0.16, 2.05, 0.22], [0.16, 2.20, 0.34], eyes, 0.0); // glowing eyes
+                                                                          // Team-tinted focus core hovering at the chest.
+    push_prism(&mut m, 0.0, 0.34, 0.20, 1.25, 1.70, team, 1.0, 6, 0.0, true);
+    m
+}
+
+/// Hollowmen Engineer: a stocky powered-armor worker with a team-tinted visor
+/// and shoulder, a hazard chest band, and a carried tool; walks, welds, drills.
+fn engineer_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let steel = [0.48, 0.51, 0.55];
+    let steel2 = [0.60, 0.63, 0.67];
+    let dark = [0.24, 0.26, 0.30];
+    let haz = [0.80, 0.58, 0.20];
+    let amber = [0.95, 0.75, 0.35];
+    let gun = [0.17, 0.19, 0.22];
+    let team = [0.5, 0.5, 0.5];
+    // Legs + boots (neutral stance).
+    push_box(&mut m, [-0.34, 0.0, -0.32], [-0.06, 0.66, 0.10], dark, 0.0);
+    push_box(&mut m, [0.06, 0.0, -0.10], [0.34, 0.66, 0.32], dark, 0.0);
+    push_box(&mut m, [-0.36, 0.0, -0.34], [-0.04, 0.12, 0.28], gun, 0.0);
+    push_box(&mut m, [0.04, 0.0, -0.12], [0.36, 0.12, 0.50], gun, 0.0);
+    // Torso + hazard chest band.
+    push_box(&mut m, [-0.44, 0.66, -0.34], [0.44, 1.50, 0.34], steel, 0.0);
+    push_box(&mut m, [-0.44, 1.00, -0.34], [0.44, 1.18, 0.36], haz, 0.0);
+    // Backpack + glowing vent.
+    push_box(&mut m, [-0.34, 0.80, -0.56], [0.34, 1.46, -0.34], dark, 0.0);
+    push_box(
+        &mut m,
+        [-0.24, 1.20, -0.60],
+        [0.24, 1.40, -0.54],
+        amber,
+        0.0,
+    );
+    // Head + team-tinted visor + crown.
+    push_box(
+        &mut m,
+        [-0.26, 1.50, -0.24],
+        [0.26, 1.98, 0.24],
+        steel2,
+        0.0,
+    );
+    push_box(&mut m, [-0.26, 1.66, 0.22], [0.26, 1.84, 0.30], team, 1.0);
+    push_box(&mut m, [-0.30, 1.96, -0.26], [0.30, 2.06, 0.26], dark, 0.0);
+    // Arms + carried tool + team shoulder pad.
+    push_box(
+        &mut m,
+        [-0.62, 0.80, -0.16],
+        [-0.44, 1.46, 0.16],
+        steel,
+        0.0,
+    );
+    push_box(&mut m, [0.44, 0.80, -0.16], [0.62, 1.46, 0.16], steel, 0.0);
+    push_box(&mut m, [0.46, 0.74, 0.0], [0.60, 1.00, 0.50], gun, 0.0);
+    push_box(&mut m, [-0.62, 1.36, -0.18], [-0.42, 1.54, 0.18], team, 1.0);
+    m
+}
+
 /// Opaque dark walls around the map rim, from above the water down past the
 /// seabed, so you don't see under the (translucent) water at the edges. Drawn
 /// with the unit pipeline via an identity instance.
@@ -654,6 +742,10 @@ pub struct Gfx {
     barracks_astro_len: u32,
     barracks_hollow_buf: wgpu::Buffer,
     barracks_hollow_len: u32,
+    acolyte_buf: wgpu::Buffer,
+    acolyte_len: u32,
+    engineer_buf: wgpu::Buffer,
+    engineer_len: u32,
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
@@ -1053,6 +1145,18 @@ impl Gfx {
             bytemuck::cast_slice(&barracks_hollow),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let acolyte = acolyte_mesh();
+        let acolyte_buf = mkbuf(
+            "acolyte",
+            bytemuck::cast_slice(&acolyte),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let engineer = engineer_mesh();
+        let engineer_buf = mkbuf(
+            "engineer",
+            bytemuck::cast_slice(&engineer),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let walls = water_walls();
         let walls_buf = mkbuf(
             "walls",
@@ -1101,6 +1205,10 @@ impl Gfx {
             barracks_astro_len: barracks_astro.len() as u32,
             barracks_hollow_buf,
             barracks_hollow_len: barracks_hollow.len() as u32,
+            acolyte_buf,
+            acolyte_len: acolyte.len() as u32,
+            engineer_buf,
+            engineer_len: engineer.len() as u32,
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
@@ -1137,18 +1245,22 @@ impl Gfx {
         infantry: &[InstanceRaw],
         barracks_astro: &[InstanceRaw],
         barracks_hollow: &[InstanceRaw],
+        acolytes: &[InstanceRaw],
+        engineers: &[InstanceRaw],
         rings: &[RingRaw],
         fow: &[u8],
         view_proj: [[f32; 4]; 4],
         eye: [f32; 3],
         time: f32,
     ) {
-        // All three meshes share one instance buffer, packed in order: infantry
-        // in [0..ni), Astromancer buildings in [ni..ni+na), Hollowmen buildings
-        // in [ni+na..ni+na+nh). Each mesh is drawn over its own range.
+        // All meshes share one instance buffer, packed in order: infantry,
+        // Astromancer buildings, Hollowmen buildings, Acolytes, Engineers. Each
+        // mesh is drawn over its own contiguous range.
         let ni = infantry.len().min(MAX_INSTANCES);
         let na = barracks_astro.len().min(MAX_INSTANCES - ni);
         let nh = barracks_hollow.len().min(MAX_INSTANCES - ni - na);
+        let nac = acolytes.len().min(MAX_INSTANCES - ni - na - nh);
+        let nen = engineers.len().min(MAX_INSTANCES - ni - na - nh - nac);
         let ring_verts = ring_decals(rings);
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
         self.queue.write_buffer(
@@ -1199,6 +1311,20 @@ impl Gfx {
                 &self.instance_buf,
                 (ni + na) as u64 * stride,
                 bytemuck::cast_slice(&barracks_hollow[..nh]),
+            );
+        }
+        if nac > 0 {
+            self.queue.write_buffer(
+                &self.instance_buf,
+                (ni + na + nh) as u64 * stride,
+                bytemuck::cast_slice(&acolytes[..nac]),
+            );
+        }
+        if nen > 0 {
+            self.queue.write_buffer(
+                &self.instance_buf,
+                (ni + na + nh + nac) as u64 * stride,
+                bytemuck::cast_slice(&engineers[..nen]),
             );
         }
         if nrv > 0 {
@@ -1263,7 +1389,7 @@ impl Gfx {
             pass.set_vertex_buffer(0, self.walls_buf.slice(..));
             pass.set_vertex_buffer(1, self.wall_inst_buf.slice(..));
             pass.draw(0..self.walls_len, 0..1);
-            if ni > 0 || na > 0 || nh > 0 {
+            if ni > 0 || na > 0 || nh > 0 || nac > 0 || nen > 0 {
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                 if ni > 0 {
                     pass.set_vertex_buffer(0, self.infantry_buf.slice(..));
@@ -1278,6 +1404,20 @@ impl Gfx {
                     pass.draw(
                         0..self.barracks_hollow_len,
                         (ni + na) as u32..(ni + na + nh) as u32,
+                    );
+                }
+                if nac > 0 {
+                    pass.set_vertex_buffer(0, self.acolyte_buf.slice(..));
+                    pass.draw(
+                        0..self.acolyte_len,
+                        (ni + na + nh) as u32..(ni + na + nh + nac) as u32,
+                    );
+                }
+                if nen > 0 {
+                    pass.set_vertex_buffer(0, self.engineer_buf.slice(..));
+                    pass.draw(
+                        0..self.engineer_len,
+                        (ni + na + nh + nac) as u32..(ni + na + nh + nac + nen) as u32,
                     );
                 }
             }
@@ -1328,5 +1468,7 @@ mod tests {
         check_mesh(&infantry_mesh(), "infantry");
         check_mesh(&barracks_mesh_astro(), "barracks-astro");
         check_mesh(&barracks_mesh_hollow(), "barracks-hollow");
+        check_mesh(&acolyte_mesh(), "acolyte");
+        check_mesh(&engineer_mesh(), "engineer");
     }
 }

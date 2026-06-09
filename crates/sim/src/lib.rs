@@ -29,7 +29,15 @@ pub struct EntityId {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Kind {
     Infantry,
+    /// Builder/harvester: moves and avoids stacking like infantry, but never
+    /// fights (no auto-aggro, no attack orders).
+    Worker,
     Barracks,
+}
+
+/// Mobile units: they path, take move orders, and obey the no-stacking rule.
+fn is_mobile(k: Kind) -> bool {
+    matches!(k, Kind::Infantry | Kind::Worker)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -58,6 +66,15 @@ fn stats(kind: Kind) -> Stats {
             damage: Fx::from_int(5),
             attack_cd: Fx::from_int(12),
             aggro2: Fx::from_int(256), // aggro 16
+        },
+        // Workers move like infantry but carry no weapon.
+        Kind::Worker => Stats {
+            max_hp: Fx::from_int(40),
+            speed: Fx::from_ratio(30, 100),
+            range2: Fx::ZERO,
+            damage: Fx::ZERO,
+            attack_cd: Fx::ZERO,
+            aggro2: Fx::ZERO,
         },
         Kind::Barracks => Stats {
             max_hp: Fx::from_int(500),
@@ -308,6 +325,7 @@ impl World {
                 Command::SpawnUnit { owner, kind, x, y } => {
                     let k = match kind {
                         UnitKind::Infantry => Kind::Infantry,
+                        UnitKind::Worker => Kind::Worker,
                     };
                     self.spawn(k, owner, x, y);
                 }
@@ -353,7 +371,7 @@ impl World {
     }
 
     fn set_order(&mut self, unit: u32, order: Order) {
-        if self.arena.alive_at(unit) && self.kind[unit as usize] == Kind::Infantry {
+        if self.arena.alive_at(unit) && is_mobile(self.kind[unit as usize]) {
             self.order[unit as usize] = order;
         }
     }
@@ -419,13 +437,15 @@ impl World {
 
     fn units_update(&mut self) {
         let cap = self.arena.capacity();
-        let inf = stats(Kind::Infantry);
         let mut damage = vec![Fx::ZERO; cap];
 
         for i in 0..cap {
-            if !self.arena.alive[i] || self.kind[i] != Kind::Infantry {
+            if !self.arena.alive[i] || !is_mobile(self.kind[i]) {
                 continue;
             }
+            // Per-kind stats: workers have zero range/damage/aggro, so even an
+            // attack order just walks them to the target and deals nothing.
+            let inf = stats(self.kind[i]);
             let me = self.pos[i];
 
             // Resolve a move-target and/or an attack-target from the order.
@@ -523,13 +543,13 @@ impl World {
         let mut push = vec![(Fx::ZERO, Fx::ZERO); cap];
 
         for (i, slot) in push.iter_mut().enumerate() {
-            if !self.arena.alive[i] || self.kind[i] != Kind::Infantry {
+            if !self.arena.alive[i] || !is_mobile(self.kind[i]) {
                 continue;
             }
             let me = self.pos[i];
             let (mut px, mut py) = (Fx::ZERO, Fx::ZERO);
             for j in 0..cap {
-                if i == j || !self.arena.alive[j] || self.kind[j] != Kind::Infantry {
+                if i == j || !self.arena.alive[j] || !is_mobile(self.kind[j]) {
                     continue;
                 }
                 let dx = me.x - self.pos[j].x;
@@ -618,6 +638,7 @@ impl World {
             h.write_u32(match self.kind[i] {
                 Kind::Infantry => 0,
                 Kind::Barracks => 1,
+                Kind::Worker => 2,
             });
             h.write_u32(self.owner[i] as u32);
             h.write_i64(self.pos[i].x.to_raw());
