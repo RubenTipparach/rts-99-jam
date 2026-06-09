@@ -82,8 +82,8 @@
   <h2>View</h2>
   <div class="row">
     <button data-layout="2d">2D</button>
-    <button data-layout="split" class="on">Split</button>
-    <button data-layout="3d">3D</button>
+    <button data-layout="split">Split</button>
+    <button data-layout="3d" class="on">3D</button>
   </div>
   <div class="row" style="margin-top:6px">
     <button data-ov="hill" class="on">Relief</button>
@@ -178,7 +178,7 @@ let M = null; // loaded map model
 const ui = {
   overlay: "hill", tool: "raise", radius: 14, strength: 6,
   mat: 2, lqlevel: 0, buildVal: 1, liqErase: false, skin: 7,
-  layout: "split", exag: 3,
+  layout: "3d", exag: 3,
 };
 
 // ---- VXL1 parse ----
