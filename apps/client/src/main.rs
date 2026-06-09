@@ -10,8 +10,10 @@ mod terrain;
 use std::sync::Arc;
 use web_time::Instant;
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
+use winit::event::{
+    DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
+};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
 
@@ -136,6 +138,46 @@ mod mobile {
     }
 }
 
+/// Pointer-lock tracking (web only).
+///
+/// Confining the cursor in a browser means pointer lock: the OS cursor is hidden
+/// and movement arrives as relative deltas (we draw our own cursor and clamp it
+/// to the canvas). The browser owns the Esc key while locked - pressing it exits
+/// the lock - so we listen for `pointerlockchange` and surface the current state.
+/// The app reads it each frame to know whether it is confined, and to open the
+/// pause menu the moment the lock is lost.
+#[cfg(target_arch = "wasm32")]
+mod ptrlock {
+    use std::cell::Cell;
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+
+    thread_local! {
+        static LOCKED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub fn is_locked() -> bool {
+        LOCKED.with(|l| l.get())
+    }
+
+    /// Listen for pointer-lock changes. Safe to call once.
+    pub fn install() {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let cb = Closure::<dyn FnMut()>::new(move || {
+            let locked = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.pointer_lock_element())
+                .is_some();
+            LOCKED.with(|l| l.set(locked));
+        });
+        let _ =
+            doc.add_event_listener_with_callback("pointerlockchange", cb.as_ref().unchecked_ref());
+        cb.forget();
+    }
+}
+
 /// Browser window inner size in CSS pixels (web only).
 #[cfg(target_arch = "wasm32")]
 fn browser_size() -> Option<(u32, u32)> {
@@ -185,6 +227,15 @@ struct App {
     /// When set, the sim is frozen and the pause menu is shown; the cursor is
     /// also released from the window (it is confined again on resume).
     paused: bool,
+    /// Web: the pointer is currently locked, so the cursor is tracked from
+    /// relative motion and drawn by the HUD. Always false on native (which uses
+    /// a confined, OS-drawn cursor instead).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    cursor_locked: bool,
+    /// Previous frame's lock state, to detect the lock being lost (Esc) and open
+    /// the pause menu in response.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    was_locked: bool,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     last_css: (u32, u32),
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -204,6 +255,8 @@ impl App {
             last_frame: Instant::now(),
             pointer_is_touch: false,
             paused: false,
+            cursor_locked: false,
+            was_locked: false,
             last_css: (0, 0),
             first_frame_done: false,
             proxy,
@@ -218,17 +271,53 @@ impl App {
     }
 
     /// Confine the cursor to the window while playing and release it while
-    /// paused. Best-effort: native backends honour `Confined`; the web backend
-    /// only supports pointer-lock (which would hide the cursor), so there it is
-    /// a graceful no-op and ESC simply opens the pause menu.
+    /// paused. Native backends use `Confined` (cursor stays visible). The web
+    /// backend only supports pointer-lock, so there we `Locked` it (the browser
+    /// then hides the OS cursor and the HUD draws our own); Esc exits the lock,
+    /// which we treat as opening the pause menu. Requesting the lock must happen
+    /// from a user gesture, so this is called from clicks and on resume.
     fn apply_cursor_grab(&self) {
-        if let Some(win) = &self.window {
-            let mode = if self.paused {
-                CursorGrabMode::None
-            } else {
-                CursorGrabMode::Confined
-            };
-            let _ = win.set_cursor_grab(mode);
+        let Some(win) = &self.window else { return };
+        #[cfg(target_arch = "wasm32")]
+        let mode = if self.paused {
+            CursorGrabMode::None
+        } else {
+            CursorGrabMode::Locked
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let mode = if self.paused {
+            CursorGrabMode::None
+        } else {
+            CursorGrabMode::Confined
+        };
+        let _ = win.set_cursor_grab(mode);
+    }
+
+    /// Apply a new absolute cursor position (in physical pixels), updating the
+    /// camera for any in-progress middle-drag pan or minimap scrub. Shared by the
+    /// absolute `CursorMoved` path and the relative (pointer-locked) motion path
+    /// so both behave identically.
+    fn cursor_to(&mut self, nx: f32, ny: f32) {
+        let (ox, oy) = self.input.cursor;
+        self.input.cursor = (nx, ny);
+        self.input.cursor_in = true;
+        // Middle-drag pan: grab the ground point under the cursor and keep it
+        // there. Both picks use the current (un-moved) camera, so there's no
+        // feedback loop and the drag tracks the mouse 1:1.
+        if self.input.middle_down {
+            let (w, h) = self.dims();
+            if let (Some((ax, az)), Some((bx, bz))) = (
+                self.camera.ground_pick(ox, oy, w, h),
+                self.camera.ground_pick(nx, ny, w, h),
+            ) {
+                self.camera.pan_world(ax - bx, az - bz);
+            }
+        }
+        // Left-drag on the minimap scrubs the camera across the map.
+        #[cfg(target_arch = "wasm32")]
+        if self.input.minimap_drag {
+            let (w, h) = self.dims();
+            self.minimap_drag_to(nx, ny, w, h);
         }
     }
 
@@ -296,18 +385,20 @@ impl App {
             return;
         }
         // Minimap-local coords in [-1, 1] (u right, v down from centre), clamped
-        // into the radar disc, then inverse-rotated by the camera yaw - the exact
+        // into the diamond, then inverse-rotated by the camera yaw - the exact
         // inverse of the transform the HUD draws the rotated map with.
         let mut u = ((cx - x0) / (x1 - x0)) * 2.0 - 1.0;
         let mut v = ((cy - y0) / (y1 - y0)) * 2.0 - 1.0;
-        let len = (u * u + v * v).sqrt();
-        if len > 1.0 {
-            u /= len;
-            v /= len;
+        let m = u.abs() + v.abs();
+        if m > 1.0 {
+            u /= m;
+            v /= m;
         }
         let (s, c) = camera::YAW.sin_cos();
-        let wx = (u * s + v * c) * terrain::HALF;
-        let wz = (-u * c + v * s) * terrain::HALF;
+        let du = u * std::f32::consts::SQRT_2;
+        let dv = v * std::f32::consts::SQRT_2;
+        let wx = (du * s + dv * c) * terrain::HALF;
+        let wz = (-du * c + dv * s) * terrain::HALF;
         self.camera.look_at(wx, wz);
     }
 }
@@ -318,6 +409,8 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
         event_loop.set_control_flow(ControlFlow::Poll);
+        // Needed for pointer-locked mouse motion (web) to arrive as DeviceEvents.
+        event_loop.listen_device_events(DeviceEvents::Always);
 
         let mut attrs = Window::default_attributes().with_title("Astromancers");
         #[cfg(target_arch = "wasm32")]
@@ -338,7 +431,10 @@ impl ApplicationHandler<UserEvent> for App {
             self.last_css = (bw, bh);
         }
         #[cfg(target_arch = "wasm32")]
-        mobile::install();
+        {
+            mobile::install();
+            ptrlock::install();
+        }
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -465,28 +561,14 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let (nx, ny) = (position.x as f32, position.y as f32);
-                let (ox, oy) = self.input.cursor;
-                self.input.cursor = (nx, ny);
-                self.input.cursor_in = true;
-                // Middle-drag pan: grab the ground point under the cursor and
-                // keep it there. Both picks use the current (un-moved) camera, so
-                // there's no feedback loop and the drag tracks the mouse 1:1.
-                if self.input.middle_down {
-                    let (w, h) = self.dims();
-                    if let (Some((ax, az)), Some((bx, bz))) = (
-                        self.camera.ground_pick(ox, oy, w, h),
-                        self.camera.ground_pick(nx, ny, w, h),
-                    ) {
-                        self.camera.pan_world(ax - bx, az - bz);
-                    }
-                }
-                // Left-drag on the minimap scrubs the camera across the map.
+                // While pointer-locked the OS cursor is frozen and motion comes
+                // through `device_event` as deltas; ignore the stale absolute
+                // position so it doesn't snap our drawn cursor back.
                 #[cfg(target_arch = "wasm32")]
-                if self.input.minimap_drag {
-                    let (w, h) = self.dims();
-                    self.minimap_drag_to(nx, ny, w, h);
+                if self.cursor_locked {
+                    return;
                 }
+                self.cursor_to(position.x as f32, position.y as f32);
             }
             WindowEvent::CursorEntered { .. } => self.input.cursor_in = true,
             WindowEvent::CursorLeft { .. } => self.input.cursor_in = false,
@@ -564,6 +646,20 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                 }
+                // Track pointer-lock (web): if the lock was lost while playing
+                // (the user pressed Esc, which the browser reserves to exit the
+                // lock), open the pause menu. The browser may swallow that Esc
+                // keydown, so this is the reliable signal.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let locked = ptrlock::is_locked();
+                    if self.was_locked && !locked && !self.paused {
+                        self.set_paused(true);
+                    }
+                    self.was_locked = locked;
+                    self.cursor_locked = locked;
+                }
+
                 let now = Instant::now();
                 let dt = (now - self.last_frame).as_secs_f32().min(0.1);
                 self.last_frame = now;
@@ -589,7 +685,18 @@ impl ApplicationHandler<UserEvent> for App {
                         );
                     }
                     let (w, h) = self.dims();
-                    hud::draw(&self.camera, &self.game, w, h, None, true);
+                    // Paused: the OS cursor is back (lock released), so the HUD
+                    // does not draw its own.
+                    hud::draw(
+                        &self.camera,
+                        &self.game,
+                        w,
+                        h,
+                        None,
+                        true,
+                        self.input.cursor,
+                        false,
+                    );
                     return;
                 }
 
@@ -666,7 +773,18 @@ impl ApplicationHandler<UserEvent> for App {
                     );
                 }
                 let (w, h) = self.dims();
-                hud::draw(&self.camera, &self.game, w, h, drag_rect, false);
+                // When the pointer is locked the browser hides the OS cursor, so
+                // the HUD draws our own at the tracked position.
+                hud::draw(
+                    &self.camera,
+                    &self.game,
+                    w,
+                    h,
+                    drag_rect,
+                    false,
+                    self.input.cursor,
+                    self.cursor_locked,
+                );
 
                 // Remove the loading overlay once the first frame is on screen.
                 #[cfg(target_arch = "wasm32")]
@@ -677,6 +795,24 @@ impl ApplicationHandler<UserEvent> for App {
             }
             _ => {}
         }
+    }
+
+    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
+        // Web pointer-lock motion: advance our drawn cursor by the raw delta,
+        // clamped to the canvas (this is what "confines" it). Native confines the
+        // real cursor instead, so it never tracks deltas here.
+        #[cfg(target_arch = "wasm32")]
+        if self.cursor_locked {
+            if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+                let (sw, sh) = self.dims();
+                let (cx, cy) = self.input.cursor;
+                let nx = (cx + dx as f32).clamp(0.0, sw.max(1.0));
+                let ny = (cy + dy as f32).clamp(0.0, sh.max(1.0));
+                self.cursor_to(nx, ny);
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = event;
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {

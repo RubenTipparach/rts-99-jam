@@ -60,6 +60,29 @@ pub fn resume_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
     )
 }
 
+/// Draw the in-game cursor at `(x, y)` in CSS pixels. Used while the pointer is
+/// locked, when the browser hides the real cursor. A small arrowhead with a dark
+/// outline so it reads over both terrain and water.
+#[cfg(target_arch = "wasm32")]
+fn draw_cursor_arrow(ctx: &web_sys::CanvasRenderingContext2d, x: f64, y: f64) {
+    ctx.save();
+    ctx.begin_path();
+    ctx.move_to(x, y);
+    ctx.line_to(x, y + 16.0);
+    ctx.line_to(x + 4.5, y + 12.0);
+    ctx.line_to(x + 8.0, y + 19.0);
+    ctx.line_to(x + 11.0, y + 17.5);
+    ctx.line_to(x + 7.5, y + 10.5);
+    ctx.line_to(x + 13.0, y + 10.5);
+    ctx.close_path();
+    ctx.set_fill_style_str("#f4f7ff");
+    ctx.fill();
+    ctx.set_stroke_style_str("rgba(0,0,0,0.85)");
+    ctx.set_line_width(1.2);
+    ctx.stroke();
+    ctx.restore();
+}
+
 /// The pause overlay: a dimmed screen, a centred panel, and a Resume button.
 #[cfg(target_arch = "wasm32")]
 fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32) {
@@ -100,17 +123,15 @@ fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32) {
     ctx.restore();
 }
 
-/// Minimap panel geometry in CSS pixels `(mx, my, mm)`: its own square box in the
-/// bottom-right corner, floating above the command bar so the two do not share
-/// space. Single source of truth for both the draw and the hit-test.
+/// Minimap panel geometry in CSS pixels `(mx, my, mm)`: its own square box tucked
+/// into the very bottom-right corner of the screen (over the command bar). Single
+/// source of truth for both the draw and the hit-test.
 #[cfg(target_arch = "wasm32")]
 fn minimap_css(w: f32, h: f32) -> (f64, f64, f64) {
-    let bar = 96.0_f64;
     let mm = 160.0_f64; // 2x the old 80px panel
     let margin = 12.0_f64;
-    let gap = 10.0_f64; // clear the command bar below it
     let mx = w as f64 - mm - margin;
-    let my = h as f64 - bar - mm - gap;
+    let my = h as f64 - mm - margin;
     (mx, my, mm)
 }
 
@@ -169,11 +190,13 @@ fn build_mini_terrain() -> Vec<[u8; 3]> {
 }
 /// Composite the terrain thumbnail with fog into the minimap rect (device px).
 ///
-/// The thumbnail is rotated by the camera yaw and masked to a disc: each output
-/// pixel is mapped back through the inverse rotation to a world sample, and
-/// pixels outside the unit circle get the dark bezel colour instead. Rotating
-/// here (rather than via a canvas transform) is required because `put_image_data`
-/// ignores the context transform - it writes raw pixels.
+/// The thumbnail is rotated by the camera yaw and masked to a diamond: each
+/// output pixel is mapped back through the inverse rotation to a world sample,
+/// and pixels outside the diamond get the dark bezel colour instead. Because the
+/// world is a square and the yaw is 45 degrees, the rotated map fills a diamond
+/// whose corners are the map corners. Rotating here (rather than via a canvas
+/// transform) is required because `put_image_data` ignores the context transform
+/// - it writes raw pixels.
 #[cfg(target_arch = "wasm32")]
 fn draw_minimap(
     ctx: &web_sys::CanvasRenderingContext2d,
@@ -186,6 +209,7 @@ fn draw_minimap(
     let dev = (mm * dpr as f64).round().max(1.0) as usize;
     let r_dev = dev as f32 / 2.0;
     let (s, c) = crate::camera::YAW.sin_cos();
+    const SQRT2: f32 = std::f32::consts::SQRT_2;
     let mut img = vec![0u8; dev * dev * 4];
     MINI_TERRAIN.with(|cell| {
         let terr = cell.get_or_init(build_mini_terrain);
@@ -195,17 +219,21 @@ fn draw_minimap(
                 // Minimap-local coords in [-1, 1]: u right, v down from centre.
                 let u = (px as f32 + 0.5 - r_dev) / r_dev;
                 let v = (py as f32 + 0.5 - r_dev) / r_dev;
-                if u * u + v * v > 1.0 {
-                    // Bezel outside the disc (matches the panel background).
+                if u.abs() + v.abs() > 1.0 {
+                    // Bezel outside the diamond (matches the panel background).
                     img[o] = 8;
                     img[o + 1] = 14;
                     img[o + 2] = 26;
                     img[o + 3] = 255;
                     continue;
                 }
-                // Inverse-rotate the minimap pixel back to a world sample.
-                let cxw = u * s + v * c;
-                let czw = -u * c + v * s;
+                // Inverse-rotate the minimap pixel back to a world sample. The
+                // diamond's edge midpoints (|u|+|v|=1) are the map edge centres,
+                // so scale by sqrt(2) before un-rotating.
+                let du = u * SQRT2;
+                let dv = v * SQRT2;
+                let cxw = du * s + dv * c;
+                let czw = -du * c + dv * s;
                 let nx = ((cxw + 1.0) * 0.5).clamp(0.0, 1.0);
                 let nz = ((czw + 1.0) * 0.5).clamp(0.0, 1.0);
                 let ix = ((nx * MINI_N as f32) as usize).min(MINI_N - 1);
@@ -229,6 +257,7 @@ fn draw_minimap(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     _c: &Camera,
     _g: &Game,
@@ -236,10 +265,13 @@ pub fn draw(
     _h: f32,
     _drag: Option<(f32, f32, f32, f32)>,
     _paused: bool,
+    _cursor: (f32, f32),
+    _draw_cursor: bool,
 ) {
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     camera: &Camera,
     game: &Game,
@@ -247,6 +279,8 @@ pub fn draw(
     h: f32,
     drag: Option<(f32, f32, f32, f32)>,
     paused: bool,
+    cursor: (f32, f32),
+    draw_cursor: bool,
 ) {
     use crate::terrain;
     use wasm_bindgen::JsCast;
@@ -392,47 +426,63 @@ pub fn draw(
         }
     }
 
-    // Minimap: a circular radar in a framed panel, bottom-right, floating above
-    // the command bar. The whole map is rotated by the camera yaw so the view
-    // box reads upright (the direction you are looking points up).
+    // Minimap: a diamond radar in a framed panel, tucked into the bottom-right
+    // corner. The whole map is rotated by the camera yaw (45 degrees) so the view
+    // box reads upright (the direction you are looking points up) and the square
+    // world reads as a diamond.
     let (mx, my, mm) = minimap_css(w, h);
     let pad = 6.0_f64;
     let mcx = mx + mm / 2.0;
     let mcy = my + mm / 2.0;
     let rad = mm / 2.0;
+    // Diamond vertices (top, right, bottom, left) at the panel edge midpoints.
+    let diamond = [
+        (mcx, mcy - rad),
+        (mcx + rad, mcy),
+        (mcx, mcy + rad),
+        (mcx - rad, mcy),
+    ];
+    let path_diamond = |ctx: &web_sys::CanvasRenderingContext2d| {
+        ctx.begin_path();
+        ctx.move_to(diamond[0].0, diamond[0].1);
+        ctx.line_to(diamond[1].0, diamond[1].1);
+        ctx.line_to(diamond[2].0, diamond[2].1);
+        ctx.line_to(diamond[3].0, diamond[3].1);
+        ctx.close_path();
+    };
     ctx.set_fill_style_str("rgba(8,14,26,0.92)");
     ctx.fill_rect(mx - pad, my - pad, mm + pad * 2.0, mm + pad * 2.0);
     draw_minimap(&ctx, game, dpr, mx, my, mm);
-    // Square housing frame, then the radar disc rim.
+    // Square housing frame, then the diamond rim.
     ctx.set_stroke_style_str("rgba(120,160,210,0.95)");
     ctx.set_line_width(2.0);
     ctx.stroke_rect(mx - pad, my - pad, mm + pad * 2.0, mm + pad * 2.0);
-    ctx.begin_path();
-    let _ = ctx.arc(mcx, mcy, rad, 0.0, std::f64::consts::TAU);
+    path_diamond(&ctx);
     ctx.stroke();
 
     // World -> minimap (rotated by the camera yaw), then centre + scale into the
-    // disc. The same rotation is applied to the terrain, units, and view box, so
-    // they stay registered. `(s, c)` is sin/cos of the yaw.
+    // diamond. The same rotation is applied to the terrain, units, and view box,
+    // so they stay registered. `(s, c)` is sin/cos of the yaw; the sqrt(2) scale
+    // puts the map corners on the diamond's points.
     let (sy, cy) = crate::camera::YAW.sin_cos();
+    let scale = rad / std::f64::consts::SQRT_2;
     let half = terrain::HALF as f64;
-    let to_disc = |wx: f32, wz: f32| -> (f64, f64) {
+    let to_diamond = |wx: f32, wz: f32| -> (f64, f64) {
         let nx = wx as f64 / half;
         let nz = wz as f64 / half;
         let du = nx * sy as f64 - nz * cy as f64;
         let dv = nx * cy as f64 + nz * sy as f64;
-        (mcx + du * rad, mcy + dv * rad)
+        (mcx + du * scale, mcy + dv * scale)
     };
 
-    // Clip everything that follows to the radar disc, so nothing spills onto the
+    // Clip everything that follows to the diamond, so nothing spills onto the
     // bezel and the view box is cleanly clipped instead of distorted.
     ctx.save();
-    ctx.begin_path();
-    let _ = ctx.arc(mcx, mcy, rad, 0.0, std::f64::consts::TAU);
+    path_diamond(&ctx);
     ctx.clip();
 
     for u in game.unit_infos() {
-        let (px, py) = to_disc(u.wx, u.wz);
+        let (px, py) = to_diamond(u.wx, u.wz);
         ctx.set_fill_style_str(match (u.owner, u.barracks) {
             (0, true) => "#9fdcff",
             (0, false) => "#48b6ff",
@@ -444,15 +494,15 @@ pub fn draw(
     }
 
     // Camera view box: the four screen corners projected onto the ground and
-    // mapped into the disc. `ground_pick_or_far` always yields a corner (even at
-    // the horizon), so the quad is never dropped or clamped - the disc clip does
-    // the real clipping, with no distortion when the camera looks off the map.
+    // mapped into the diamond. `ground_pick_or_far` always yields a corner (even
+    // at the horizon), so the quad is never dropped or clamped - the diamond clip
+    // does the real clipping, with no distortion when the camera looks off-map.
     let corners = [(0.0_f32, 0.0_f32), (w, 0.0), (w, h), (0.0, h)];
     let view: Vec<(f64, f64)> = corners
         .iter()
         .map(|&(sx, sv)| {
             let (wx, wz) = camera.ground_pick_or_far(sx, sv, w, h);
-            to_disc(wx, wz)
+            to_diamond(wx, wz)
         })
         .collect();
     ctx.begin_path();
@@ -468,6 +518,12 @@ pub fn draw(
     ctx.stroke();
 
     ctx.restore();
+
+    // In-game cursor (pointer locked): the cursor arrives in physical pixels, so
+    // bring it into the CSS space we draw in. Drawn under the pause overlay.
+    if draw_cursor {
+        draw_cursor_arrow(&ctx, (cursor.0 / dpr) as f64, (cursor.1 / dpr) as f64);
+    }
 
     // Pause overlay sits on top of everything when the game is paused.
     if paused {
