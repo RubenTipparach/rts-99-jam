@@ -245,7 +245,7 @@ core of "AI is a player." See [AI Bots](architecture/09-ai-bots.md).
 | 05 | [Animation](architecture/05-animation.md) | "Animations" at crowd scale |
 | 06 | [Particles](architecture/06-particles.md) | "Particles" (GPU-driven, cosmetic) |
 | 07 | [Pathfinding & navigation](architecture/07-pathfinding-navigation.md) | "Spherical A*, navmesh, terrain nav, collision avoidance" |
-| 08 | [Procedural generation](architecture/08-procedural-generation.md) | "Large maps", "procedural map generation" |
+| 08 | [Procedural generation](architecture/08-procedural-generation.md) | "Large maps", "procedural map generation"; concrete [world catalog](worldgen.md) (21 Solar System battlefields) |
 | 09 | [AI bots](architecture/09-ai-bots.md) | "AI bot support (build alongside everything)" |
 | 10 | [Roadmap, testing & tooling](architecture/10-roadmap-testing.md) | Milestones, determinism CI, profiling |
 

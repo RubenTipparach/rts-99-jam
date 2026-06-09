@@ -39,9 +39,17 @@ fn fbm(x: f32, z: f32) -> f32 {
     v
 }
 
-/// Terrain height at world (x, z): rolling hills over a wide landmass, with the
-/// outer ring dipping below sea level so water borders the map.
+/// Terrain height at world (x, z). The default is rolling hills over a wide
+/// landmass, with the outer ring dipping below sea level so water borders the
+/// map. If a Solar System world is selected (`worlds::ACTIVE`), its procedural
+/// surface is used instead.
 pub fn height(x: f32, z: f32) -> f32 {
+    if let Some(map) = crate::voxel::active() {
+        return map.surface_height(x, z);
+    }
+    if let Some(def) = crate::worlds::active() {
+        return crate::worlds::height(def, x, z);
+    }
     let hills = fbm(x * 0.012, z * 0.012) * 34.0;
     let rolling = (x * 0.004).sin() * 3.0 + (z * 0.0045).cos() * 3.0;
     let r = (x * x + z * z).sqrt();

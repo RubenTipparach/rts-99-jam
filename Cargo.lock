@@ -320,6 +320,7 @@ dependencies = [
  "image",
  "log",
  "math",
+ "miniz_oxide",
  "naga",
  "pollster",
  "protocol",

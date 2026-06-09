@@ -8,6 +8,12 @@
 > Generation must also support the **flat or spherical** `Topology`
 > ([Ch.07 §2](07-pathfinding-navigation.md)) and scale to large worlds.
 
+> Implemented: a concrete **[world catalog](../worldgen.md)** of 21 Solar System
+> battlefields (the Moon, Mars, the major moons, Pluto, Chiron) with per-world
+> texture archetypes, procedural terrain recipes and map hazards. Generator +
+> previews: [`assets/worldgen/`](../../assets/worldgen/); engine procgen mirror:
+> [`apps/client/src/worlds.rs`](../../apps/client/src/worlds.rs).
+
 ## 1. The determinism requirement (this is the catch)
 
 Two peers with different terrain desync instantly - a "passable" cliff on one
