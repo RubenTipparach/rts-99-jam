@@ -19,6 +19,8 @@ bytemuck = { version = "1", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 web-time = "1"
+# Pure-Rust zlib inflate for the baked .vxl voxel maps (wasm-friendly).
+miniz_oxide = "0.8"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = "0.4"

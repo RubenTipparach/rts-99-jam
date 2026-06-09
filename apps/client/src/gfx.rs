@@ -506,6 +506,9 @@ pub struct Gfx {
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
+    /// Marching-cubes terrain for the active voxel map (buffer + vertex count),
+    /// or `None` to render the heightmap terrain in `terrain.rs` instead.
+    voxel_terrain: Option<(wgpu::Buffer, u32)>,
     instance_buf: wgpu::Buffer,
     ring_buf: wgpu::Buffer,
     camera_buf: wgpu::Buffer,
@@ -911,6 +914,26 @@ impl Gfx {
             }),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+
+        // If a voxel battlefield is selected, mesh it once (marching cubes) into
+        // vertex-coloured triangles drawn via the unit pipeline. Default: none.
+        let voxel_terrain = crate::voxel::active().map(|grid| {
+            let mesh = grid.build_mesh([1.0, 1.0, 1.0], 1.0);
+            let verts: Vec<UnitVertex> = mesh
+                .iter()
+                .map(|v| UnitVertex {
+                    pos: v.pos,
+                    normal: v.normal,
+                    color: [v.color[0], v.color[1], v.color[2], 0.0],
+                })
+                .collect();
+            let buf = mkbuf(
+                "voxel-terrain",
+                bytemuck::cast_slice(&verts),
+                wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            );
+            (buf, verts.len() as u32)
+        });
         let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instances"),
             size: (MAX_INSTANCES * std::mem::size_of::<InstanceRaw>()) as u64,
@@ -945,6 +968,7 @@ impl Gfx {
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
+            voxel_terrain,
             instance_buf,
             ring_buf,
             camera_buf,
@@ -1083,11 +1107,19 @@ impl Gfx {
             });
             pass.set_bind_group(0, &self.camera_bind, &[]);
 
-            pass.set_pipeline(&self.terrain_pipeline);
-            pass.set_bind_group(1, &self.terrain_bind, &[]);
-            pass.set_vertex_buffer(0, self.terrain_vbuf.slice(..));
-            pass.set_index_buffer(self.terrain_ibuf.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..self.terrain_indices, 0, 0..1);
+            if let Some((buf, len)) = self.voxel_terrain.as_ref() {
+                // Marching-cubes voxel battlefield: vertex-coloured, unit pipeline.
+                pass.set_pipeline(&self.unit_pipeline);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.set_vertex_buffer(1, self.wall_inst_buf.slice(..));
+                pass.draw(0..*len, 0..1);
+            } else {
+                pass.set_pipeline(&self.terrain_pipeline);
+                pass.set_bind_group(1, &self.terrain_bind, &[]);
+                pass.set_vertex_buffer(0, self.terrain_vbuf.slice(..));
+                pass.set_index_buffer(self.terrain_ibuf.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..self.terrain_indices, 0, 0..1);
+            }
 
             pass.set_pipeline(&self.unit_pipeline);
             // Map-rim walls (always), via an identity instance.
@@ -1106,10 +1138,13 @@ impl Gfx {
                 }
             }
 
-            pass.set_pipeline(&self.water_pipeline);
-            pass.set_bind_group(1, &self.terrain_bind, &[]);
-            pass.set_vertex_buffer(0, self.water_buf.slice(..));
-            pass.draw(0..6, 0..1);
+            // Ocean only for the heightmap map; airless voxel worlds have none.
+            if self.voxel_terrain.is_none() {
+                pass.set_pipeline(&self.water_pipeline);
+                pass.set_bind_group(1, &self.terrain_bind, &[]);
+                pass.set_vertex_buffer(0, self.water_buf.slice(..));
+                pass.draw(0..6, 0..1);
+            }
 
             if nrv > 0 {
                 pass.set_pipeline(&self.ring_pipeline);

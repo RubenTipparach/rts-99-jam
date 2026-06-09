@@ -6,6 +6,7 @@ mod game;
 mod gfx;
 mod hud;
 mod terrain;
+mod voxel;
 mod worlds;
 
 use std::sync::Arc;

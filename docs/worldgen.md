@@ -125,21 +125,25 @@ to inspect, or any tool that speaks VXL1.
 
 ## Engine integration
 
-The deterministic sim is flat 2D fixed-point, so the safe path (chosen design) is
-**marching-cubes mesh + cliffs for the look, with buildability / gameplay derived
-from the baked `buildable` mask on a 2.5D plane**. The plan:
+The deterministic sim is flat 2D fixed-point, so the chosen design is a
+**marching-cubes mesh + cliffs for the look, with buildability derived from the
+baked `buildable` mask on a 2.5D plane**. Implemented in
+[`apps/client/src/voxel.rs`](../apps/client/src/voxel.rs):
 
-- `apps/client/src/voxel.rs`: load a `.vxl`, run marching cubes to a mesh, and
-  expose `surface_height(x, z)` + `buildable(x, z)`. (Engine-side, `f32`.)
-- The renderer draws the MC mesh; units sit on `surface_height`; placement uses
-  `buildable`.
-- Fully 3D-aware pathing/building (units under overhangs) is the larger,
-  determinism-sensitive follow-up: any terrain the sim consumes must be
-  fixed-point and re-pins the golden hash, so it is staged carefully rather than
-  rushed into the sim.
+- Parses the embedded `.vxl` maps (zlib via `miniz_oxide`, wasm-friendly), runs
+  marching cubes to a coloured mesh, and exposes `surface_height(x, z)`.
+- When a map is selected (`voxel::ACTIVE`, default none), `gfx.rs` draws that
+  mesh (via the vertex-coloured unit pipeline) instead of the heightmap terrain
+  and ocean, and `terrain.rs` sits units on `surface_height`. Tests parse and
+  mesh all 21 maps; CI (fmt / clippy / test / wasm) is green.
+- The default keeps the existing Earthlike map, so the live build is unchanged
+  until a battlefield is selected.
 
-(The earlier parameterized heightmap procgen in `apps/client/src/worlds.rs`
-remains as a lightweight fallback.)
+Remaining, determinism-sensitive follow-up: feeding the buildable mask and a 3D
+surface into the deterministic sim for in-sim pathing/building. Anything the sim
+consumes must be fixed-point and re-pins the golden hash, so it is staged
+carefully rather than rushed. (The parameterized heightmap procgen in
+`apps/client/src/worlds.rs` remains as a lightweight fallback.)
 
 ## Regenerating
 

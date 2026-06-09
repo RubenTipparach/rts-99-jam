@@ -44,6 +44,9 @@ fn fbm(x: f32, z: f32) -> f32 {
 /// map. If a Solar System world is selected (`worlds::ACTIVE`), its procedural
 /// surface is used instead.
 pub fn height(x: f32, z: f32) -> f32 {
+    if let Some(map) = crate::voxel::active() {
+        return map.surface_height(x, z);
+    }
     if let Some(def) = crate::worlds::active() {
         return crate::worlds::height(def, x, z);
     }
