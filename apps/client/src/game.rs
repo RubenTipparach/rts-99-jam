@@ -5,7 +5,7 @@ use crate::camera::Camera;
 use crate::gfx::{InstanceRaw, RingRaw, FOW_RES};
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
-use protocol::{BuildingKind, Command, UnitKind};
+use protocol::{BuildingKind, Command, ResourceKind, UnitKind};
 use sim::{Kind, Snap, World};
 use std::collections::HashSet;
 use web_time::Instant;
@@ -36,6 +36,16 @@ fn team_color(owner: u16) -> [f32; 4] {
     }
 }
 
+/// Which faction a player fields. Drives which placeholder building/unit meshes
+/// are drawn for that player; set from the skirmish lobby. Only the two launch
+/// factions exist so far.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub enum Faction {
+    Astromancer,
+    Hollowmen,
+}
+
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub struct UnitInfo {
@@ -62,6 +72,9 @@ pub struct Game {
     /// Debug toggles: darken unexplored / explored areas (both on by default).
     fog_unexplored: bool,
     fog_explored: bool,
+    /// Faction per side: index 0 = the player (owner 0), index 1 = everyone
+    /// else. Defaults to Hollowmen vs Astromancers; the lobby overrides it.
+    factions: [Faction; 2],
 }
 
 impl Default for Game {
@@ -88,6 +101,34 @@ impl Game {
                 y: fxi(180),
             });
         }
+        // A starting trio of workers by the player's base.
+        for k in 0..3 {
+            setup.push(Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Worker,
+                x: fxi(-12 + 12 * k),
+                y: fxi(196),
+            });
+        }
+        // Resource nodes: an ore patch and a carbon geyser near the player base,
+        // plus an ore patch up by each enemy base to fight over.
+        setup.push(Command::SpawnResource {
+            kind: ResourceKind::Ore,
+            x: fxi(-70),
+            y: fxi(170),
+        });
+        setup.push(Command::SpawnResource {
+            kind: ResourceKind::Carbon,
+            x: fxi(70),
+            y: fxi(168),
+        });
+        for &bx in &[-150i32, 150] {
+            setup.push(Command::SpawnResource {
+                kind: ResourceKind::Ore,
+                x: fxi(bx + 60),
+                y: fxi(-150),
+            });
+        }
         // Two enemy barracks far to the north, each with a guard squad - hidden
         // by fog until you scout up to them.
         for &bx in &[-150i32, 150] {
@@ -103,6 +144,14 @@ impl Game {
                     kind: UnitKind::Infantry,
                     x: fxi(bx - 10 + 4 * k),
                     y: fxi(-165),
+                });
+            }
+            for k in 0..2 {
+                setup.push(Command::SpawnUnit {
+                    owner: 1,
+                    kind: UnitKind::Worker,
+                    x: fxi(bx - 6 + 12 * k),
+                    y: fxi(-178),
                 });
             }
         }
@@ -121,6 +170,7 @@ impl Game {
             explored: vec![false; FOW_RES * FOW_RES],
             fog_unexplored: true,
             fog_explored: true,
+            factions: [Faction::Hollowmen, Faction::Astromancer],
         };
         g.step_now();
         g.prev = g.curr.clone();
@@ -154,6 +204,12 @@ impl Game {
             self.step_now();
             self.acc -= self.tick_dt;
         }
+    }
+
+    /// Keep wall-clock bookkeeping current without stepping the sim, used while
+    /// the game is paused so resuming does not fast-forward a backlog of ticks.
+    pub fn skip_tick(&mut self) {
+        self.last = Instant::now();
     }
 
     pub fn time(&self) -> f32 {
@@ -322,12 +378,47 @@ impl Game {
 
     // ---- render + HUD data ----
 
-    /// Instances for the infantry mesh, the barracks mesh, and selection rings.
-    /// Meshes are authored at world scale, so instance scale is ~1.
-    pub fn render_data(&self) -> (Vec<InstanceRaw>, Vec<InstanceRaw>, Vec<RingRaw>) {
+    /// Which faction the given owner fields (owner 0 = the player).
+    pub fn faction_of(&self, owner: u16) -> Faction {
+        self.factions[(owner != 0) as usize]
+    }
+
+    /// Set the player's faction (owner 0); the enemy takes the other launch
+    /// faction. Called from the skirmish lobby before the match starts.
+    #[allow(dead_code)] // wired up by the skirmish lobby (next)
+    pub fn set_player_faction(&mut self, faction: Faction) {
+        self.factions[0] = faction;
+        self.factions[1] = match faction {
+            Faction::Astromancer => Faction::Hollowmen,
+            Faction::Hollowmen => Faction::Astromancer,
+        };
+    }
+
+    /// Instances for each mesh - infantry, the two faction barracks (Astromancer,
+    /// Hollowmen), the two faction workers (Acolyte, Engineer), the two resource
+    /// nodes (ore, carbon) - plus selection rings. Meshes are authored at world
+    /// scale, so instance scale is ~1 (nodes shrink with depletion).
+    #[allow(clippy::type_complexity)]
+    pub fn render_data(
+        &self,
+    ) -> (
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
+        Vec<InstanceRaw>,
+        Vec<RingRaw>,
+    ) {
         let sel: HashSet<u32> = self.selected.iter().copied().collect();
         let mut infantry = Vec::new();
-        let mut barracks = Vec::new();
+        let mut barracks_astro = Vec::new();
+        let mut barracks_hollow = Vec::new();
+        let mut acolytes = Vec::new();
+        let mut engineers = Vec::new();
+        let mut ore_nodes = Vec::new();
+        let mut carbon_nodes = Vec::new();
         let mut rings = Vec::new();
         for s in &self.curr {
             let (wx, wz) = self.lerped(s);
@@ -336,16 +427,77 @@ impl Game {
             }
             let ground = terrain::height(wx, wz);
             let tint = team_color(s.owner);
-            if s.kind == Kind::Barracks {
-                barracks.push(InstanceRaw {
+            if matches!(s.kind, Kind::OreNode | Kind::CarbonNode) {
+                // Nodes shrink as they deplete (resource_frac runs 1 -> 0).
+                let scl = 0.55 + 0.45 * f(s.resource_frac);
+                let inst = InstanceRaw {
+                    offset: [wx, ground, wz],
+                    scale: [scl, scl, scl],
+                    color: [1.0, 1.0, 1.0, 0.0],
+                };
+                if s.kind == Kind::OreNode {
+                    ore_nodes.push(inst);
+                } else {
+                    carbon_nodes.push(inst);
+                }
+            } else if s.kind == Kind::Barracks {
+                let inst = InstanceRaw {
                     offset: [wx, ground, wz],
                     scale: [1.0, 1.0, 1.0],
                     color: tint,
-                });
+                };
+                match self.faction_of(s.owner) {
+                    Faction::Astromancer => barracks_astro.push(inst),
+                    Faction::Hollowmen => barracks_hollow.push(inst),
+                }
                 if sel.contains(&s.index) {
                     rings.push(RingRaw {
                         center: [wx, ground, wz],
                         radius: 8.0,
+                        color: [0.4, 1.0, 0.5, 0.95],
+                    });
+                }
+            } else if s.kind == Kind::Worker {
+                // Workers animate per faction. The Acolyte hovers with a slow
+                // bob; the Engineer plants and bobs while walking. While mining,
+                // both get a faster work bob to read as "gathering".
+                let phase = s.index as f32 * 1.3;
+                let work = if s.mining {
+                    (self.time * 14.0 + phase).sin().abs()
+                } else {
+                    0.0
+                };
+                let inst = match self.faction_of(s.owner) {
+                    Faction::Astromancer => {
+                        let hover = if s.mining { 0.5 } else { 1.1 }; // dips to gather
+                        let y = ground + hover + ((self.time * 2.2) + phase).sin() * 0.18;
+                        InstanceRaw {
+                            offset: [wx, y, wz],
+                            scale: [1.0, 1.0, 1.0],
+                            color: tint,
+                        }
+                    }
+                    Faction::Hollowmen => {
+                        let mut y = ground;
+                        if s.moving && !s.mining {
+                            y += ((self.time * 9.0) + phase).sin().abs() * 0.12;
+                        }
+                        y += work * 0.10; // drilling bob
+                        InstanceRaw {
+                            offset: [wx, y, wz],
+                            scale: [1.0, 1.0, 1.0],
+                            color: tint,
+                        }
+                    }
+                };
+                match self.faction_of(s.owner) {
+                    Faction::Astromancer => acolytes.push(inst),
+                    Faction::Hollowmen => engineers.push(inst),
+                }
+                if sel.contains(&s.index) {
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: 2.2,
                         color: [0.4, 1.0, 0.5, 0.95],
                     });
                 }
@@ -371,7 +523,16 @@ impl Game {
                 }
             }
         }
-        (infantry, barracks, rings)
+        (
+            infantry,
+            barracks_astro,
+            barracks_hollow,
+            acolytes,
+            engineers,
+            ore_nodes,
+            carbon_nodes,
+            rings,
+        )
     }
 
     fn info(&self, s: &Snap) -> UnitInfo {
@@ -416,7 +577,7 @@ impl Game {
     pub fn player_units(&self) -> Vec<UnitInfo> {
         self.curr
             .iter()
-            .filter(|s| s.owner == 0 && s.kind == Kind::Infantry)
+            .filter(|s| s.owner == 0 && matches!(s.kind, Kind::Infantry | Kind::Worker))
             .map(|s| self.info(s))
             .collect()
     }
@@ -434,6 +595,8 @@ impl Game {
                 (_, Kind::Infantry) => c.1 += 1,
                 (0, Kind::Barracks) => c.2 += 1,
                 (_, Kind::Barracks) => c.3 += 1,
+                // Workers and resource nodes are not part of this army tally.
+                (_, Kind::Worker) | (_, Kind::OreNode) | (_, Kind::CarbonNode) => {}
             }
         }
         c
@@ -472,10 +635,10 @@ impl Game {
         self.selected.clear();
         let mut best: Option<(u32, f32)> = None;
 
-        // Nearest infantry within a click radius.
+        // Nearest selectable unit within a click radius.
         let unit_r = (h * 0.03).max(18.0);
         for s in &self.curr {
-            if s.owner != 0 || s.kind != Kind::Infantry {
+            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker) {
                 continue;
             }
             let (wx, wz) = self.lerped(s);
@@ -536,6 +699,12 @@ impl Game {
         f(self.world.ore(0))
     }
 
+    /// The local player's carbon stockpile (for the HUD).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn player_carbon(&self) -> f32 {
+        f(self.world.carbon(0))
+    }
+
     /// Ore cost to train one unit (for the HUD).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn train_cost(&self) -> f32 {
@@ -560,7 +729,7 @@ impl Game {
         let (x0, y0, x1, y1) = rect;
         self.selected.clear();
         for s in &self.curr {
-            if s.owner != 0 || s.kind != Kind::Infantry {
+            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker) {
                 continue;
             }
             let (wx, wz) = self.lerped(s);
@@ -574,8 +743,47 @@ impl Game {
         }
     }
 
+    /// Nearest resource node to a world point within `radius`, if any.
+    fn nearest_node(&self, wx: f32, wz: f32, radius: f32) -> Option<u32> {
+        let mut best: Option<(u32, f32)> = None;
+        for s in &self.curr {
+            if !matches!(s.kind, Kind::OreNode | Kind::CarbonNode) {
+                continue;
+            }
+            let (nx, nz) = self.lerped(s);
+            let d = (nx - wx).hypot(nz - wz);
+            if d <= radius && best.is_none_or(|(_, bd)| d < bd) {
+                best = Some((s.index, d));
+            }
+        }
+        best.map(|(i, _)| i)
+    }
+
+    fn is_worker(&self, unit: u32) -> bool {
+        self.curr
+            .iter()
+            .any(|s| s.index == unit && s.kind == Kind::Worker)
+    }
+
     pub fn order(&mut self, wx: f32, wz: f32) {
         if self.selected.is_empty() {
+            return;
+        }
+        // Right-clicking a resource node sends selected workers to harvest it;
+        // any non-worker in the selection just moves to the spot.
+        if let Some(node) = self.nearest_node(wx, wz, 10.0) {
+            let sel = self.selected.clone();
+            for u in sel {
+                if self.is_worker(u) {
+                    self.pending.push(Command::Harvest { unit: u, node });
+                } else {
+                    self.pending.push(Command::Move {
+                        unit: u,
+                        x: fx(wx),
+                        y: fx(wz),
+                    });
+                }
+            }
             return;
         }
         if let Some(target) = self.nearest_enemy(wx, wz, 4.0) {
