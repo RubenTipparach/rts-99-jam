@@ -30,29 +30,19 @@ pub enum CursorKind {
     Rally,
 }
 
-/// True when a physical-pixel point sits over in-game UI (the command bar,
-/// the minimap, or the build grid), so edge-panning and world cursors stand
-/// down there.
+/// Height of the unified bottom HUD strip (CSS px): one continuous surface
+/// whose left section holds the minimap, the centre the selection panel,
+/// and the right the command card - discrete areas split by dividers,
+/// nothing floating over anything else.
 #[cfg(target_arch = "wasm32")]
-pub fn over_ui(game: &Game, cx: f32, cy: f32, w_phys: f32, h_phys: f32) -> bool {
+const HUD_H: f64 = 184.0;
+
+/// True when a physical-pixel point sits over the in-game UI (the bottom
+/// HUD strip), so edge-panning and world cursors stand down there.
+#[cfg(target_arch = "wasm32")]
+pub fn over_ui(_game: &Game, _cx: f32, cy: f32, _w_phys: f32, h_phys: f32) -> bool {
     let d = dpr();
-    if cy >= h_phys - 96.0 * d {
-        return true; // the command bar strip
-    }
-    let (x0, y0, x1, y1) = minimap_rect(w_phys, h_phys);
-    if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
-        return true;
-    }
-    // The whole command-card panel counts as UI while it is up, not just
-    // its occupied slots.
-    if !card_actions(game).is_empty() {
-        let (px, py, pw, ph) = card_panel_css(w_phys / d, h_phys / d);
-        let (x0, y0, x1, y1) = css_to_phys((px, py, pw, ph), d);
-        if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
-            return true;
-        }
-    }
-    false
+    cy >= h_phys - HUD_H as f32 * d
 }
 
 // --- icon art -------------------------------------------------------------
@@ -275,12 +265,18 @@ const CARD_ROWS: usize = 3;
 #[cfg(target_arch = "wasm32")]
 const PANEL_PAD: f64 = 10.0;
 
-/// The command-card panel rect in CSS pixels (bottom-right corner).
+/// The command-card section rect in CSS pixels: the right section of the
+/// bottom HUD strip, vertically centred inside it.
 #[cfg(target_arch = "wasm32")]
 fn card_panel_css(w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
     let pw = CARD_COLS as f64 * BTN + (CARD_COLS as f64 - 1.0) * BTN_GAP + 2.0 * PANEL_PAD;
     let ph = CARD_ROWS as f64 * BTN + (CARD_ROWS as f64 - 1.0) * BTN_GAP + 2.0 * PANEL_PAD;
-    (w_css as f64 - pw - 12.0, h_css as f64 - ph - 12.0, pw, ph)
+    (
+        w_css as f64 - pw - 12.0,
+        h_css as f64 - HUD_H + (HUD_H - ph) / 2.0,
+        pw,
+        ph,
+    )
 }
 
 /// Command-card slot `k`'s rect in CSS pixels `(x, y, w, h)` (row-major in
@@ -605,14 +601,12 @@ fn draw_match_end(
     ctx.restore();
 }
 
-/// Minimap panel geometry in CSS pixels `(mx, my, mm)`: its own square box
-/// tucked into the bottom-LEFT corner (StarCraft layout; the command card
-/// mirrors it bottom-right). Single source of truth for draw and hit-test.
+/// Minimap geometry in CSS pixels `(mx, my, mm)`: the left section of the
+/// bottom HUD strip. Single source of truth for draw and hit-test.
 #[cfg(target_arch = "wasm32")]
 fn minimap_css(_w: f32, h: f32) -> (f64, f64, f64) {
-    let mm = 160.0_f64;
-    let margin = 12.0_f64;
-    (margin, h as f64 - mm - margin, mm)
+    let mm = HUD_H - 24.0;
+    (12.0, h as f64 - HUD_H + 12.0, mm)
 }
 
 /// Minimap rect in physical pixels `(x0, y0, x1, y1)`, for click/drag-to-look.
@@ -905,13 +899,28 @@ pub fn draw(
         ctx.stroke_rect(x0 as f64, y0 as f64, (x1 - x0) as f64, (y1 - y0) as f64);
     }
 
-    // Command bar.
-    let bar = 96.0_f64;
-    ctx.set_fill_style_str("rgba(8,14,26,0.85)");
+    // The bottom HUD: one continuous strip split by thin dividers into
+    // three discrete sections - minimap | selection | command card. No
+    // panels float on top of other panels.
+    let bar = HUD_H;
+    ctx.set_fill_style_str("rgba(8,14,26,0.92)");
     ctx.fill_rect(0.0, hf - bar, wf, bar);
     ctx.set_stroke_style_str("rgba(120,160,210,0.85)");
     ctx.set_line_width(2.0);
     ctx.stroke_rect(1.0, hf - bar + 1.0, wf - 2.0, bar - 2.0);
+    let (card_x, _, _, _) = card_panel_css(w, h);
+    let div_l = HUD_H; // right edge of the minimap section (12 + map + 12)
+    let div_r = card_x - 12.0;
+    ctx.set_stroke_style_str("rgba(120,160,210,0.45)");
+    ctx.set_line_width(1.5);
+    for x in [div_l, div_r] {
+        ctx.begin_path();
+        ctx.move_to(x, hf - bar + 10.0);
+        ctx.line_to(x, hf - 10.0);
+        ctx.stroke();
+    }
+    // Centre of the selection section, for everything drawn in it.
+    let mid_c = (div_l + div_r) / 2.0;
 
     // Resource readout with proper icons (top-RIGHT corner, StarCraft
     // style): an ore crystal, a carbon geyser puff, and a supply depot.
@@ -964,8 +973,8 @@ pub fn draw(
             let n = units.len().min(16);
             let cols = 8.min(n);
             let cell = 38.0_f64;
-            let px = wf / 2.0 - cols as f64 * cell / 2.0;
-            let py = hf - bar + 8.0;
+            let px = mid_c - cols as f64 * cell / 2.0;
+            let py = hf - bar + 24.0;
             for (i, u) in units.iter().take(n).enumerate() {
                 let x = px + (i % 8) as f64 * cell;
                 let y = py + (i / 8) as f64 * (cell + 4.0);
@@ -982,8 +991,8 @@ pub fn draw(
             }
         } else if let Some(u) = infos.first() {
             // A building selects alone: portrait art + name + HP readout.
-            let px = wf / 2.0 - 105.0;
-            let py = hf - bar + 14.0;
+            let px = mid_c - 105.0;
+            let py = hf - bar + (bar - 66.0) / 2.0;
             ctx.set_fill_style_str("rgba(20,30,48,0.9)");
             ctx.fill_rect(px, py, 66.0, 66.0);
             draw_icon(&ctx, info_icon(u.kind, astro), px + 1.0, py + 1.0, 64.0);
@@ -1005,19 +1014,13 @@ pub fn draw(
         }
     }
 
-    // Command card (StarCraft layout): one framed 3x3 grid in the
-    // bottom-right corner holding every option for the current selection
-    // (training and construction alike). Faces are icon + hotkey only; the
-    // name and cost live in the hover tooltip to keep the card clean.
+    // Command card: the 5x3 slot grid filling the strip's right section
+    // (no panel-on-panel: the strip is the surface; slots are wells in it).
+    // Faces are icon + hotkey only; the name and cost live in the hover
+    // tooltip to keep the card clean.
     let actions = card_actions(game);
     let mut tooltip: Option<(f64, f64, f64, &str, i64, i64)> = None;
     if !actions.is_empty() {
-        let (px, py, pw, ph) = card_panel_css(w, h);
-        ctx.set_fill_style_str("rgba(8,14,26,0.88)");
-        ctx.fill_rect(px, py, pw, ph);
-        ctx.set_stroke_style_str("rgba(120,160,210,0.85)");
-        ctx.set_line_width(2.0);
-        ctx.stroke_rect(px, py, pw, ph);
         for s in 0..(CARD_COLS * CARD_ROWS) {
             let (bx, by, bw, bh) = card_btn_css(s, w, h);
             ctx.set_fill_style_str("rgba(22,30,46,0.7)");
@@ -1112,7 +1115,6 @@ pub fn draw(
     // box reads upright (the direction you are looking points up) and the square
     // world reads as a diamond.
     let (mx, my, mm) = minimap_css(w, h);
-    let pad = 6.0_f64;
     let mcx = mx + mm / 2.0;
     let mcy = my + mm / 2.0;
     let rad = mm / 2.0;
@@ -1131,13 +1133,11 @@ pub fn draw(
         ctx.line_to(diamond[3].0, diamond[3].1);
         ctx.close_path();
     };
-    ctx.set_fill_style_str("rgba(8,14,26,0.92)");
-    ctx.fill_rect(mx - pad, my - pad, mm + pad * 2.0, mm + pad * 2.0);
+    // The strip itself is the minimap's housing (no extra panel box): just
+    // the radar pixels and the diamond rim inside the left section.
     draw_minimap(&ctx, game, dpr, mx, my, mm);
-    // Square housing frame, then the diamond rim.
     ctx.set_stroke_style_str("rgba(120,160,210,0.95)");
     ctx.set_line_width(2.0);
-    ctx.stroke_rect(mx - pad, my - pad, mm + pad * 2.0, mm + pad * 2.0);
     path_diamond(&ctx);
     ctx.stroke();
 
