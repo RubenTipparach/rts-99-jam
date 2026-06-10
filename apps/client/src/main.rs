@@ -299,6 +299,10 @@ struct App {
     /// A front-end (menu/lobby) button was just clicked; same flash treatment.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     menu_flash: Option<(menu::Click, Instant)>,
+    /// A short-lived HUD notice ("NOT ENOUGH ORE"), shown centred above the
+    /// command bar and faded out by the HUD.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    toast: Option<(String, Instant)>,
     /// The match verdict, once decided (true = victory). Freezes the sim and
     /// swaps the pause overlay for the end screen.
     outcome: Option<bool>,
@@ -330,6 +334,7 @@ impl App {
             build_mode: None,
             card_flash: None,
             menu_flash: None,
+            toast: None,
             outcome: None,
             proxy,
         }
@@ -461,17 +466,36 @@ impl App {
         self.apply_cursor_grab();
     }
 
+    /// Arm build-placement mode for `kind`, unless the player cannot afford
+    /// it - then raise a "NOT ENOUGH ..." toast instead and stay unarmed.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn arm_build(&mut self, kind: protocol::BuildingKind) {
+        let (ore, carbon) = Game::build_cost(kind);
+        let need_ore = (self.game.player_ore() as i64) < ore;
+        let need_carbon = (self.game.player_carbon() as i64) < carbon;
+        if need_ore || need_carbon {
+            let what = match (need_ore, need_carbon) {
+                (true, true) => "ORE AND CARBON",
+                (true, false) => "ORE",
+                _ => "CARBON",
+            };
+            self.toast = Some((format!("NOT ENOUGH {what}"), Instant::now()));
+            return;
+        }
+        self.build_mode = Some(kind);
+    }
+
     /// If the point hits a command-card button, perform its action (queue a
     /// unit, or arm build-placement mode) and report the click consumed
     /// (web HUD only).
     #[cfg(target_arch = "wasm32")]
-    fn card_click(&mut self, cx: f32, cy: f32, _w: f32, h: f32) -> bool {
+    fn card_click(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
         for (k, (action, ..)) in hud::card_actions(&self.game).into_iter().enumerate() {
-            let (x0, y0, x1, y1) = hud::card_button_rect(&self.game, k, h);
+            let (x0, y0, x1, y1) = hud::card_button_rect(k, w, h);
             if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
                 match action {
                     hud::CardAction::Train(kind) => self.game.train_selected(kind),
-                    hud::CardAction::Build(kind) => self.build_mode = Some(kind),
+                    hud::CardAction::Build(kind) => self.arm_build(kind),
                 }
                 self.card_flash = Some((k, Instant::now()));
                 return true;
@@ -757,18 +781,19 @@ impl ApplicationHandler<UserEvent> for App {
                             self.game.train_selected(protocol::UnitKind::Heavy)
                         }
                         // Worker build: B = barracks, V = turret, N = a new HQ
-                        // (founds an expansion) -> placement mode.
+                        // (founds an expansion) -> placement mode (refused
+                        // with a toast when unaffordable).
                         KeyCode::KeyB if down && self.game.has_worker_selected() => {
-                            self.build_mode = Some(protocol::BuildingKind::Barracks)
+                            self.arm_build(protocol::BuildingKind::Barracks)
                         }
                         KeyCode::KeyV if down && self.game.has_worker_selected() => {
-                            self.build_mode = Some(protocol::BuildingKind::Turret)
+                            self.arm_build(protocol::BuildingKind::Turret)
                         }
                         KeyCode::KeyN if down && self.game.has_worker_selected() => {
-                            self.build_mode = Some(protocol::BuildingKind::Hq)
+                            self.arm_build(protocol::BuildingKind::Hq)
                         }
                         KeyCode::KeyG if down && self.game.has_worker_selected() => {
-                            self.build_mode = Some(protocol::BuildingKind::Supply)
+                            self.arm_build(protocol::BuildingKind::Supply)
                         }
                         KeyCode::Digit1 if down => self.game.toggle_fog_unexplored(),
                         KeyCode::Digit2 if down => self.game.toggle_fog_explored(),
@@ -803,6 +828,16 @@ impl ApplicationHandler<UserEvent> for App {
                 // ground point; a right-click cancels. Consumes the click.
                 if let Some(kind) = self.build_mode {
                     if button == MouseButton::Left && state == ElementState::Pressed {
+                        // Resources can drain while aiming; re-check at the
+                        // drop so the hologram can't outspend the stockpile.
+                        let (ore, carbon) = Game::build_cost(kind);
+                        if (self.game.player_ore() as i64) < ore
+                            || (self.game.player_carbon() as i64) < carbon
+                        {
+                            self.build_mode = None;
+                            self.arm_build(kind); // refuses + raises the toast
+                            return;
+                        }
                         if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
                             self.game.build_selected(kind, wx, wz);
                         }
@@ -1035,6 +1070,7 @@ impl ApplicationHandler<UserEvent> for App {
                         None,
                         None,
                         None,
+                        None,
                         self.outcome,
                     );
                     return;
@@ -1158,6 +1194,16 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                 };
+                // Expire the toast after its fade.
+                if let Some((_, t0)) = &self.toast {
+                    if t0.elapsed().as_secs_f32() > 2.5 {
+                        self.toast = None;
+                    }
+                }
+                let toast = self
+                    .toast
+                    .as_ref()
+                    .map(|(s, t0)| (s.as_str(), t0.elapsed().as_secs_f32()));
                 hud::draw(
                     &self.camera,
                     &self.game,
@@ -1170,6 +1216,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.build_mode,
                     self.card_flash
                         .and_then(|(k, t)| (t.elapsed().as_secs_f32() < 0.15).then_some(k)),
+                    toast,
                     None,
                 );
 

@@ -1550,6 +1550,28 @@ impl Game {
         }
     }
 
+    /// Ore + carbon price of a building (mirrors the sim's costs; the HUD
+    /// card, hotkeys, and placement checks all share this table).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn build_cost(kind: BuildingKind) -> (i64, i64) {
+        match kind {
+            BuildingKind::Barracks => (150, 0),
+            BuildingKind::Turret => (90, 50),
+            BuildingKind::Supply => (100, 0),
+            BuildingKind::Hq => (400, 0),
+        }
+    }
+
+    /// Ore + carbon price of a trainable unit.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn train_cost(kind: UnitKind) -> (i64, i64) {
+        match kind {
+            UnitKind::Worker => (40, 0),
+            UnitKind::Infantry => (50, 0),
+            UnitKind::Heavy => (120, 60),
+        }
+    }
+
     /// Whether the local player drives the Astromancer faction (the HUD
     /// picks faction-flavored icon art with this).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

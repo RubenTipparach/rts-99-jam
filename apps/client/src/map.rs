@@ -65,6 +65,27 @@ pub fn active_scenario() -> &'static str {
     }
 }
 
+/// `(owner, x, z)` of every HQ in world `idx`'s fitted scenario, so the
+/// lobby preview marks the starts where they actually are on that world.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // web lobby only
+pub fn world_spawns(idx: usize) -> Vec<(u16, f32, f32)> {
+    let src = WORLD_SCENARIOS.get(idx).copied().unwrap_or(SKIRMISH);
+    let mut out = Vec::new();
+    for line in src.lines() {
+        let text = line.split('#').next().unwrap_or("").trim();
+        let mut tok = text.split_whitespace();
+        if tok.next() != Some("hq") {
+            continue;
+        }
+        if let (Some(p), Some(x), Some(z)) = (tok.next(), tok.next(), tok.next()) {
+            if let (Ok(p), Ok(x), Ok(z)) = (p.parse(), x.parse::<i32>(), z.parse::<i32>()) {
+                out.push((p, x as f32, z as f32));
+            }
+        }
+    }
+    out
+}
+
 /// A parsed map: its display name and the setup commands that realize it.
 pub struct MapFile {
     pub name: String,

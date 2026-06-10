@@ -43,8 +43,11 @@ pub fn over_ui(game: &Game, cx: f32, cy: f32, w_phys: f32, h_phys: f32) -> bool 
     if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
         return true;
     }
-    for (k, _) in card_actions(game).iter().enumerate() {
-        let (x0, y0, x1, y1) = card_button_rect(game, k, h_phys);
+    // The whole command-card panel counts as UI while it is up, not just
+    // its occupied slots.
+    if !card_actions(game).is_empty() {
+        let (px, py, pw, ph) = card_panel_css(w_phys / d, h_phys / d);
+        let (x0, y0, x1, y1) = css_to_phys((px, py, pw, ph), d);
         if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
             return true;
         }
@@ -235,96 +238,72 @@ pub enum CardAction {
 #[cfg(target_arch = "wasm32")]
 pub fn card_actions(game: &Game) -> Vec<(CardAction, &'static str, &'static str, i64, i64)> {
     let mut out = Vec::new();
+    let mut push = |action: CardAction, label: &'static str, hotkey: &'static str| {
+        let (ore, carbon) = match action {
+            CardAction::Train(k) => Game::train_cost(k),
+            CardAction::Build(k) => Game::build_cost(k),
+        };
+        out.push((action, label, hotkey, ore, carbon));
+    };
     if game.selected_hq().is_some() {
-        out.push((CardAction::Train(UnitKind::Worker), "Worker", "T", 40, 0));
+        push(CardAction::Train(UnitKind::Worker), "Worker", "T");
     } else if game.selected_barracks().is_some() {
-        out.push((
-            CardAction::Train(UnitKind::Infantry),
-            "Infantry",
-            "T",
-            50,
-            0,
-        ));
-        out.push((CardAction::Train(UnitKind::Heavy), "Heavy", "H", 120, 60));
+        push(CardAction::Train(UnitKind::Infantry), "Infantry", "T");
+        push(CardAction::Train(UnitKind::Heavy), "Heavy", "H");
     }
     if game.has_worker_selected() {
-        out.push((
-            CardAction::Build(BuildingKind::Barracks),
-            "Barracks",
-            "B",
-            150,
-            0,
-        ));
-        out.push((
-            CardAction::Build(BuildingKind::Turret),
-            "Turret",
-            "V",
-            90,
-            50,
-        ));
-        out.push((
-            CardAction::Build(BuildingKind::Supply),
-            "Depot",
-            "G",
-            100,
-            0,
-        ));
-        out.push((CardAction::Build(BuildingKind::Hq), "HQ", "N", 400, 0));
+        push(CardAction::Build(BuildingKind::Barracks), "Barracks", "B");
+        push(CardAction::Build(BuildingKind::Turret), "Turret", "V");
+        push(CardAction::Build(BuildingKind::Supply), "Depot", "G");
+        push(CardAction::Build(BuildingKind::Hq), "HQ", "N");
     }
     out
 }
 
-/// Square icon buttons: training options sit in the bottom command bar
-/// (left side); construction options stack in a 2-column grid on the left
-/// edge of the screen.
+/// The command card (StarCraft layout): a 5x3 grid of square icon buttons
+/// in a framed panel anchored to the bottom-right corner, with spare slots
+/// for future orders. Training and construction options fill the slots in
+/// `card_actions` order.
 #[cfg(target_arch = "wasm32")]
-const BTN: f64 = 56.0;
+const BTN: f64 = 48.0;
 #[cfg(target_arch = "wasm32")]
-const BTN_GAP: f64 = 8.0;
+const BTN_GAP: f64 = 6.0;
+#[cfg(target_arch = "wasm32")]
+const CARD_COLS: usize = 5;
+#[cfg(target_arch = "wasm32")]
+const CARD_ROWS: usize = 3;
+#[cfg(target_arch = "wasm32")]
+const PANEL_PAD: f64 = 10.0;
 
+/// The command-card panel rect in CSS pixels (bottom-right corner).
 #[cfg(target_arch = "wasm32")]
-fn train_btn_css(idx: usize, h_css: f32) -> (f64, f64, f64, f64) {
+fn card_panel_css(w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
+    let pw = CARD_COLS as f64 * BTN + (CARD_COLS as f64 - 1.0) * BTN_GAP + 2.0 * PANEL_PAD;
+    let ph = CARD_ROWS as f64 * BTN + (CARD_ROWS as f64 - 1.0) * BTN_GAP + 2.0 * PANEL_PAD;
+    (w_css as f64 - pw - 12.0, h_css as f64 - ph - 12.0, pw, ph)
+}
+
+/// Command-card slot `k`'s rect in CSS pixels `(x, y, w, h)` (row-major in
+/// the 3x3 grid).
+#[cfg(target_arch = "wasm32")]
+fn card_btn_css(k: usize, w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
+    let (px, py, _, _) = card_panel_css(w_css, h_css);
+    let col = (k % CARD_COLS) as f64;
+    let row = (k / CARD_COLS) as f64;
     (
-        14.0 + idx as f64 * (BTN + BTN_GAP),
-        h_css as f64 - 96.0 + 20.0,
+        px + PANEL_PAD + col * (BTN + BTN_GAP),
+        py + PANEL_PAD + row * (BTN + BTN_GAP),
         BTN,
         BTN,
     )
 }
 
-#[cfg(target_arch = "wasm32")]
-fn build_btn_css(idx: usize, h_css: f32) -> (f64, f64, f64, f64) {
-    let col = (idx % 2) as f64;
-    let row = (idx / 2) as f64;
-    (
-        14.0 + col * (BTN + BTN_GAP),
-        h_css as f64 * 0.5 - 70.0 + row * (BTN + BTN_GAP),
-        BTN,
-        BTN,
-    )
-}
-
-/// Command-card button `k`'s rect in CSS pixels `(x, y, w, h)`: trains count
-/// along the bar, builds count down the left grid.
-#[cfg(target_arch = "wasm32")]
-fn card_btn_css(game: &Game, k: usize, h_css: f32) -> (f64, f64, f64, f64) {
-    let actions = card_actions(game);
-    let builds_before = actions[..k]
-        .iter()
-        .filter(|a| matches!(a.0, CardAction::Build(_)))
-        .count();
-    match actions[k].0 {
-        CardAction::Train(_) => train_btn_css(k - builds_before, h_css),
-        CardAction::Build(_) => build_btn_css(builds_before, h_css),
-    }
-}
-
-/// Command-card button `k`'s rect in physical pixels `(x0, y0, x1, y1)`, for
+/// Command-card slot `k`'s rect in physical pixels `(x0, y0, x1, y1)`, for
 /// hit-testing against raw cursor/touch coordinates.
 #[cfg(target_arch = "wasm32")]
-pub fn card_button_rect(game: &Game, k: usize, h_phys: f32) -> (f32, f32, f32, f32) {
+pub fn card_button_rect(k: usize, w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
     let d = dpr();
-    let (x, y, bw, bh) = card_btn_css(game, k, h_phys / d);
+    let (x, y, bw, bh) = card_btn_css(k, w_phys / d, h_phys / d);
     (
         x as f32 * d,
         y as f32 * d,
@@ -626,16 +605,14 @@ fn draw_match_end(
     ctx.restore();
 }
 
-/// Minimap panel geometry in CSS pixels `(mx, my, mm)`: its own square box tucked
-/// into the very bottom-right corner of the screen (over the command bar). Single
-/// source of truth for both the draw and the hit-test.
+/// Minimap panel geometry in CSS pixels `(mx, my, mm)`: its own square box
+/// tucked into the bottom-LEFT corner (StarCraft layout; the command card
+/// mirrors it bottom-right). Single source of truth for draw and hit-test.
 #[cfg(target_arch = "wasm32")]
-fn minimap_css(w: f32, h: f32) -> (f64, f64, f64) {
-    let mm = 160.0_f64; // 2x the old 80px panel
+fn minimap_css(_w: f32, h: f32) -> (f64, f64, f64) {
+    let mm = 160.0_f64;
     let margin = 12.0_f64;
-    let mx = w as f64 - mm - margin;
-    let my = h as f64 - mm - margin;
-    (mx, my, mm)
+    (margin, h as f64 - mm - margin, mm)
 }
 
 /// Minimap rect in physical pixels `(x0, y0, x1, y1)`, for click/drag-to-look.
@@ -772,6 +749,7 @@ pub fn draw(
     _cursor_kind: Option<CursorKind>,
     _build_mode: Option<BuildingKind>,
     _card_pressed: Option<usize>,
+    _toast: Option<(&str, f32)>,
     _outcome: Option<bool>,
 ) {
 }
@@ -789,6 +767,7 @@ pub fn draw(
     cursor_kind: Option<CursorKind>,
     build_mode: Option<BuildingKind>,
     card_pressed: Option<usize>,
+    toast: Option<(&str, f32)>,
     outcome: Option<bool>,
 ) {
     use crate::terrain;
@@ -934,19 +913,20 @@ pub fn draw(
     ctx.set_line_width(2.0);
     ctx.stroke_rect(1.0, hf - bar + 1.0, wf - 2.0, bar - 2.0);
 
-    // Resource readout with proper icons: an ore crystal, a carbon geyser
-    // puff, and a supply depot. Icons are tiny canvas paths so they ship with
-    // the WASM HUD (no image assets). Per the HUD policy in CLAUDE.md this is
-    // the only top-bar content: no faction labels, counters, or help text.
+    // Resource readout with proper icons (top-RIGHT corner, StarCraft
+    // style): an ore crystal, a carbon geyser puff, and a supply depot.
+    // Icons are tiny canvas paths so they ship with the WASM HUD (no image
+    // assets). Per the HUD policy in CLAUDE.md this is the only top-bar
+    // content: no faction labels, counters, or help text.
     ctx.set_font("bold 16px monospace");
     let icon_y = 17.0_f64;
 
-    let ox = 16.0_f64;
+    let ox = wf - 292.0;
     draw_ore_glyph(&ctx, ox, icon_y);
     ctx.set_fill_style_str("#e7eefa");
     let _ = ctx.fill_text(&format!("{}", game.player_ore() as i64), ox + 18.0, 24.0);
 
-    let cx2 = 106.0_f64;
+    let cx2 = wf - 198.0;
     draw_carbon_glyph(&ctx, cx2, icon_y);
     ctx.set_fill_style_str("#e7eefa");
     let _ = ctx.fill_text(
@@ -1025,20 +1005,34 @@ pub fn draw(
         }
     }
 
-    // Command card: icon buttons. Training options (HQ -> Worker, Barracks ->
-    // Infantry/Heavy) sit in the bar; worker construction options stack in
-    // the build grid on the left edge. Faces are icon + hotkey only; the
+    // Command card (StarCraft layout): one framed 3x3 grid in the
+    // bottom-right corner holding every option for the current selection
+    // (training and construction alike). Faces are icon + hotkey only; the
     // name and cost live in the hover tooltip to keep the card clean.
     let actions = card_actions(game);
     let mut tooltip: Option<(f64, f64, f64, &str, i64, i64)> = None;
     if !actions.is_empty() {
+        let (px, py, pw, ph) = card_panel_css(w, h);
+        ctx.set_fill_style_str("rgba(8,14,26,0.88)");
+        ctx.fill_rect(px, py, pw, ph);
+        ctx.set_stroke_style_str("rgba(120,160,210,0.85)");
+        ctx.set_line_width(2.0);
+        ctx.stroke_rect(px, py, pw, ph);
+        for s in 0..(CARD_COLS * CARD_ROWS) {
+            let (bx, by, bw, bh) = card_btn_css(s, w, h);
+            ctx.set_fill_style_str("rgba(22,30,46,0.7)");
+            ctx.fill_rect(bx, by, bw, bh);
+            ctx.set_stroke_style_str("rgba(80,110,160,0.45)");
+            ctx.set_line_width(1.0);
+            ctx.stroke_rect(bx, by, bw, bh);
+        }
         let prod = game.selected_production();
         let ore_have = game.player_ore() as i64;
         let carbon_have = game.player_carbon() as i64;
         let mut prod_shown = false;
         let dc = dpr as f64;
         for (k, &(action, label, hotkey, ore, carbon)) in actions.iter().enumerate() {
-            let (bx, by, bw, bh) = card_btn_css(game, k, h);
+            let (bx, by, bw, bh) = card_btn_css(k, w, h);
             let afford = ore_have >= ore && carbon_have >= carbon;
             // The button whose building is being placed right now glows green.
             let active = matches!((action, build_mode), (CardAction::Build(b), Some(m)) if b == m);
@@ -1205,6 +1199,27 @@ pub fn draw(
     ctx.stroke();
 
     ctx.restore();
+
+    // Toast notice ("NOT ENOUGH ORE"): centred just above the command bar,
+    // holding briefly and then fading out.
+    if let Some((text, age)) = toast {
+        let alpha = (1.0 - ((age - 1.6) / 0.9).max(0.0)).clamp(0.0, 1.0);
+        if alpha > 0.0 {
+            ctx.set_font("bold 16px monospace");
+            let tw = 12.0 * text.len() as f64 + 28.0;
+            let tx = wf / 2.0 - tw / 2.0;
+            let ty = hf - bar - 46.0;
+            ctx.set_fill_style_str(&format!("rgba(40,16,16,{:.3})", 0.92 * alpha));
+            ctx.fill_rect(tx, ty, tw, 32.0);
+            ctx.set_stroke_style_str(&format!("rgba(255,120,100,{:.3})", 0.9 * alpha));
+            ctx.set_line_width(1.5);
+            ctx.stroke_rect(tx, ty, tw, 32.0);
+            ctx.set_fill_style_str(&format!("rgba(255,200,190,{:.3})", alpha));
+            ctx.set_text_align("center");
+            let _ = ctx.fill_text(text, wf / 2.0, ty + 21.0);
+            ctx.set_text_align("left");
+        }
+    }
 
     // Hover tooltip for a command-card button: the option's name with its
     // cost as resource glyph + amount pairs (the only place costs appear,

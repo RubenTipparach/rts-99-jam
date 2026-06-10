@@ -441,8 +441,9 @@ mod web {
             tw,
             th,
         );
-        // Start markers, in the diamond's unit-square coordinates: the player
-        // main sits south, the two enemy mains north (see the baked map).
+        // Start markers at this world's actual fitted spawns (every
+        // battlefield re-fits the template onto its own viable ground, so
+        // the positions differ per world).
         let (half_w, half_h) = (tw / 2.0, th / 2.0);
         let iso = |u: f64, t: f64| (cx + (u - t) * half_w, cy + (u + t - 1.0) * half_h * 0.92);
         let dot = |u: f64, t: f64, col: &str| {
@@ -452,10 +453,12 @@ mod web {
             let _ = ctx.ellipse(px, py, half_w * 0.035, half_w * 0.021, 0.0, 0.0, TAU);
             ctx.fill();
         };
-        // World (x, z) -> unit square: u = (x + 512) / 1024, t = (z + 512) / 1024.
-        dot(0.5, 0.705, "#4aa3ff"); // player main (0, 210)
-        dot(0.353, 0.314, "#ff5a4a"); // enemy main NW (-150, -190)
-        dot(0.646, 0.314, "#ff5a4a"); // enemy main NE (150, -190)
+        let span = 2.0 * crate::terrain::HALF as f64;
+        for (owner, x, z) in crate::map::world_spawns(idx) {
+            let u = (x as f64 + crate::terrain::HALF as f64) / span;
+            let t = (z as f64 + crate::terrain::HALF as f64) / span;
+            dot(u, t, if owner == 0 { "#4aa3ff" } else { "#ff5a4a" });
+        }
     }
 
     /// The scrollable map-select modal: a list (with scrollbar) on the left and a
