@@ -298,8 +298,18 @@ fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
         return vec4<f32>(in.albedo, 1.0);
     }
     if in.mode >= 2.0 {
-        // Holographic build preview: unshaded, with scanlines slowly rolling
-        // up the mesh (cam.params.x is time).
+        // Holographic build preview: unshaded scanlines plus screen-door
+        // (dither) transparency. The cursor ghost (mode 2.0) keeps every
+        // other pixel; a placed hologram (mode >= 2.25) is denser, so
+        // placement reads as a solid commitment versus a tentative preview.
+        let px = vec2<u32>(in.clip.xy);
+        if in.mode >= 2.25 {
+            if (px.x % 2u == 1u) && (px.y % 2u == 1u) {
+                discard;
+            }
+        } else if (px.x + px.y) % 2u == 0u {
+            discard;
+        }
         let scan = 0.7 + 0.3 * sin(in.world.y * 5.0 - cam.params.x * 6.0);
         return vec4<f32>(in.albedo * (1.1 * scan), 1.0);
     }

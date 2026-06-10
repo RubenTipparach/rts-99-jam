@@ -97,6 +97,22 @@ const PING_LIFE: f32 = 0.9;
 /// deviates more than this from the centre height are too steep to build on.
 const MAX_PAD_CUT: f32 = 3.0;
 
+/// Steepest ground slope (height units per world unit) ground units can walk;
+/// anything steeper is fed to the sim as impassable, along with water.
+const MAX_WALK_SLOPE: f32 = 1.3;
+
+/// A build order awaiting its worker: a placed hologram holds the site until
+/// the structure spawns (or the order quietly dies and the ghost times out).
+struct PendingBuild {
+    kind: BuildingKind,
+    wx: f32,
+    wz: f32,
+    born: f32,
+}
+
+/// Seconds a placed hologram survives without its building appearing.
+const PENDING_BUILD_TTL: f32 = 45.0;
+
 /// Levelled-pad radius for a building footprint (matches the selection ring).
 fn pad_radius(kind: BuildingKind) -> f32 {
     match kind {
@@ -164,6 +180,8 @@ pub struct Game {
     terrain_dirty: bool,
     /// Particle/light effects (muzzle flashes, blood, mining sparks, ...).
     fx: FxSystem,
+    /// Build orders awaiting their worker (drawn as placed holograms).
+    pending_builds: Vec<PendingBuild>,
 }
 
 impl Default for Game {
@@ -199,9 +217,11 @@ impl Game {
             effects: Vec::new(),
             terrain_dirty: false,
             fx: FxSystem::default(),
+            pending_builds: Vec::new(),
         };
         // The enemy is driven by the in-sim bot commander (mines, builds, trains).
         g.world.set_bot(1, true);
+        g.apply_terrain();
         g.step_now();
         g.prev = g.curr.clone();
         g.recompute_fow();
@@ -224,6 +244,60 @@ impl Game {
         self.selected.retain(|i| live.contains(i));
         self.sync_pads();
         self.emit_fx();
+        // A placed hologram retires the moment its building exists on site
+        // (or after a timeout, for orders that quietly died en route).
+        let now = self.time;
+        self.pending_builds.retain(|pb| {
+            let built = self.curr.iter().any(|s| {
+                s.owner == 0
+                    && matches!(
+                        s.kind,
+                        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    )
+                    && (f(s.pos.x) - pb.wx).hypot(f(s.pos.y) - pb.wz) < 5.0
+            });
+            !built && now - pb.born < PENDING_BUILD_TTL
+        });
+    }
+
+    /// Feed the sim the active battlefield's passability: water and steep
+    /// cliffs are impassable to ground units. Call at match start and whenever
+    /// the lobby swaps the world. (Derived client-side from the baked map; for
+    /// networked play this mask should be baked, but every command here is
+    /// local today.)
+    pub fn apply_terrain(&mut self) {
+        const N: usize = 128;
+        let cell = 2.0 * terrain::HALF / N as f32;
+        let mut cells = vec![true; N * N];
+        for k in 0..N {
+            let wz = -terrain::HALF + (k as f32 + 0.5) * cell;
+            for i in 0..N {
+                let wx = -terrain::HALF + (i as f32 + 0.5) * cell;
+                cells[k * N + i] = !Self::terrain_blocked(wx, wz);
+            }
+        }
+        self.world
+            .set_passability(N, Fx::from_int(terrain::HALF as i32), cells);
+    }
+
+    /// Water or too-steep ground (shared by the sim grid and site checks).
+    fn terrain_blocked(wx: f32, wz: f32) -> bool {
+        if terrain::submerged(wx, wz) {
+            return true;
+        }
+        let s = 4.0;
+        let gx = (terrain::natural_height(wx + s, wz) - terrain::natural_height(wx - s, wz)).abs();
+        let gz = (terrain::natural_height(wx, wz + s) - terrain::natural_height(wx, wz - s)).abs();
+        gx.max(gz) / (2.0 * s) > MAX_WALK_SLOPE
+    }
+
+    /// The match outcome once decided: `Some(true)` = victory (every rival
+    /// base razed), `Some(false)` = defeat (the player's base is gone).
+    pub fn outcome(&self) -> Option<bool> {
+        if self.world.eliminated(0) {
+            return Some(false);
+        }
+        self.world.last_standing(0).then_some(true)
     }
 
     /// Turn this tick's sim events into particles and lights: shots become
@@ -821,6 +895,31 @@ impl Game {
             });
         }
 
+        // Placed holograms: every pending build order keeps a denser ghost on
+        // its site (tint alpha 2.4 = the shader's "placed" dither) until the
+        // worker raises the real structure.
+        for pb in &self.pending_builds {
+            let ground = terrain::height(pb.wx, pb.wz);
+            let inst = InstanceRaw {
+                offset: [pb.wx, ground, pb.wz],
+                scale: [1.0, 1.0, 1.0],
+                color: [0.30, 1.0, 0.55, 2.4],
+                rot: ROT_NONE,
+            };
+            match pb.kind {
+                BuildingKind::Hq => match self.faction_of(0) {
+                    Faction::Astromancer => hq_astro.push(inst),
+                    Faction::Hollowmen => hq_hollow.push(inst),
+                },
+                BuildingKind::Barracks => match self.faction_of(0) {
+                    Faction::Astromancer => barracks_astro.push(inst),
+                    Faction::Hollowmen => barracks_hollow.push(inst),
+                },
+                BuildingKind::Turret => turrets.push(inst),
+                BuildingKind::Supply => supplies.push(inst),
+            }
+        }
+
         // Order pings: short-lived feedback decals. A ping with a target rides
         // the (living) target entity; the rest fade in place.
         for e in &self.effects {
@@ -884,12 +983,35 @@ impl Game {
                 return false;
             }
         }
-        // Slope limit: sample the natural ground around the footprint rim.
+        // Never on water, never on top of mobile units, and clear of any
+        // already-placed hologram.
         let r = pad_radius(kind);
+        if terrain::submerged(wx, wz) {
+            return false;
+        }
+        for s in &self.curr {
+            if matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
+                let (ex, ez) = (f(s.pos.x), f(s.pos.y));
+                if (ex - wx).hypot(ez - wz) < r + 1.5 {
+                    return false;
+                }
+            }
+        }
+        for pb in &self.pending_builds {
+            if (pb.wx - wx).hypot(pb.wz - wz) < 14.0 {
+                return false;
+            }
+        }
+        // Slope limit: sample the natural ground around the footprint rim
+        // (also rejects a waterline footprint edge).
         let h0 = terrain::natural_height(wx, wz);
         for k in 0..8 {
             let a = k as f32 * std::f32::consts::TAU / 8.0;
-            let h = terrain::natural_height(wx + a.cos() * r, wz + a.sin() * r);
+            let (sx, sz) = (wx + a.cos() * r, wz + a.sin() * r);
+            if terrain::submerged(sx, sz) {
+                return false;
+            }
+            let h = terrain::natural_height(sx, sz);
             if (h - h0).abs() > MAX_PAD_CUT {
                 return false;
             }
@@ -1124,6 +1246,7 @@ impl Game {
             return;
         }
         let sel: Vec<u32> = self.selected.clone();
+        let mut issued = false;
         for u in sel {
             if self.is_worker(u) {
                 self.pending.push(Command::Build {
@@ -1132,7 +1255,17 @@ impl Game {
                     x: fx(wx),
                     y: fx(wz),
                 });
+                issued = true;
             }
+        }
+        if issued {
+            // The placed hologram holds the site until the worker raises it.
+            self.pending_builds.push(PendingBuild {
+                kind,
+                wx,
+                wz,
+                born: self.time,
+            });
         }
     }
 

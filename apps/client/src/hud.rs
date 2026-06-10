@@ -217,6 +217,60 @@ fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32, cursor: (
     ctx.restore();
 }
 
+/// The match verdict overlay: VICTORY or DEFEAT over a dimmed scene, with the
+/// pause panel's button slot leading back to the menu.
+#[cfg(target_arch = "wasm32")]
+fn draw_match_end(
+    ctx: &web_sys::CanvasRenderingContext2d,
+    w: f32,
+    h: f32,
+    win: bool,
+    cursor: (f64, f64),
+) {
+    let (wf, hf) = (w as f64, h as f64);
+    ctx.save();
+    ctx.set_fill_style_str("rgba(4,8,16,0.78)");
+    ctx.fill_rect(0.0, 0.0, wf, hf);
+    let pw = 380.0_f64;
+    let ph = 230.0_f64;
+    let px = (wf - pw) / 2.0;
+    let py = hf / 2.0 - ph / 2.0 - 10.0;
+    ctx.set_fill_style_str("rgba(10,16,30,0.96)");
+    ctx.fill_rect(px, py, pw, ph);
+    ctx.set_stroke_style_str(if win {
+        "rgba(140,255,170,0.95)"
+    } else {
+        "rgba(255,120,100,0.95)"
+    });
+    ctx.set_line_width(2.0);
+    ctx.stroke_rect(px, py, pw, ph);
+    ctx.set_text_align("center");
+    ctx.set_fill_style_str(if win { "#9dffb4" } else { "#ff8a76" });
+    ctx.set_font("bold 34px monospace");
+    let _ = ctx.fill_text(if win { "VICTORY" } else { "DEFEAT" }, wf / 2.0, py + 68.0);
+    // One button, in the pause panel's Resume slot (shared hit-test).
+    let (bx, by, bw, bh) = resume_btn_css(w, h);
+    let hover = cursor.0 >= bx && cursor.0 <= bx + bw && cursor.1 >= by && cursor.1 <= by + bh;
+    ctx.set_fill_style_str(if hover {
+        "rgba(58,110,185,0.97)"
+    } else {
+        "rgba(40,80,140,0.95)"
+    });
+    ctx.fill_rect(bx, by, bw, bh);
+    ctx.set_stroke_style_str(if hover {
+        "rgba(210,235,255,1.0)"
+    } else {
+        "rgba(150,190,240,0.95)"
+    });
+    ctx.set_line_width(if hover { 2.5 } else { 1.5 });
+    ctx.stroke_rect(bx, by, bw, bh);
+    ctx.set_fill_style_str("#eaf2ff");
+    ctx.set_font("bold 18px monospace");
+    let _ = ctx.fill_text("Return to Menu", bx + bw / 2.0, by + 31.0);
+    ctx.set_text_align("left");
+    ctx.restore();
+}
+
 /// Minimap panel geometry in CSS pixels `(mx, my, mm)`: its own square box tucked
 /// into the very bottom-right corner of the screen (over the command bar). Single
 /// source of truth for both the draw and the hit-test.
@@ -363,6 +417,7 @@ pub fn draw(
     _draw_cursor: bool,
     _build_mode: Option<BuildingKind>,
     _card_pressed: Option<usize>,
+    _outcome: Option<bool>,
 ) {
 }
 
@@ -379,6 +434,7 @@ pub fn draw(
     draw_cursor: bool,
     build_mode: Option<BuildingKind>,
     card_pressed: Option<usize>,
+    outcome: Option<bool>,
 ) {
     use crate::terrain;
     use wasm_bindgen::JsCast;
@@ -768,6 +824,10 @@ pub fn draw(
     // Pause overlay sits on top of everything when the game is paused.
     if paused {
         let dp = dpr as f64;
-        draw_pause(&ctx, w, h, (cursor.0 as f64 / dp, cursor.1 as f64 / dp));
+        let css_cursor = (cursor.0 as f64 / dp, cursor.1 as f64 / dp);
+        match outcome {
+            Some(win) => draw_match_end(&ctx, w, h, win, css_cursor),
+            None => draw_pause(&ctx, w, h, css_cursor),
+        }
     }
 }

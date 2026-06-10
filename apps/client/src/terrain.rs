@@ -116,6 +116,19 @@ pub fn height(x: f32, z: f32) -> f32 {
     h
 }
 
+/// True when `(x, z)` lies under open liquid: a voxel world's sea/lake layer,
+/// or below sea level on the Earthlike heightmap. Submerged ground is
+/// impassable to units and unbuildable.
+pub fn submerged(x: f32, z: f32) -> bool {
+    if let Some(map) = crate::voxel::active() {
+        return map.liquid_surface(x, z).is_some();
+    }
+    if crate::worlds::active().is_some() {
+        return false; // the procedural solar-system worlds are dry
+    }
+    natural_height(x, z) < SEA_LEVEL + 0.3
+}
+
 pub fn normal(x: f32, z: f32) -> [f32; 3] {
     let e = 1.0;
     let hl = height(x - e, z);

@@ -308,6 +308,13 @@ impl VoxelGrid {
         out
     }
 
+    /// World-space liquid surface height over `(x, z)`, if that column is wet.
+    pub fn liquid_surface(&self, x: f32, z: f32) -> Option<f32> {
+        let (i, k) = self.col_index(x, z);
+        let lj = self.liquid[k * self.nx + i];
+        (lj > 0).then(|| self.world(i, (lj - 1) as usize, k)[1])
+    }
+
     /// A flat quad per liquid column at its surface height: the water/methane
     /// mesh, rendered by the water pipeline. Empty if the world has no liquid.
     pub fn liquid_mesh(&self) -> Vec<[f32; 3]> {

@@ -299,6 +299,9 @@ struct App {
     /// A front-end (menu/lobby) button was just clicked; same flash treatment.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     menu_flash: Option<(menu::Click, Instant)>,
+    /// The match verdict, once decided (true = victory). Freezes the sim and
+    /// swaps the pause overlay for the end screen.
+    outcome: Option<bool>,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     proxy: EventLoopProxy<UserEvent>,
 }
@@ -327,6 +330,7 @@ impl App {
             build_mode: None,
             card_flash: None,
             menu_flash: None,
+            outcome: None,
             proxy,
         }
     }
@@ -553,6 +557,7 @@ impl App {
                 if let Some(g) = self.gfx.as_mut() {
                     g.set_world();
                 }
+                self.game.apply_terrain();
                 self.screen = menu::Screen::InGame;
                 set_body_menu(false); // show the mobile test controls
                 self.apply_cursor_grab();
@@ -561,15 +566,39 @@ impl App {
         }
     }
 
-    /// Apply a pause-menu click or tap at physical `(cx, cy)`.
+    /// Apply a pause-menu click or tap at physical `(cx, cy)`. On the match
+    /// verdict screen the same button slot returns to the menu instead.
     #[cfg(target_arch = "wasm32")]
     fn pause_click(&mut self, cx: f32, cy: f32) {
         let (w, h) = self.dims();
         let hitr = |r: (f32, f32, f32, f32)| cx >= r.0 && cx <= r.2 && cy >= r.1 && cy <= r.3;
+        if self.outcome.is_some() {
+            if hitr(hud::resume_button_rect(w, h)) {
+                self.end_match_to_menu();
+            } else if hitr(hud::fullscreen_button_rect(w, h)) {
+                toggle_fullscreen();
+            }
+            return;
+        }
         if hitr(hud::resume_button_rect(w, h)) {
             self.set_paused(false);
         } else if hitr(hud::fullscreen_button_rect(w, h)) {
             toggle_fullscreen();
+        }
+    }
+
+    /// Leave a finished match: fresh game, back to the front-end (web) or a
+    /// fresh sandbox (native).
+    fn end_match_to_menu(&mut self) {
+        self.outcome = None;
+        self.build_mode = None;
+        self.game = Game::new();
+        self.game.apply_terrain();
+        self.set_paused(false);
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.screen = menu::Screen::Menu;
+            set_body_menu(true);
         }
     }
 }
@@ -660,6 +689,10 @@ impl ApplicationHandler<UserEvent> for App {
                     // Esc: cancel a pending build first; in the lobby step back to
                     // the menu; otherwise (in a match) toggle pause.
                     if code == KeyCode::Escape && down {
+                        if self.outcome.is_some() {
+                            self.end_match_to_menu();
+                            return;
+                        }
                         if self.build_mode.is_some() {
                             self.build_mode = None;
                             return;
@@ -982,6 +1015,7 @@ impl ApplicationHandler<UserEvent> for App {
                         false,
                         None,
                         None,
+                        self.outcome,
                     );
                     return;
                 }
@@ -1031,6 +1065,15 @@ impl ApplicationHandler<UserEvent> for App {
                     self.camera.pan(fwd, right, dt);
                 }
 
+                // The verdict: razing every rival base wins, losing yours
+                // loses. Freeze on the pause path and show the end screen.
+                if self.outcome.is_none() {
+                    if let Some(win) = self.game.outcome() {
+                        log::info!("match over: {}", if win { "victory" } else { "defeat" });
+                        self.outcome = Some(win);
+                        self.set_paused(true);
+                    }
+                }
                 self.game.update();
                 self.game.recompute_fow();
                 // Buildings level the ground under them; rebuild the terrain
@@ -1066,6 +1109,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.build_mode,
                     self.card_flash
                         .and_then(|(k, t)| (t.elapsed().as_secs_f32() < 0.15).then_some(k)),
+                    None,
                 );
 
                 // Remove the loading overlay once the first frame is on screen.

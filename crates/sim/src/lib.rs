@@ -399,6 +399,18 @@ pub struct World {
     /// Shots fired this tick, as `(attacker, target)` slot indices. Display
     /// events for the client fx layer; cleared every step, never hashed.
     shots: Vec<(u32, u32)>,
+    /// Terrain passability grid (square, `pass_n` per side over `+-pass_half`):
+    /// mobile units never enter a blocked cell (water, cliffs). Static match
+    /// config fed identically on every peer before play; empty = all open.
+    passable: Vec<bool>,
+    pass_n: i64,
+    pass_half: Fx,
+    /// Fingerprint of the fed grid, folded into the state hash (0 = no grid).
+    pass_hash: u64,
+    /// Per-player: ever owned a building. Drives elimination (a player who
+    /// built a base and lost all of it is out); derived deterministically
+    /// from spawns, queried by the client, never read by the sim itself.
+    had_building: Vec<bool>,
 }
 
 #[inline]
@@ -434,6 +446,11 @@ impl World {
             bot: Vec::new(),
             facing: Vec::new(),
             shots: Vec::new(),
+            passable: Vec::new(),
+            pass_n: 0,
+            pass_half: Fx::ZERO,
+            pass_hash: 0,
+            had_building: Vec::new(),
         }
     }
 
@@ -445,6 +462,56 @@ impl World {
             self.bot.push(false);
         }
         self.bot[i] = on;
+    }
+
+    /// Feed the terrain passability grid (must be identical on every peer):
+    /// `cells` is row-major `n x n` over the square `+-half` world extent,
+    /// true = walkable. Its fingerprint joins the state hash so a mismatch
+    /// desyncs loudly instead of silently.
+    pub fn set_passability(&mut self, n: usize, half: Fx, cells: Vec<bool>) {
+        assert_eq!(cells.len(), n * n, "passability grid must be n x n");
+        let mut h = Fnv1a::new();
+        h.write_u64(n as u64);
+        h.write_i64(half.to_raw());
+        for (i, &open) in cells.iter().enumerate() {
+            if open {
+                h.write_u32(i as u32);
+            }
+        }
+        self.pass_hash = h.finish();
+        self.pass_n = n as i64;
+        self.pass_half = half;
+        self.passable = cells;
+    }
+
+    /// Whether ground units may stand at `(x, y)` (true with no grid fed).
+    fn cell_passable(&self, x: Fx, y: Fx) -> bool {
+        if self.passable.is_empty() {
+            return true;
+        }
+        let span = self.pass_half + self.pass_half;
+        let n = Fx::from_int(self.pass_n as i32);
+        let ix = ((x + self.pass_half) / span * n).floor_int();
+        let iy = ((y + self.pass_half) / span * n).floor_int();
+        if ix < 0 || iy < 0 || ix >= self.pass_n || iy >= self.pass_n {
+            return false;
+        }
+        self.passable[(iy * self.pass_n + ix) as usize]
+    }
+
+    /// Move entity `i` to `(nx, ny)` if the terrain allows; a blocked step
+    /// slides along whichever single axis stays open, so units skirt water
+    /// and cliffs instead of walking into them.
+    fn try_move(&mut self, i: usize, nx: Fx, ny: Fx) {
+        let cur = self.pos[i];
+        if self.cell_passable(nx, ny) {
+            self.pos[i].x = nx;
+            self.pos[i].y = ny;
+        } else if self.cell_passable(nx, cur.y) {
+            self.pos[i].x = nx;
+        } else if self.cell_passable(cur.x, ny) {
+            self.pos[i].y = ny;
+        }
     }
 
     /// A player's current ore (defaults to the starting stockpile).
@@ -534,10 +601,48 @@ impl World {
         self.facing[i] = Vec2::new(Fx::ZERO, Fx::from_int(-1));
         if owner != NEUTRAL {
             let _ = self.ore_mut(owner); // materialize the owner's stockpile
+            if is_building(kind) {
+                let p = owner as usize;
+                if self.had_building.len() <= p {
+                    self.had_building.resize(p + 1, false);
+                }
+                self.had_building[p] = true;
+            }
         }
         // Default rally a little "south" of a building.
         self.rally[i] = Vec3::new(x, y - Fx::from_int(7), Fx::ZERO);
         id
+    }
+
+    /// A player is eliminated once they have built a base and lost every
+    /// building (the classic RTS defeat rule; stray units don't keep you in).
+    pub fn eliminated(&self, player: PlayerId) -> bool {
+        if !self
+            .had_building
+            .get(player as usize)
+            .copied()
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        !(0..self.arena.capacity())
+            .any(|i| self.arena.alive[i] && is_building(self.kind[i]) && self.owner[i] == player)
+    }
+
+    /// True once every rival of `player` that ever had a base is eliminated
+    /// (and at least one such rival existed): the victory condition.
+    pub fn last_standing(&self, player: PlayerId) -> bool {
+        let mut had_rival = false;
+        for p in 0..self.had_building.len() {
+            if p == player as usize || !self.had_building[p] {
+                continue;
+            }
+            had_rival = true;
+            if !self.eliminated(p as PlayerId) {
+                return false;
+            }
+        }
+        had_rival
     }
 
     /// Supply in use: every living mobile unit (fighters and workers) is one.
@@ -1029,6 +1134,7 @@ impl World {
     }
 
     /// Step entity `i` toward `(tx, ty)` at `speed`, snapping on arrival.
+    /// Terrain-aware: blocked steps slide along the open axis.
     fn step_toward(&mut self, i: usize, tx: Fx, ty: Fx, speed: Fx) {
         self.face(i, tx, ty);
         let me = self.pos[i];
@@ -1037,11 +1143,9 @@ impl World {
         let d = (dx * dx + dy * dy).sqrt();
         if d > speed && d > Fx::ZERO {
             let s = speed / d;
-            self.pos[i].x = me.x + dx * s;
-            self.pos[i].y = me.y + dy * s;
+            self.try_move(i, me.x + dx * s, me.y + dy * s);
         } else {
-            self.pos[i].x = tx;
-            self.pos[i].y = ty;
+            self.try_move(i, tx, ty);
         }
     }
 
@@ -1210,12 +1314,10 @@ impl World {
                 let d = (dx * dx + dy * dy).sqrt();
                 if d > inf.speed && d > Fx::ZERO {
                     let s = inf.speed / d;
-                    self.pos[i].x = me.x + dx * s;
-                    self.pos[i].y = me.y + dy * s;
+                    self.try_move(i, me.x + dx * s, me.y + dy * s);
                     self.face(i, tx, ty);
                 } else {
-                    self.pos[i].x = tx;
-                    self.pos[i].y = ty;
+                    self.try_move(i, tx, ty);
                 }
             }
 
@@ -1263,6 +1365,9 @@ impl World {
     /// True if `(x, y)` is far enough from every existing building and resource
     /// node to place one.
     fn site_clear(&self, x: Fx, y: Fx) -> bool {
+        if !self.cell_passable(x, y) {
+            return false;
+        }
         for j in 0..self.arena.capacity() {
             if !self.arena.alive[j] {
                 continue;
@@ -1304,13 +1409,14 @@ impl World {
                 }
                 if d2 <= Fx::from_ratio(1, 64) {
                     // Concentric: shove along +x by the full radius (deterministic).
-                    self.pos[i].x = op.x + r;
+                    let ny = self.pos[i].y;
+                    self.try_move(i, op.x + r, ny);
                     continue;
                 }
                 let d = d2.sqrt();
                 let push = (r - d) / d;
-                self.pos[i].x += dx * push;
-                self.pos[i].y += dy * push;
+                let (nx, ny) = (self.pos[i].x + dx * push, self.pos[i].y + dy * push);
+                self.try_move(i, nx, ny);
             }
         }
     }
@@ -1376,8 +1482,8 @@ impl World {
                 sx = sx * k;
                 sy = sy * k;
             }
-            self.pos[i].x += sx;
-            self.pos[i].y += sy;
+            let (nx, ny) = (self.pos[i].x + sx, self.pos[i].y + sy);
+            self.try_move(i, nx, ny);
         }
     }
 
@@ -1486,6 +1592,9 @@ impl World {
         }
         for &b in &self.bot {
             h.write_u64(b as u64);
+        }
+        if self.pass_hash != 0 {
+            h.write_u64(self.pass_hash);
         }
         h.finish()
     }
@@ -1671,6 +1780,83 @@ mod tests {
             w.step(&[]);
         }
         assert_eq!(w.alive_count(), 1, "the ordered worker should win");
+    }
+
+    #[test]
+    fn losing_every_building_eliminates() {
+        let mut w = World::new(33);
+        w.step(&[
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Hq,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnBuilding {
+                owner: 1,
+                kind: BuildingKind::Supply,
+                x: fx(60),
+                y: fx(0),
+            },
+            // Enough infantry to raze the depot.
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(30),
+                y: fx(0),
+            },
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(30),
+                y: fx(8),
+            },
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(30),
+                y: fx(-8),
+            },
+        ]);
+        assert!(!w.eliminated(1));
+        assert!(!w.last_standing(0));
+        w.step(&[
+            Command::Attack { unit: 2, target: 1 },
+            Command::Attack { unit: 3, target: 1 },
+            Command::Attack { unit: 4, target: 1 },
+        ]);
+        for _ in 0..1500 {
+            w.step(&[]);
+        }
+        assert!(w.eliminated(1), "razed player should be eliminated");
+        assert!(w.last_standing(0), "survivor should have won");
+        assert!(!w.eliminated(0));
+    }
+
+    #[test]
+    fn impassable_terrain_blocks_movement() {
+        let mut w = World::new(31);
+        // Two columns over the +-512 world: west open, east blocked.
+        w.set_passability(2, Fx::from_int(512), vec![true, false, true, false]);
+        w.step(&[Command::SpawnUnit {
+            owner: 0,
+            kind: UnitKind::Infantry,
+            x: fx(-100),
+            y: fx(0),
+        }]);
+        w.step(&[Command::Move {
+            unit: 0,
+            x: fx(100),
+            y: fx(0),
+        }]);
+        for _ in 0..800 {
+            w.step(&[]);
+        }
+        let s = w.snapshot();
+        assert!(
+            s[0].pos.x < Fx::ZERO,
+            "unit must never cross into the blocked half"
+        );
     }
 
     #[test]

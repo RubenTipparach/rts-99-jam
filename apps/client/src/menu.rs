@@ -372,81 +372,80 @@ mod web {
     }
 
     thread_local! {
-        /// Decoded preview RGBA per map (the embedded PNGs, decoded once).
-        static PREVIEW_RGBA: std::cell::RefCell<std::collections::HashMap<usize, (u32, u32, Vec<u8>)>> =
-            std::cell::RefCell::new(std::collections::HashMap::new());
-        /// Nearest-scaled `ImageData` per (map, target width), rebuilt on resize.
-        static PREVIEW_SCALED: std::cell::RefCell<std::collections::HashMap<(usize, u32), web_sys::ImageData>> =
+        /// Per-map offscreen canvas holding the decoded preview PNG. Drawn
+        /// with `drawImage`, which respects the canvas transform and browser
+        /// sampling (a raw `putImageData` ignored both and striped on some
+        /// zoom / devicePixelRatio combinations).
+        static PREVIEW_CANVAS: std::cell::RefCell<std::collections::HashMap<usize, web_sys::HtmlCanvasElement>> =
             std::cell::RefCell::new(std::collections::HashMap::new());
     }
 
+    /// An offscreen canvas with map `idx`'s pre-rendered 3D preview (decoded
+    /// once and cached). Never attached to the DOM; it is purely a drawImage
+    /// source.
+    fn preview_canvas(idx: usize) -> Option<web_sys::HtmlCanvasElement> {
+        PREVIEW_CANVAS.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if let Some(c) = cache.get(&idx) {
+                return Some(c.clone());
+            }
+            let img = image::load_from_memory(crate::voxel::MAP_PREVIEWS[idx]).ok()?;
+            let rgba = img.to_rgba8();
+            let (iw, ih) = (rgba.width(), rgba.height());
+            let doc = web_sys::window()?.document()?;
+            let canvas = doc
+                .create_element("canvas")
+                .ok()?
+                .dyn_into::<web_sys::HtmlCanvasElement>()
+                .ok()?;
+            canvas.set_width(iw);
+            canvas.set_height(ih);
+            let cctx = canvas.get_context("2d").ok()??.dyn_into::<Ctx>().ok()?;
+            let data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+                wasm_bindgen::Clamped(&rgba.into_raw()),
+                iw,
+                ih,
+            )
+            .ok()?;
+            cctx.put_image_data(&data, 0.0, 0.0).ok()?;
+            cache.insert(idx, canvas.clone());
+            Some(canvas)
+        })
+    }
+
     /// The pre-rendered 3D battlefield preview (the actual voxel terrain
-    /// rasterized at the game camera angle, embedded as a PNG), blitted
-    /// centred at `(cx, cy)` and fitted inside the `2a x 2b` box. The blit is
-    /// in physical pixels (putImageData ignores the canvas transform), and the
-    /// PNG bakes the lobby backdrop colour so it composes seamlessly. Player
-    /// (blue) and enemy (red) start markers overlay the terrain.
+    /// rasterized at the game camera angle), drawn centred at `(cx, cy)` and
+    /// fitted inside the `2a x 2b` box (CSS pixels). Player (blue) and enemy
+    /// (red) start markers overlay the terrain at the real spawn points.
     fn draw_map_preview(ctx: &Ctx, cx: f64, cy: f64, a: f64, b: f64, idx: usize) {
         use std::f64::consts::TAU;
-        let d = dpr() as f64;
-        // Decode the PNG once per map.
-        let (iw, ih) = PREVIEW_RGBA.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            let (iw, ih, _) = cache.entry(idx).or_insert_with(|| {
-                match image::load_from_memory(crate::voxel::MAP_PREVIEWS[idx]) {
-                    Ok(img) => {
-                        let rgba = img.to_rgba8();
-                        (rgba.width(), rgba.height(), rgba.into_raw())
-                    }
-                    Err(_) => (1, 1, vec![11, 18, 36, 255]),
-                }
-            });
-            (*iw, *ih)
-        });
-        // Fit inside the box, preserving the render's aspect.
-        let scale = (2.0 * a * d / iw as f64).min(2.0 * b * d / ih as f64);
-        let (tw, th) = (
-            ((iw as f64 * scale) as u32).max(1),
-            ((ih as f64 * scale) as u32).max(1),
-        );
-        let ok = PREVIEW_SCALED.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if !cache.contains_key(&(idx, tw)) {
-                let scaled = PREVIEW_RGBA.with(|src| {
-                    let src = src.borrow();
-                    let (iw, ih, rgba) = src.get(&idx).unwrap();
-                    let mut out = vec![0u8; (tw * th * 4) as usize];
-                    for y in 0..th {
-                        let sy = (y as u64 * *ih as u64 / th as u64) as u32;
-                        for x in 0..tw {
-                            let sx = (x as u64 * *iw as u64 / tw as u64) as u32;
-                            let si = ((sy * iw + sx) * 4) as usize;
-                            let di = ((y * tw + x) * 4) as usize;
-                            out[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
-                        }
-                    }
-                    out
-                });
-                let Ok(data) = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
-                    wasm_bindgen::Clamped(&scaled),
-                    tw,
-                    th,
-                ) else {
-                    return false;
-                };
-                cache.insert((idx, tw), data);
-            }
-            let data = cache.get(&(idx, tw)).unwrap();
-            ctx.put_image_data(data, cx * d - tw as f64 / 2.0, cy * d - th as f64 / 2.0)
-                .is_ok()
-        });
-        if !ok {
+        let Some(src) = preview_canvas(idx) else {
+            // Decode failed: fall back to a flat swatch diamond so a map's
+            // preview can never simply go missing from the menu.
+            let sw = crate::voxel::MAP_SWATCH[idx];
+            ctx.set_fill_style_str(&format!("rgb({},{},{})", sw[0], sw[1], sw[2]));
+            ctx.begin_path();
+            ctx.move_to(cx, cy - b);
+            ctx.line_to(cx + a, cy);
+            ctx.line_to(cx, cy + b);
+            ctx.line_to(cx - a, cy);
+            ctx.close_path();
+            ctx.fill();
             return;
-        }
+        };
+        let (iw, ih) = (src.width() as f64, src.height() as f64);
+        let scale = (2.0 * a / iw).min(2.0 * b / ih);
+        let (tw, th) = (iw * scale, ih * scale);
+        let _ = ctx.draw_image_with_html_canvas_element_and_dw_and_dh(
+            &src,
+            cx - tw / 2.0,
+            cy - th / 2.0,
+            tw,
+            th,
+        );
         // Start markers, in the diamond's unit-square coordinates: the player
         // main sits south, the two enemy mains north (see the baked map).
-        let half_w = tw as f64 / (2.0 * d);
-        let half_h = th as f64 / (2.0 * d);
+        let (half_w, half_h) = (tw / 2.0, th / 2.0);
         let iso = |u: f64, t: f64| (cx + (u - t) * half_w, cy + (u + t - 1.0) * half_h * 0.92);
         let dot = |u: f64, t: f64, col: &str| {
             let (px, py) = iso(u, t);

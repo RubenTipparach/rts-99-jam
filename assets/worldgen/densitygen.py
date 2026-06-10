@@ -257,6 +257,22 @@ def _cones(ht, mat, seed, n, height, base_r, kind, region=None):
     return vents
 
 
+# The fixed skirmish spawn sites in world (x, z) - the three mains in
+# assets/maps/crossfire_basin.map. Every main must start on dry land, so wet
+# worlds dome the ground above sea level here and never flood these discs.
+SPAWNS = ((0.0, 210.0), (-150.0, -190.0), (150.0, -190.0))
+SPAWN_R = NXZ * 0.075  # ~77 world units around each base
+
+
+def _spawn_dist(i, k):
+    best = 1e9
+    for sx, sz in SPAWNS:
+        ci = (sx + HALF) / (2.0 * HALF) * (NXZ - 1)
+        ck = (sz + HALF) / (2.0 * HALF) * (NXZ - 1)
+        best = min(best, math.hypot(i - ci, k - ck))
+    return best
+
+
 def _liquid(grid, ht, world, dy):
     """Fill oceans (Titan methane, Earth seas), Earth lakes and rivers.
 
@@ -276,10 +292,26 @@ def _liquid(grid, ht, world, dy):
     sea_y = sea  # ht is already in world-y units after shift
 
     def set_liquid(i, k, surf_y):
+        if _spawn_dist(i, k) < SPAWN_R * 0.85:
+            return  # spawn discs stay dry (lakes and rivers included)
         j = int(round((surf_y - YMIN) / dy))
         j = max(0, min(NY - 1, j))
         grid.liquid[k * NXZ + i] = j + 1
         wet.add((i, k))
+
+    # Dome every spawn disc above the sea: the centre is guaranteed dry land,
+    # feathering back to the natural terrain at the disc's edge.
+    for k in range(NXZ):
+        for i in range(NXZ):
+            d = _spawn_dist(i, k) / SPAWN_R
+            if d >= 1.0:
+                continue
+            need = sea_y + 6.0
+            if d < 0.6:
+                ht[k][i] = max(ht[k][i], need)
+            elif ht[k][i] < need:
+                t = (1.0 - d) / 0.4
+                ht[k][i] += (need - ht[k][i]) * t * t
 
     # oceans / seas
     for k in range(NXZ):
@@ -394,6 +426,19 @@ def build(world):
     # Shift so the lowest point sits at 0, then voxelize.
     lo0 = min(min(r) for r in ht)
     ht = [[ht[k][i] - lo0 for i in range(NXZ)] for k in range(NXZ)]
+
+    # Earth is an island: sink the map rim well below the coming sea level
+    # (taken as a height percentile in _liquid), so open water rings the
+    # landmass instead of seas pooling at random. Clamped above the grid
+    # floor so the ocean keeps a solid bed.
+    if key == "earth":
+        for k in range(NXZ):
+            v = k / (NXZ - 1) - 0.5
+            for i in range(NXZ):
+                u = i / (NXZ - 1) - 0.5
+                r = 2.0 * math.hypot(u, v)  # 0 centre, 1 at the edge midpoints
+                f = min(1.0, max(0.0, (r - 0.82) / 0.30))
+                ht[k][i] = max(-34.0, ht[k][i] - 55.0 * f * f)
 
     grid = vox.VoxelGrid(NXZ, NY, NXZ, (-HALF, HALF, YMIN, YMAX, -HALF, HALF))
     hi = max(max(r) for r in ht)
