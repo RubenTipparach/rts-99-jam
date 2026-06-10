@@ -113,6 +113,17 @@ struct PendingBuild {
 /// Seconds a placed hologram survives without its building appearing.
 const PENDING_BUILD_TTL: f32 = 45.0;
 
+/// Rough mesh height per building kind, for the screen-space click box.
+fn building_height(kind: Kind) -> f32 {
+    match kind {
+        Kind::Hq => 17.5,
+        Kind::Barracks => 12.0,
+        Kind::Turret => 4.5,
+        Kind::Supply => 3.5,
+        _ => 0.0,
+    }
+}
+
 /// Levelled-pad radius for a building footprint (matches the selection ring).
 fn pad_radius(kind: BuildingKind) -> f32 {
     match kind {
@@ -154,6 +165,11 @@ pub struct UnitInfo {
     pub hp_frac: f32,
     /// Buildings: world footprint radius (drives the HUD corner brackets).
     pub radius: f32,
+    /// Display name (faction-flavored for buildings).
+    pub name: &'static str,
+    /// Current and maximum hit points, for the numeric readout.
+    pub hp: i32,
+    pub hp_max: i32,
 }
 
 pub struct Game {
@@ -1032,6 +1048,19 @@ impl Game {
             Kind::Supply => 4.5,
             _ => 0.0,
         };
+        let name = match (s.kind, self.faction_of(s.owner)) {
+            (Kind::Hq, Faction::Astromancer) => "SPIRE",
+            (Kind::Hq, Faction::Hollowmen) => "COMMAND HQ",
+            (Kind::Barracks, Faction::Astromancer) => "SANCTUM",
+            (Kind::Barracks, Faction::Hollowmen) => "BARRACKS",
+            (Kind::Turret, Faction::Astromancer) => "WARD",
+            (Kind::Turret, Faction::Hollowmen) => "TURRET",
+            (Kind::Supply, _) => "DEPOT",
+            (Kind::Worker, Faction::Astromancer) => "ACOLYTE",
+            (Kind::Worker, Faction::Hollowmen) => "ENGINEER",
+            (Kind::Heavy, _) => "HEAVY",
+            _ => "INFANTRY",
+        };
         UnitInfo {
             owner: s.owner,
             barracks,
@@ -1040,6 +1069,9 @@ impl Game {
             wz,
             hp_frac: (f(s.hp) / f(s.max_hp)).clamp(0.0, 1.0),
             radius,
+            name,
+            hp: f(s.hp).ceil().max(0.0) as i32,
+            hp_max: f(s.max_hp).ceil() as i32,
         }
     }
 
@@ -1160,9 +1192,11 @@ impl Game {
             }
         }
 
-        // Otherwise the nearest building (larger radius - buildings are big).
+        // Otherwise a building whose projected bounds contain the click: a
+        // rough screen-space box collider over the whole mesh, so clicking
+        // anywhere on the geometry selects it. Units are tested first above,
+        // so a unit standing in front of (or behind) a building still wins.
         if best.is_none() {
-            let bldg_r = (h * 0.06).max(36.0);
             for s in &self.curr {
                 if s.owner != 0
                     || !matches!(
@@ -1173,12 +1207,36 @@ impl Game {
                     continue;
                 }
                 let (wx, wz) = self.lerped(s);
-                let wy = terrain::height(wx, wz) + 3.0;
-                if let Some((px, py)) = cam.project(glam::Vec3::new(wx, wy, wz), w, h) {
-                    let d = (px - sx).hypot(py - sy);
-                    if d <= bldg_r && best.is_none_or(|(_, bd)| d < bd) {
-                        best = Some((s.index, d));
+                let ground = terrain::height(wx, wz);
+                let r = match s.kind {
+                    Kind::Hq => 9.0,
+                    Kind::Barracks => 8.0,
+                    Kind::Turret => 4.0,
+                    _ => 4.5,
+                };
+                let top = ground + building_height(s.kind);
+                let (mut x0, mut x1, mut y0, mut y1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+                let mut all = true;
+                for (cx, cz) in [(-r, -r), (r, -r), (-r, r), (r, r)] {
+                    for wy in [ground, top] {
+                        match cam.project(glam::Vec3::new(wx + cx, wy, wz + cz), w, h) {
+                            Some((px, py)) => {
+                                x0 = x0.min(px);
+                                x1 = x1.max(px);
+                                y0 = y0.min(py);
+                                y1 = y1.max(py);
+                            }
+                            None => all = false,
+                        }
                     }
+                }
+                if !all || sx < x0 || sx > x1 || sy < y0 || sy > y1 {
+                    continue;
+                }
+                // Several boxes can overlap; take the closest center.
+                let d = (sx - (x0 + x1) * 0.5).hypot(sy - (y0 + y1) * 0.5);
+                if best.is_none_or(|(_, bd)| d < bd) {
+                    best = Some((s.index, d));
                 }
             }
         }

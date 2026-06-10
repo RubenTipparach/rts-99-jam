@@ -547,12 +547,23 @@ mod web {
         let flashed = |b: &Btn| flash.is_some_and(|c| c != Click::None && c == b.click);
         ctx.clear_rect(0.0, 0.0, w, h);
         // Opaque backdrop: the match hasn't started (no map chosen yet), so the
-        // front-end fully covers the scene rather than dimming it. Two dark bands
-        // give a touch of depth without needing the gradient API.
-        ctx.set_fill_style_str("#070b16");
+        // front-end fully covers the scene. A deep-space vertical gradient,
+        // plus a faint violet aurora glow behind the title.
+        let g = ctx.create_linear_gradient(0.0, 0.0, 0.0, h);
+        let _ = g.add_color_stop(0.0, "#1a2348");
+        let _ = g.add_color_stop(0.45, "#0d142e");
+        let _ = g.add_color_stop(1.0, "#04060d");
+        ctx.set_fill_style_canvas_gradient(&g);
         ctx.fill_rect(0.0, 0.0, w, h);
-        ctx.set_fill_style_str("#0b1224");
-        ctx.fill_rect(0.0, 0.0, w, h * 0.5);
+        if let Ok(g) =
+            ctx.create_radial_gradient(w * 0.5, h * 0.26, 10.0, w * 0.5, h * 0.26, h * 0.7)
+        {
+            let _ = g.add_color_stop(0.0, "rgba(122,84,210,0.28)");
+            let _ = g.add_color_stop(0.5, "rgba(64,52,140,0.10)");
+            let _ = g.add_color_stop(1.0, "rgba(0,0,0,0.0)");
+            ctx.set_fill_style_canvas_gradient(&g);
+            ctx.fill_rect(0.0, 0.0, w, h);
+        }
 
         ctx.set_text_baseline("alphabetic");
         let s = ui_scale(w, h);

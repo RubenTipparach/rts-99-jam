@@ -1114,7 +1114,10 @@ impl World {
         }
     }
 
-    /// Spawn one queued unit just in front of building `i`, headed to its rally.
+    /// Spawn one queued unit on building `i`'s perimeter, on the side facing
+    /// its rally point, fanned across an arc by a deterministic jitter - so a
+    /// production stream steps out around the doorway instead of piling onto
+    /// one squeezed spot inside the footprint.
     fn produce_at(&mut self, i: usize) {
         let owner = self.owner[i];
         let p = self.pos[i];
@@ -1124,13 +1127,56 @@ impl World {
             2 => Kind::Worker,
             _ => Kind::Infantry,
         };
-        // tiny deterministic spread so they don't stack perfectly
-        let jitter = Fx::from_ratio((self.rng.range_u32(7) as i64) - 3, 2);
-        let id = self.spawn(kind, owner, p.x + jitter, p.y - Fx::from_int(3));
+        // Outward direction toward the rally (fallback: due south).
+        let dx = rally.x - p.x;
+        let dy = rally.y - p.y;
+        let len = (dx * dx + dy * dy).sqrt();
+        let (ux, uy) = if len > Fx::ZERO {
+            (dx / len, dy / len)
+        } else {
+            (Fx::ZERO, Fx::ONE)
+        };
+        // Fan across the facing arc: rotate by one of five fixed angles
+        // (-40/-20/0/20/40 degrees, fixed-point cos/sin), picked by the
+        // deterministic RNG.
+        const FAN: [(i64, i64); 5] = [
+            (7660, -6428),
+            (9397, -3420),
+            (10000, 0),
+            (9397, 3420),
+            (7660, 6428),
+        ];
+        let (c, sn) = FAN[self.rng.range_u32(5) as usize];
+        let (c, sn) = (Fx::from_ratio(c, 10000), Fx::from_ratio(sn, 10000));
+        let rx = ux * c - uy * sn;
+        let ry = ux * sn + uy * c;
+        // Just past the building's obstacle footprint.
+        let r = obstacle_radius(self.kind[i]).unwrap_or(Fx::from_int(3)) + Fx::from_int(2);
+        let id = self.spawn(kind, owner, p.x + rx * r, p.y + ry * r);
         self.order[id.index as usize] = Order::Move {
             x: rally.x,
             y: rally.y,
         };
+    }
+
+    /// True when at least two other mobile units press within separation range
+    /// of `i`: a unit nearly at its goal then gives up instead of grinding
+    /// into a crowd already occupying the spot.
+    fn crowded_near(&self, i: usize) -> bool {
+        let me = self.pos[i];
+        let mut n = 0;
+        for j in 0..self.arena.capacity() {
+            if j == i || !self.arena.alive[j] || !is_mobile(self.kind[j]) {
+                continue;
+            }
+            if dist2(me, self.pos[j].x, self.pos[j].y) <= Fx::from_int(9) {
+                n += 1;
+                if n >= 2 {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Step entity `i` toward `(tx, ty)` at `speed`, snapping on arrival.
@@ -1263,7 +1309,12 @@ impl World {
                 Order::Harvest { .. } => {} // handled above
                 Order::Build { .. } => {}   // handled above
                 Order::Move { x, y } => {
-                    if dist2(me, x, y) <= Fx::from_ratio(4, 10) {
+                    let d2t = dist2(me, x, y);
+                    // Arrived - or near enough while the spot is already
+                    // crowded (don't grind into an occupied destination).
+                    if d2t <= Fx::from_ratio(4, 10)
+                        || (d2t <= Fx::from_int(49) && self.crowded_near(i))
+                    {
                         self.order[i] = Order::Idle;
                     } else {
                         move_to = Some((x, y));
@@ -1291,10 +1342,15 @@ impl World {
                             let tp = self.pos[t as usize];
                             move_to = Some((tp.x, tp.y));
                         }
-                    } else if dist2(me, x, y) <= Fx::from_ratio(4, 10) {
-                        self.order[i] = Order::Idle;
                     } else {
-                        move_to = Some((x, y));
+                        let d2t = dist2(me, x, y);
+                        if d2t <= Fx::from_ratio(4, 10)
+                            || (d2t <= Fx::from_int(49) && self.crowded_near(i))
+                        {
+                            self.order[i] = Order::Idle;
+                        } else {
+                            move_to = Some((x, y));
+                        }
                     }
                 }
             }

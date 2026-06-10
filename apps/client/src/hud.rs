@@ -104,7 +104,9 @@ fn resume_btn_css(w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
     let bw = 200.0_f64;
     let bh = 48.0_f64;
     let bx = (w_css as f64 - bw) / 2.0;
-    let by = h_css as f64 / 2.0 + 6.0;
+    // Sits so the title + two buttons + hint stack reads centered in the
+    // pause panel (panel top is h/2 - 155).
+    let by = h_css as f64 / 2.0 - 40.0;
     (bx, by, bw, bh)
 }
 
@@ -247,7 +249,7 @@ fn draw_match_end(
     ctx.set_text_align("center");
     ctx.set_fill_style_str(if win { "#9dffb4" } else { "#ff8a76" });
     ctx.set_font("bold 34px monospace");
-    let _ = ctx.fill_text(if win { "VICTORY" } else { "DEFEAT" }, wf / 2.0, py + 68.0);
+    let _ = ctx.fill_text(if win { "VICTORY" } else { "DEFEAT" }, wf / 2.0, py + 56.0);
     // One button, in the pause panel's Resume slot (shared hit-test).
     let (bx, by, bw, bh) = resume_btn_css(w, h);
     let hover = cursor.0 >= bx && cursor.0 <= bx + bw && cursor.1 >= by && cursor.1 <= by + bh;
@@ -473,7 +475,7 @@ pub fn draw(
     // Health bars: selected entities, plus every visible damaged building
     // (so a base under fire reads at a glance). Building bars scale with the
     // footprint so a depot's bar is visibly a building's, not a unit's.
-    let health_bar = |u: &crate::game::UnitInfo| {
+    let health_bar = |u: &crate::game::UnitInfo, labeled: bool| {
         let Some((sx, sy)) = camera.project(glam::Vec3::new(u.wx, u.wy, u.wz), w, h) else {
             return;
         };
@@ -489,12 +491,30 @@ pub fn draw(
         ctx.fill_rect(x - 1.0, y - 1.0, bw + 2.0, bh + 2.0);
         ctx.set_fill_style_str(if u.owner == 0 { "#39d35a" } else { "#e0473a" });
         ctx.fill_rect(x, y, bw * u.hp_frac.clamp(0.0, 1.0) as f64, bh);
+        // Selected buildings carry their name and a numeric HP readout, so
+        // a glance tells exactly how much is left.
+        if labeled && u.barracks {
+            ctx.set_text_align("center");
+            ctx.set_fill_style_str("#e7eefa");
+            ctx.set_font("bold 13px monospace");
+            let _ = ctx.fill_text(u.name, sx as f64, y - 22.0);
+            ctx.set_font("12px monospace");
+            ctx.set_fill_style_str(if u.hp_frac > 0.5 {
+                "#9dffb4"
+            } else if u.hp_frac > 0.25 {
+                "#ffd36b"
+            } else {
+                "#ff8a76"
+            });
+            let _ = ctx.fill_text(&format!("HP: {}/{}", u.hp, u.hp_max), sx as f64, y - 7.0);
+            ctx.set_text_align("left");
+        }
     };
     for u in game.selected_infos() {
-        health_bar(&u);
+        health_bar(&u, true);
     }
     for u in game.damaged_buildings() {
-        health_bar(&u);
+        health_bar(&u, false);
     }
 
     // Selected buildings: screen-space corner brackets sized to the projected
