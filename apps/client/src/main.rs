@@ -450,6 +450,56 @@ impl App {
         let wz = (-du * c + dv * s) * terrain::HALF;
         self.camera.look_at(wx, wz);
     }
+
+    /// Apply a front-end (menu / lobby) click or tap at physical `(cx, cy)`.
+    /// Shared by mouse clicks and touch taps so phones can drive the menus.
+    #[cfg(target_arch = "wasm32")]
+    fn front_end_click(&mut self, cx: f32, cy: f32) {
+        let (w, h) = self.dims();
+        match menu::hit(self.screen, &self.lobby, cx, cy, w, h) {
+            menu::Click::Skirmish => self.screen = menu::Screen::Lobby,
+            menu::Click::SetFaction(f) => self.lobby.faction = f,
+            menu::Click::AddBot => self.lobby.bots = (self.lobby.bots + 1).min(3),
+            menu::Click::RemoveBot => self.lobby.bots = self.lobby.bots.saturating_sub(1).max(1),
+            menu::Click::OpenMap => {
+                self.lobby.map_open = true;
+                // Scroll so the current selection is visible.
+                self.lobby.map_scroll = self.lobby.map.saturating_sub(2).min(map_scroll_max());
+            }
+            menu::Click::CloseMap => self.lobby.map_open = false,
+            menu::Click::PickMap(i) => self.lobby.map = i,
+            menu::Click::ScrollMap(d) => {
+                let s = self.lobby.map_scroll as i32 + d as i32;
+                self.lobby.map_scroll = s.clamp(0, map_scroll_max() as i32) as u8;
+            }
+            menu::Click::Back => self.screen = menu::Screen::Menu,
+            menu::Click::Fullscreen => toggle_fullscreen(),
+            menu::Click::Start => {
+                self.game.set_player_faction(self.lobby.faction);
+                // Load the chosen battlefield and rebuild its terrain.
+                crate::voxel::set_active(Some(self.lobby.map as usize));
+                if let Some(g) = self.gfx.as_mut() {
+                    g.set_world();
+                }
+                self.screen = menu::Screen::InGame;
+                set_body_menu(false); // show the mobile test controls
+                self.apply_cursor_grab();
+            }
+            menu::Click::None => {}
+        }
+    }
+
+    /// Apply a pause-menu click or tap at physical `(cx, cy)`.
+    #[cfg(target_arch = "wasm32")]
+    fn pause_click(&mut self, cx: f32, cy: f32) {
+        let (w, h) = self.dims();
+        let hitr = |r: (f32, f32, f32, f32)| cx >= r.0 && cx <= r.2 && cy >= r.1 && cy <= r.3;
+        if hitr(hud::resume_button_rect(w, h)) {
+            self.set_paused(false);
+        } else if hitr(hud::fullscreen_button_rect(w, h)) {
+            toggle_fullscreen();
+        }
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -580,40 +630,7 @@ impl ApplicationHandler<UserEvent> for App {
                 #[cfg(target_arch = "wasm32")]
                 if self.screen != menu::Screen::InGame {
                     if button == MouseButton::Left && state == ElementState::Pressed {
-                        match menu::hit(self.screen, &self.lobby, cx, cy, w, h) {
-                            menu::Click::Skirmish => self.screen = menu::Screen::Lobby,
-                            menu::Click::SetFaction(f) => self.lobby.faction = f,
-                            menu::Click::AddBot => self.lobby.bots = (self.lobby.bots + 1).min(3),
-                            menu::Click::RemoveBot => {
-                                self.lobby.bots = self.lobby.bots.saturating_sub(1).max(1)
-                            }
-                            menu::Click::OpenMap => {
-                                self.lobby.map_open = true;
-                                // Scroll so the current selection is visible.
-                                self.lobby.map_scroll =
-                                    self.lobby.map.saturating_sub(2).min(map_scroll_max());
-                            }
-                            menu::Click::CloseMap => self.lobby.map_open = false,
-                            menu::Click::PickMap(i) => self.lobby.map = i,
-                            menu::Click::ScrollMap(d) => {
-                                let s = self.lobby.map_scroll as i32 + d as i32;
-                                self.lobby.map_scroll = s.clamp(0, map_scroll_max() as i32) as u8;
-                            }
-                            menu::Click::Back => self.screen = menu::Screen::Menu,
-                            menu::Click::Fullscreen => toggle_fullscreen(),
-                            menu::Click::Start => {
-                                self.game.set_player_faction(self.lobby.faction);
-                                // Load the chosen battlefield and rebuild its terrain.
-                                crate::voxel::set_active(Some(self.lobby.map as usize));
-                                if let Some(g) = self.gfx.as_mut() {
-                                    g.set_world();
-                                }
-                                self.screen = menu::Screen::InGame;
-                                set_body_menu(false); // show the mobile test controls
-                                self.apply_cursor_grab();
-                            }
-                            menu::Click::None => {}
-                        }
+                        self.front_end_click(cx, cy);
                     }
                     return;
                 }
@@ -622,14 +639,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.paused {
                     #[cfg(target_arch = "wasm32")]
                     if button == MouseButton::Left && state == ElementState::Pressed {
-                        let hitr = |r: (f32, f32, f32, f32)| {
-                            cx >= r.0 && cx <= r.2 && cy >= r.1 && cy <= r.3
-                        };
-                        if hitr(hud::resume_button_rect(w, h)) {
-                            self.set_paused(false);
-                        } else if hitr(hud::fullscreen_button_rect(w, h)) {
-                            toggle_fullscreen();
-                        }
+                        self.pause_click(cx, cy);
                     }
                     return;
                 }
@@ -709,6 +719,22 @@ impl ApplicationHandler<UserEvent> for App {
                 let (cx, cy) = (touch.location.x as f32, touch.location.y as f32);
                 self.input.cursor = (cx, cy);
                 self.pointer_is_touch = true;
+                // Menus and the pause overlay: a tap acts on release, like a
+                // click (taps never reach gameplay from these screens).
+                #[cfg(target_arch = "wasm32")]
+                if self.screen != menu::Screen::InGame {
+                    if touch.phase == TouchPhase::Ended {
+                        self.front_end_click(cx, cy);
+                    }
+                    return;
+                }
+                if self.paused {
+                    #[cfg(target_arch = "wasm32")]
+                    if touch.phase == TouchPhase::Ended {
+                        self.pause_click(cx, cy);
+                    }
+                    return;
+                }
                 match touch.phase {
                     TouchPhase::Started => self.input.left_press = Some((cx, cy)),
                     TouchPhase::Moved => {}
