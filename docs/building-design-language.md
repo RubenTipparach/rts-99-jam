@@ -9,6 +9,10 @@ Concept render: `assets/concepts/buildings.png` (regenerate with
 `python3 assets/render_buildings.py`). It is **rough massing only**: approximate
 shapes, proportions, and palettes in the game's iso camera, not final art.
 
+To **implement** these assets in-engine (exact palettes, geometry recipes,
+animation specs, step-by-step wiring), see
+[`faction-asset-kit.md`](faction-asset-kit.md).
+
 ---
 
 ## 1. What we took from Blizzard's RTS design
