@@ -52,6 +52,7 @@ impl Fx {
         (x & 0xffff) as f32 / 32768.0 - 1.0
     }
 
+    #[allow(clippy::too_many_arguments)] // a tuning-knob row, like the gfx primitives
     fn burst(
         &mut self,
         pos: [f32; 3],
