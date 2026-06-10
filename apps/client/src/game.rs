@@ -172,6 +172,8 @@ pub struct RenderData {
 pub struct UnitInfo {
     pub owner: u16,
     pub barracks: bool,
+    /// Entity kind (drives the HUD's portrait icon).
+    pub kind: Kind,
     pub wx: f32,
     pub wy: f32,
     pub wz: f32,
@@ -1281,6 +1283,7 @@ impl Game {
         UnitInfo {
             owner: s.owner,
             barracks,
+            kind: s.kind,
             wx,
             wy: terrain::height(wx, wz) + if barracks { 7.0 } else { 3.4 },
             wz,
@@ -1545,6 +1548,13 @@ impl Game {
                 born: self.time,
             });
         }
+    }
+
+    /// Whether the local player drives the Astromancer faction (the HUD
+    /// picks faction-flavored icon art with this).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn player_is_astromancer(&self) -> bool {
+        self.factions[0] == Faction::Astromancer
     }
 
     /// World position of the local player's (first) HQ, for the camera's

@@ -467,7 +467,7 @@ impl App {
     #[cfg(target_arch = "wasm32")]
     fn card_click(&mut self, cx: f32, cy: f32, _w: f32, h: f32) -> bool {
         for (k, (action, ..)) in hud::card_actions(&self.game).into_iter().enumerate() {
-            let (x0, y0, x1, y1) = hud::card_button_rect(k, h);
+            let (x0, y0, x1, y1) = hud::card_button_rect(&self.game, k, h);
             if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
                 match action {
                     hud::CardAction::Train(kind) => self.game.train_selected(kind),

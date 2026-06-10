@@ -30,8 +30,9 @@ pub enum CursorKind {
     Rally,
 }
 
-/// True when a physical-pixel point sits over in-game UI (the command bar or
-/// the minimap), so edge-panning and world cursors stand down there.
+/// True when a physical-pixel point sits over in-game UI (the command bar,
+/// the minimap, or the build grid), so edge-panning and world cursors stand
+/// down there.
 #[cfg(target_arch = "wasm32")]
 pub fn over_ui(game: &Game, cx: f32, cy: f32, w_phys: f32, h_phys: f32) -> bool {
     let d = dpr();
@@ -43,12 +44,180 @@ pub fn over_ui(game: &Game, cx: f32, cy: f32, w_phys: f32, h_phys: f32) -> bool 
         return true;
     }
     for (k, _) in card_actions(game).iter().enumerate() {
-        let (x0, y0, x1, y1) = card_button_rect(k, h_phys);
+        let (x0, y0, x1, y1) = card_button_rect(game, k, h_phys);
         if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
             return true;
         }
     }
     false
+}
+
+// --- icon art -------------------------------------------------------------
+// Pre-rendered mesh portraits (assets/icons; regenerate with
+// `cargo test -p client render_unit_icons -- --ignored`). Indexed by
+// [`Icon`]; decoded once into offscreen canvases and drawn with drawImage.
+#[cfg(target_arch = "wasm32")]
+const ICON_PNGS: [&[u8]; 10] = [
+    include_bytes!("../../../assets/icons/hq-astromancer.png"),
+    include_bytes!("../../../assets/icons/hq-hollowmen.png"),
+    include_bytes!("../../../assets/icons/barracks-astromancer.png"),
+    include_bytes!("../../../assets/icons/barracks-hollowmen.png"),
+    include_bytes!("../../../assets/icons/turret.png"),
+    include_bytes!("../../../assets/icons/supply.png"),
+    include_bytes!("../../../assets/icons/worker-acolyte.png"),
+    include_bytes!("../../../assets/icons/worker-engineer.png"),
+    include_bytes!("../../../assets/icons/infantry.png"),
+    include_bytes!("../../../assets/icons/heavy.png"),
+];
+
+#[cfg(target_arch = "wasm32")]
+fn icon_canvas(idx: usize) -> Option<web_sys::HtmlCanvasElement> {
+    use wasm_bindgen::JsCast;
+    thread_local! {
+        static CACHE: std::cell::RefCell<std::collections::HashMap<usize, web_sys::HtmlCanvasElement>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(c) = cache.get(&idx) {
+            return Some(c.clone());
+        }
+        let img = image::load_from_memory(ICON_PNGS[idx]).ok()?;
+        let rgba = img.to_rgba8();
+        let (iw, ih) = (rgba.width(), rgba.height());
+        let doc = web_sys::window()?.document()?;
+        let canvas = doc
+            .create_element("canvas")
+            .ok()?
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .ok()?;
+        canvas.set_width(iw);
+        canvas.set_height(ih);
+        let cctx = canvas
+            .get_context("2d")
+            .ok()??
+            .dyn_into::<web_sys::CanvasRenderingContext2d>()
+            .ok()?;
+        let data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+            wasm_bindgen::Clamped(&rgba.into_raw()),
+            iw,
+            ih,
+        )
+        .ok()?;
+        cctx.put_image_data(&data, 0.0, 0.0).ok()?;
+        cache.insert(idx, canvas.clone());
+        Some(canvas)
+    })
+}
+
+/// Icon index for a command-card action (faction-aware).
+#[cfg(target_arch = "wasm32")]
+fn action_icon(game: &Game, action: CardAction) -> usize {
+    let astro = game.player_is_astromancer();
+    match action {
+        CardAction::Build(BuildingKind::Hq) => {
+            if astro {
+                0
+            } else {
+                1
+            }
+        }
+        CardAction::Build(BuildingKind::Barracks) => {
+            if astro {
+                2
+            } else {
+                3
+            }
+        }
+        CardAction::Build(BuildingKind::Turret) => 4,
+        CardAction::Build(BuildingKind::Supply) => 5,
+        CardAction::Train(UnitKind::Worker) => {
+            if astro {
+                6
+            } else {
+                7
+            }
+        }
+        CardAction::Train(UnitKind::Infantry) => 8,
+        CardAction::Train(UnitKind::Heavy) => 9,
+    }
+}
+
+/// Icon index for a selected entity's portrait.
+#[cfg(target_arch = "wasm32")]
+fn info_icon(kind: sim::Kind, astro: bool) -> usize {
+    match kind {
+        sim::Kind::Hq => {
+            if astro {
+                0
+            } else {
+                1
+            }
+        }
+        sim::Kind::Barracks => {
+            if astro {
+                2
+            } else {
+                3
+            }
+        }
+        sim::Kind::Turret => 4,
+        sim::Kind::Supply => 5,
+        sim::Kind::Worker => {
+            if astro {
+                6
+            } else {
+                7
+            }
+        }
+        sim::Kind::Heavy => 9,
+        _ => 8,
+    }
+}
+
+/// Draw icon `idx` fitted into the given CSS-pixel box.
+#[cfg(target_arch = "wasm32")]
+fn draw_icon(ctx: &web_sys::CanvasRenderingContext2d, idx: usize, x: f64, y: f64, s: f64) {
+    if let Some(src) = icon_canvas(idx) {
+        let _ = ctx.draw_image_with_html_canvas_element_and_dw_and_dh(&src, x, y, s, s);
+    }
+}
+
+// --- resource glyphs -------------------------------------------------------
+/// An ore crystal (faceted diamond), ~16 px wide, centred vertically on `y`.
+#[cfg(target_arch = "wasm32")]
+fn draw_ore_glyph(ctx: &web_sys::CanvasRenderingContext2d, x: f64, y: f64) {
+    ctx.begin_path();
+    ctx.move_to(x + 6.0, y - 8.0);
+    ctx.line_to(x + 12.0, y);
+    ctx.line_to(x + 6.0, y + 8.0);
+    ctx.line_to(x, y);
+    ctx.close_path();
+    ctx.set_fill_style_str("#69c8e8");
+    ctx.fill();
+    ctx.begin_path();
+    ctx.move_to(x + 6.0, y - 8.0);
+    ctx.line_to(x + 12.0, y);
+    ctx.line_to(x + 6.0, y);
+    ctx.close_path();
+    ctx.set_fill_style_str("#c4eefb");
+    ctx.fill();
+}
+
+/// A carbon geyser puff (green clouds over a dark vent), matching the
+/// top-bar readout.
+#[cfg(target_arch = "wasm32")]
+fn draw_carbon_glyph(ctx: &web_sys::CanvasRenderingContext2d, x: f64, y: f64) {
+    ctx.set_fill_style_str("#3a4540");
+    ctx.fill_rect(x + 3.0, y + 3.0, 6.0, 5.0);
+    ctx.set_fill_style_str("#5ad97c");
+    ctx.begin_path();
+    let _ = ctx.arc(x + 6.0, y, 5.0, 0.0, std::f64::consts::TAU);
+    ctx.fill();
+    ctx.set_fill_style_str("#a9f3bd");
+    ctx.begin_path();
+    let _ = ctx.arc(x + 4.0, y - 3.0, 3.0, 0.0, std::f64::consts::TAU);
+    ctx.fill();
 }
 
 /// A command-card button's effect when clicked.
@@ -105,25 +274,57 @@ pub fn card_actions(game: &Game) -> Vec<(CardAction, &'static str, &'static str,
     out
 }
 
-/// Command-card button `k`'s rect in CSS pixels `(x, y, w, h)`.
+/// Square icon buttons: training options sit in the bottom command bar
+/// (left side); construction options stack in a 2-column grid on the left
+/// edge of the screen.
 #[cfg(target_arch = "wasm32")]
-fn card_btn_css(k: usize, h_css: f32) -> (f64, f64, f64, f64) {
-    let bar = 96.0;
-    let bw = 132.0;
+const BTN: f64 = 56.0;
+#[cfg(target_arch = "wasm32")]
+const BTN_GAP: f64 = 8.0;
+
+#[cfg(target_arch = "wasm32")]
+fn train_btn_css(idx: usize, h_css: f32) -> (f64, f64, f64, f64) {
     (
-        14.0 + k as f64 * (bw + 8.0),
-        (h_css - bar + 34.0) as f64,
-        bw,
-        44.0,
+        14.0 + idx as f64 * (BTN + BTN_GAP),
+        h_css as f64 - 96.0 + 20.0,
+        BTN,
+        BTN,
     )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn build_btn_css(idx: usize, h_css: f32) -> (f64, f64, f64, f64) {
+    let col = (idx % 2) as f64;
+    let row = (idx / 2) as f64;
+    (
+        14.0 + col * (BTN + BTN_GAP),
+        h_css as f64 * 0.5 - 70.0 + row * (BTN + BTN_GAP),
+        BTN,
+        BTN,
+    )
+}
+
+/// Command-card button `k`'s rect in CSS pixels `(x, y, w, h)`: trains count
+/// along the bar, builds count down the left grid.
+#[cfg(target_arch = "wasm32")]
+fn card_btn_css(game: &Game, k: usize, h_css: f32) -> (f64, f64, f64, f64) {
+    let actions = card_actions(game);
+    let builds_before = actions[..k]
+        .iter()
+        .filter(|a| matches!(a.0, CardAction::Build(_)))
+        .count();
+    match actions[k].0 {
+        CardAction::Train(_) => train_btn_css(k - builds_before, h_css),
+        CardAction::Build(_) => build_btn_css(builds_before, h_css),
+    }
 }
 
 /// Command-card button `k`'s rect in physical pixels `(x0, y0, x1, y1)`, for
 /// hit-testing against raw cursor/touch coordinates.
 #[cfg(target_arch = "wasm32")]
-pub fn card_button_rect(k: usize, h_phys: f32) -> (f32, f32, f32, f32) {
+pub fn card_button_rect(game: &Game, k: usize, h_phys: f32) -> (f32, f32, f32, f32) {
     let d = dpr();
-    let (x, y, bw, bh) = card_btn_css(k, h_phys / d);
+    let (x, y, bw, bh) = card_btn_css(game, k, h_phys / d);
     (
         x as f32 * d,
         y as f32 * d,
@@ -627,7 +828,9 @@ pub fn draw(
     // Health bars: selected entities, plus every visible damaged building
     // (so a base under fire reads at a glance). Building bars scale with the
     // footprint so a depot's bar is visibly a building's, not a unit's.
-    let health_bar = |u: &crate::game::UnitInfo, labeled: bool| {
+    // (Names and numeric HP for the selection live in the command bar's
+    // selection panel; the world only shows the bars themselves.)
+    let health_bar = |u: &crate::game::UnitInfo| {
         let Some((sx, sy)) = camera.project(glam::Vec3::new(u.wx, u.wy, u.wz), w, h) else {
             return;
         };
@@ -643,30 +846,12 @@ pub fn draw(
         ctx.fill_rect(x - 1.0, y - 1.0, bw + 2.0, bh + 2.0);
         ctx.set_fill_style_str(if u.owner == 0 { "#39d35a" } else { "#e0473a" });
         ctx.fill_rect(x, y, bw * u.hp_frac.clamp(0.0, 1.0) as f64, bh);
-        // Selected buildings carry their name and a numeric HP readout, so
-        // a glance tells exactly how much is left.
-        if labeled && u.barracks {
-            ctx.set_text_align("center");
-            ctx.set_fill_style_str("#e7eefa");
-            ctx.set_font("bold 13px monospace");
-            let _ = ctx.fill_text(u.name, sx as f64, y - 22.0);
-            ctx.set_font("12px monospace");
-            ctx.set_fill_style_str(if u.hp_frac > 0.5 {
-                "#9dffb4"
-            } else if u.hp_frac > 0.25 {
-                "#ffd36b"
-            } else {
-                "#ff8a76"
-            });
-            let _ = ctx.fill_text(&format!("HP: {}/{}", u.hp, u.hp_max), sx as f64, y - 7.0);
-            ctx.set_text_align("left");
-        }
     };
     for u in game.selected_infos() {
-        health_bar(&u, true);
+        health_bar(&u);
     }
     for u in game.damaged_buildings() {
-        health_bar(&u, false);
+        health_bar(&u);
     }
 
     // Selected buildings: screen-space corner brackets sized to the projected
@@ -756,38 +941,13 @@ pub fn draw(
     ctx.set_font("bold 16px monospace");
     let icon_y = 17.0_f64;
 
-    // Ore: a faceted crystal (diamond + bright top facet).
     let ox = 16.0_f64;
-    ctx.begin_path();
-    ctx.move_to(ox + 6.0, icon_y - 8.0);
-    ctx.line_to(ox + 12.0, icon_y);
-    ctx.line_to(ox + 6.0, icon_y + 8.0);
-    ctx.line_to(ox, icon_y);
-    ctx.close_path();
-    ctx.set_fill_style_str("#69c8e8");
-    ctx.fill();
-    ctx.begin_path();
-    ctx.move_to(ox + 6.0, icon_y - 8.0);
-    ctx.line_to(ox + 12.0, icon_y);
-    ctx.line_to(ox + 6.0, icon_y);
-    ctx.close_path();
-    ctx.set_fill_style_str("#c4eefb");
-    ctx.fill();
+    draw_ore_glyph(&ctx, ox, icon_y);
     ctx.set_fill_style_str("#e7eefa");
     let _ = ctx.fill_text(&format!("{}", game.player_ore() as i64), ox + 18.0, 24.0);
 
-    // Carbon: a geyser puff (stacked green clouds over a dark vent).
     let cx2 = 106.0_f64;
-    ctx.set_fill_style_str("#3a4540");
-    ctx.fill_rect(cx2 + 3.0, icon_y + 3.0, 6.0, 5.0);
-    ctx.set_fill_style_str("#5ad97c");
-    ctx.begin_path();
-    let _ = ctx.arc(cx2 + 6.0, icon_y, 5.0, 0.0, std::f64::consts::TAU);
-    ctx.fill();
-    ctx.set_fill_style_str("#a9f3bd");
-    ctx.begin_path();
-    let _ = ctx.arc(cx2 + 4.0, icon_y - 3.0, 3.0, 0.0, std::f64::consts::TAU);
-    ctx.fill();
+    draw_carbon_glyph(&ctx, cx2, icon_y);
     ctx.set_fill_style_str("#e7eefa");
     let _ = ctx.fill_text(
         &format!("{}", game.player_carbon() as i64),
@@ -813,10 +973,64 @@ pub fn draw(
     });
     let _ = ctx.fill_text(&format!("{sup_used}/{sup_cap}"), sx + 18.0, 24.0);
 
-    // Command card: clickable buttons for training units (HQ -> Worker,
-    // Barracks -> Infantry/Heavy) and for worker construction. Hotkeys still
-    // work; the buttons mirror them.
+    // Selection display, centred in the command bar: a single selected
+    // building shows its portrait, name and HP; selected units show a
+    // portrait grid with per-unit health bars.
+    {
+        let infos = game.selected_infos();
+        let astro = game.player_is_astromancer();
+        let units: Vec<_> = infos.iter().filter(|u| !u.barracks).collect();
+        if !units.is_empty() {
+            let n = units.len().min(16);
+            let cols = 8.min(n);
+            let cell = 38.0_f64;
+            let px = wf / 2.0 - cols as f64 * cell / 2.0;
+            let py = hf - bar + 8.0;
+            for (i, u) in units.iter().take(n).enumerate() {
+                let x = px + (i % 8) as f64 * cell;
+                let y = py + (i / 8) as f64 * (cell + 4.0);
+                ctx.set_fill_style_str("rgba(20,30,48,0.9)");
+                ctx.fill_rect(x, y, 32.0, 32.0);
+                draw_icon(&ctx, info_icon(u.kind, astro), x, y, 32.0);
+                ctx.set_stroke_style_str("rgba(140,180,230,0.8)");
+                ctx.set_line_width(1.0);
+                ctx.stroke_rect(x, y, 32.0, 32.0);
+                ctx.set_fill_style_str("rgba(0,0,0,0.65)");
+                ctx.fill_rect(x, y + 33.0, 32.0, 4.0);
+                ctx.set_fill_style_str("#39d35a");
+                ctx.fill_rect(x, y + 33.0, 32.0 * u.hp_frac.clamp(0.0, 1.0) as f64, 4.0);
+            }
+        } else if let Some(u) = infos.first() {
+            // A building selects alone: portrait art + name + HP readout.
+            let px = wf / 2.0 - 105.0;
+            let py = hf - bar + 14.0;
+            ctx.set_fill_style_str("rgba(20,30,48,0.9)");
+            ctx.fill_rect(px, py, 66.0, 66.0);
+            draw_icon(&ctx, info_icon(u.kind, astro), px + 1.0, py + 1.0, 64.0);
+            ctx.set_stroke_style_str("rgba(140,180,230,0.9)");
+            ctx.set_line_width(1.5);
+            ctx.stroke_rect(px, py, 66.0, 66.0);
+            ctx.set_fill_style_str("#e7eefa");
+            ctx.set_font("bold 15px monospace");
+            let _ = ctx.fill_text(u.name, px + 80.0, py + 24.0);
+            ctx.set_font("13px monospace");
+            ctx.set_fill_style_str(if u.hp_frac > 0.5 {
+                "#9dffb4"
+            } else if u.hp_frac > 0.25 {
+                "#ffd36b"
+            } else {
+                "#ff8a76"
+            });
+            let _ = ctx.fill_text(&format!("HP: {}/{}", u.hp, u.hp_max), px + 80.0, py + 46.0);
+        }
+    }
+
+    // Command card: icon buttons. Training options (HQ -> Worker, Barracks ->
+    // Infantry/Heavy) sit in the bar; worker construction options stack in
+    // the build grid on the left edge. Faces are icon + hotkey only; the
+    // name and cost live in the hover tooltip to keep the card clean.
     let actions = card_actions(game);
+    let mut tooltip: Option<(f64, f64, f64, &str, i64, i64)> = None;
     if !actions.is_empty() {
         let prod = game.selected_production();
         let ore_have = game.player_ore() as i64;
@@ -824,7 +1038,7 @@ pub fn draw(
         let mut prod_shown = false;
         let dc = dpr as f64;
         for (k, &(action, label, hotkey, ore, carbon)) in actions.iter().enumerate() {
-            let (bx, by, bw, bh) = card_btn_css(k, h);
+            let (bx, by, bw, bh) = card_btn_css(game, k, h);
             let afford = ore_have >= ore && carbon_have >= carbon;
             // The button whose building is being placed right now glows green.
             let active = matches!((action, build_mode), (CardAction::Build(b), Some(m)) if b == m);
@@ -852,6 +1066,18 @@ pub fn draw(
                 "rgba(48,54,66,0.92)"
             });
             ctx.fill_rect(bx, by, bw, bh);
+            draw_icon(
+                &ctx,
+                action_icon(game, action),
+                bx + 4.0,
+                by + 2.0,
+                bw - 8.0,
+            );
+            if !afford {
+                // Unaffordable: dim the art.
+                ctx.set_fill_style_str("rgba(20,24,32,0.55)");
+                ctx.fill_rect(bx, by, bw, bh);
+            }
             ctx.set_stroke_style_str(if pressed {
                 "rgba(255,255,255,1.0)"
             } else if active {
@@ -863,33 +1089,26 @@ pub fn draw(
             });
             ctx.set_line_width(if hover || pressed { 2.5 } else { 1.5 });
             ctx.stroke_rect(bx, by, bw, bh);
-            ctx.set_fill_style_str(if pressed {
-                "#0a1220"
-            } else if afford {
-                "#eaf2ff"
-            } else {
-                "#8a93a4"
-            });
-            ctx.set_font("bold 13px monospace");
-            let _ = ctx.fill_text(&format!("{label} [{hotkey}]"), bx + 8.0, by + 17.0);
-            ctx.set_font("11px monospace");
-            ctx.set_fill_style_str(if afford { "#bcd2f2" } else { "#7d8698" });
-            let cost = if carbon > 0 {
-                format!("{ore} ore + {carbon} c")
-            } else {
-                format!("{ore} ore")
-            };
-            let _ = ctx.fill_text(&cost, bx + 8.0, by + 33.0);
+            // Hotkey tag in the corner (the only on-button text).
+            ctx.set_font("bold 11px monospace");
+            ctx.set_fill_style_str("rgba(0,0,0,0.6)");
+            ctx.fill_rect(bx + bw - 15.0, by + bh - 15.0, 13.0, 13.0);
+            ctx.set_fill_style_str("#cfe2ff");
+            let _ = ctx.fill_text(hotkey, bx + bw - 12.0, by + bh - 4.0);
             // The first train button carries the building's queue + progress.
             if let (CardAction::Train(_), Some((queued, frac)), false) = (action, prod, prod_shown)
             {
                 prod_shown = true;
+                ctx.set_font("bold 11px monospace");
                 ctx.set_fill_style_str("#ffd36b");
-                let _ = ctx.fill_text(&format!("{queued}/6"), bx + bw - 32.0, by + 17.0);
+                let _ = ctx.fill_text(&format!("{queued}"), bx + 3.0, by + 13.0);
                 if frac > 0.0 {
                     ctx.set_fill_style_str("rgba(255,211,107,0.95)");
                     ctx.fill_rect(bx, by + bh - 3.0, bw * frac.clamp(0.0, 1.0) as f64, 3.0);
                 }
+            }
+            if hover {
+                tooltip = Some((bx, by, bw, label, ore, carbon));
             }
         }
     }
@@ -986,6 +1205,37 @@ pub fn draw(
     ctx.stroke();
 
     ctx.restore();
+
+    // Hover tooltip for a command-card button: the option's name with its
+    // cost as resource glyph + amount pairs (the only place costs appear,
+    // keeping the buttons themselves clean).
+    if let Some((bx, by, bw, label, ore, carbon)) = tooltip {
+        let tw = 150.0_f64;
+        let th = if ore > 0 || carbon > 0 { 52.0 } else { 30.0 };
+        let tx = (bx + bw / 2.0 - tw / 2.0).clamp(8.0, wf - tw - 8.0);
+        let ty = (by - th - 10.0).max(8.0);
+        ctx.set_fill_style_str("rgba(10,16,30,0.95)");
+        ctx.fill_rect(tx, ty, tw, th);
+        ctx.set_stroke_style_str("rgba(150,190,240,0.95)");
+        ctx.set_line_width(1.5);
+        ctx.stroke_rect(tx, ty, tw, th);
+        ctx.set_fill_style_str("#e7eefa");
+        ctx.set_font("bold 13px monospace");
+        let _ = ctx.fill_text(label, tx + 10.0, ty + 19.0);
+        let mut cx = tx + 10.0;
+        ctx.set_font("bold 13px monospace");
+        if ore > 0 {
+            draw_ore_glyph(&ctx, cx, ty + 37.0);
+            ctx.set_fill_style_str("#cfe2ff");
+            let _ = ctx.fill_text(&format!("{ore}"), cx + 15.0, ty + 42.0);
+            cx += 15.0 + 12.0 * (ore.max(1).ilog10() as f64 + 1.0) + 12.0;
+        }
+        if carbon > 0 {
+            draw_carbon_glyph(&ctx, cx, ty + 37.0);
+            ctx.set_fill_style_str("#cfe2ff");
+            let _ = ctx.fill_text(&format!("{carbon}"), cx + 15.0, ty + 42.0);
+        }
+    }
 
     // In-game context cursor: the OS cursor is hidden during play, so the HUD
     // draws an order-aware glyph at the tracked position (physical pixels,

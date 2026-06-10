@@ -284,9 +284,7 @@ mod web {
         ctx.set_fill_style_str(fill);
         ctx.fill_rect(b.x, b.y, b.w, b.h);
         ctx.set_stroke_style_str(border);
-        ctx.set_line_width(if hover || pressed {
-            2.5
-        } else if b.selected {
+        ctx.set_line_width(if hover || pressed || b.selected {
             2.5
         } else {
             1.5
