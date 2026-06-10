@@ -56,6 +56,8 @@ pub enum Click {
     ScrollMap(i8),
     Back,
     Start,
+    /// Toggle browser fullscreen (web only; needs this user gesture).
+    Fullscreen,
 }
 
 /// Rows shown at once in the map-select modal (also bounds `Lobby::map_scroll`).
@@ -117,13 +119,32 @@ mod web {
         }
     }
 
+    /// Uniform UI scale: the layout is authored for a ~1180x720 desktop window
+    /// and shrinks to fit small screens (phone landscape) without overlapping.
+    fn ui_scale(w: f64, h: f64) -> f64 {
+        (w / 1180.0).min(h / 720.0).clamp(0.42, 1.0)
+    }
+
     /// The interactive buttons for a screen, in CSS pixels. Single source of
-    /// truth for both `draw` and `hit`.
+    /// truth for both `draw` and `hit`. Fixed offsets/sizes scale by `ui_scale`.
     fn layout(screen: Screen, lobby: &Lobby, w: f64, h: f64) -> Vec<Btn> {
+        let s = ui_scale(w, h);
         let mut v = Vec::new();
+        // Fullscreen toggle, top-right on every front-end screen (web builds).
+        if screen != Screen::InGame {
+            v.push(btn(
+                Click::Fullscreen,
+                w - 196.0 * s - 16.0,
+                16.0,
+                196.0 * s,
+                44.0 * s,
+                "FULLSCREEN",
+                true,
+            ));
+        }
         match screen {
             Screen::Menu => {
-                let bw = 280.0;
+                let bw = 280.0 * s;
                 let bx = (w - bw) / 2.0;
                 // Campaign sits on top (greyed, not yet playable); Skirmish below.
                 v.push(btn(
@@ -131,16 +152,16 @@ mod web {
                     bx,
                     h * 0.46,
                     bw,
-                    56.0,
+                    56.0 * s,
                     "CAMPAIGN  (SOON)",
                     false,
                 ));
                 v.push(btn(
                     Click::Skirmish,
                     bx,
-                    h * 0.46 + 72.0,
+                    h * 0.46 + 72.0 * s,
                     bw,
-                    56.0,
+                    56.0 * s,
                     "SKIRMISH",
                     true,
                 ));
@@ -150,10 +171,10 @@ mod web {
                 for (i, (name, fac)) in FACTIONS.iter().enumerate() {
                     let mut b = btn(
                         fac.map(Click::SetFaction).unwrap_or(Click::None),
-                        60.0,
-                        168.0 + i as f64 * 60.0,
-                        320.0,
-                        48.0,
+                        60.0 * s,
+                        (168.0 + i as f64 * 60.0) * s,
+                        320.0 * s,
+                        48.0 * s,
                         name,
                         fac.is_some(),
                     );
@@ -161,43 +182,51 @@ mod web {
                     v.push(b);
                 }
                 // Bot + map controls (right column).
-                let rx = w - 400.0;
+                let rx = w - 400.0 * s;
                 v.push(btn(
                     Click::RemoveBot,
                     rx,
-                    250.0,
-                    60.0,
-                    44.0,
+                    250.0 * s,
+                    60.0 * s,
+                    44.0 * s,
                     "-",
                     lobby.bots > 1,
                 ));
                 v.push(btn(
                     Click::AddBot,
-                    rx + 320.0,
-                    250.0,
-                    60.0,
-                    44.0,
+                    rx + 320.0 * s,
+                    250.0 * s,
+                    60.0 * s,
+                    44.0 * s,
                     "+",
                     lobby.bots < 3,
                 ));
-                // Diamond map preview is drawn at y=336; the picker opens a modal.
+                // Diamond map preview draws above this; the picker opens a modal.
                 v.push(btn(
                     Click::OpenMap,
                     rx,
-                    548.0,
-                    380.0,
-                    44.0,
+                    548.0 * s,
+                    380.0 * s,
+                    44.0 * s,
                     "SELECT MAP",
                     true,
                 ));
                 // Back / Start.
-                v.push(btn(Click::Back, 60.0, h - 96.0, 200.0, 56.0, "BACK", true));
+                v.push(btn(
+                    Click::Back,
+                    60.0 * s,
+                    h - 96.0 * s,
+                    200.0 * s,
+                    56.0 * s,
+                    "BACK",
+                    true,
+                ));
                 v.push(btn(
                     Click::Start,
-                    w - 260.0,
-                    h - 96.0,
-                    200.0,
-                    56.0,
+                    w - 260.0 * s,
+                    h - 96.0 * s,
+                    200.0 * s,
+                    56.0 * s,
                     "START",
                     true,
                 ));
@@ -232,7 +261,7 @@ mod web {
         Some((ctx, w, h, d))
     }
 
-    fn draw_btn(ctx: &Ctx, b: &Btn) {
+    fn draw_btn(ctx: &Ctx, b: &Btn, s: f64) {
         let (fill, border, text) = if !b.enabled {
             ("rgba(28,34,48,0.85)", "rgba(70,84,110,0.6)", "#5e6a82")
         } else if b.selected {
@@ -246,27 +275,32 @@ mod web {
         ctx.set_line_width(if b.selected { 2.5 } else { 1.5 });
         ctx.stroke_rect(b.x, b.y, b.w, b.h);
         ctx.set_fill_style_str(text);
-        ctx.set_font("bold 18px monospace");
+        ctx.set_font(&format!(
+            "bold {}px monospace",
+            (18.0 * s).round().max(10.0)
+        ));
         ctx.set_text_align("center");
         ctx.set_text_baseline("middle");
         let _ = ctx.fill_text(&b.label, b.x + b.w / 2.0, b.y + b.h / 2.0);
     }
 
     const VIS_ROWS: usize = super::MAP_VIS_ROWS;
-    const ROW_H: f64 = 40.0;
 
     /// The map-select modal's panel rect (mx, my, mw, mh) in CSS pixels.
     fn modal_rect(w: f64, h: f64) -> (f64, f64, f64, f64) {
-        let mw = 760.0_f64.min(w - 60.0);
-        let mh = 520.0_f64.min(h - 60.0);
+        let s = ui_scale(w, h);
+        let mw = (760.0 * s).min(w - 24.0);
+        let mh = (520.0 * s).min(h - 24.0);
         ((w - mw) / 2.0, (h - mh) / 2.0, mw, mh)
     }
 
     /// Interactive elements of the map-select modal: the visible list rows, the
     /// scrollbar up/down buttons, and DONE. Single source of truth for draw+hit.
     fn modal_layout(lobby: &Lobby, w: f64, h: f64) -> Vec<Btn> {
+        let s = ui_scale(w, h);
+        let row_h = 40.0 * s;
         let (mx, my, mw, mh) = modal_rect(w, h);
-        let (lx, ly, lw) = (mx + 30.0, my + 92.0, 300.0);
+        let (lx, ly, lw) = (mx + 30.0 * s, my + 92.0 * s, 300.0 * s);
         let count = crate::voxel::MAP_COUNT;
         let scroll = lobby.map_scroll as usize;
         let mut v = Vec::new();
@@ -278,41 +312,41 @@ mod web {
             let mut b = btn(
                 Click::PickMap(i as u8),
                 lx,
-                ly + r as f64 * ROW_H,
+                ly + r as f64 * row_h,
                 lw,
-                ROW_H - 6.0,
+                row_h - 6.0 * s,
                 crate::voxel::MAP_NAMES[i],
                 true,
             );
             b.selected = i == lobby.map as usize;
             v.push(b);
         }
-        let sbx = lx + lw + 8.0;
-        let track = VIS_ROWS as f64 * ROW_H;
+        let sbx = lx + lw + 8.0 * s;
+        let track = VIS_ROWS as f64 * row_h;
         v.push(btn(
             Click::ScrollMap(-1),
             sbx,
             ly,
-            26.0,
-            30.0,
+            26.0 * s,
+            30.0 * s,
             "^",
             scroll > 0,
         ));
         v.push(btn(
             Click::ScrollMap(1),
             sbx,
-            ly + track - 30.0,
-            26.0,
-            30.0,
+            ly + track - 30.0 * s,
+            26.0 * s,
+            30.0 * s,
             "v",
             scroll + VIS_ROWS < count,
         ));
         v.push(btn(
             Click::CloseMap,
-            mx + mw - 180.0,
-            my + mh - 62.0,
-            150.0,
-            44.0,
+            mx + mw - 180.0 * s,
+            my + mh - 62.0 * s,
+            150.0 * s,
+            44.0 * s,
             "DONE",
             true,
         ));
@@ -418,6 +452,8 @@ mod web {
     /// The scrollable map-select modal: a list (with scrollbar) on the left and a
     /// live diamond preview of the highlighted world on the right.
     fn draw_modal(ctx: &Ctx, lobby: &Lobby, w: f64, h: f64) {
+        let s = ui_scale(w, h);
+        let row_h = 40.0 * s;
         ctx.set_fill_style_str("rgba(2,4,10,0.6)");
         ctx.fill_rect(0.0, 0.0, w, h);
         let (mx, my, mw, mh) = modal_rect(w, h);
@@ -430,41 +466,47 @@ mod web {
         ctx.set_text_align("left");
         ctx.set_text_baseline("alphabetic");
         ctx.set_fill_style_str("#e7eefa");
-        ctx.set_font("bold 24px monospace");
-        let _ = ctx.fill_text("SELECT BATTLEFIELD", mx + 30.0, my + 52.0);
+        ctx.set_font(&format!(
+            "bold {}px monospace",
+            (24.0 * s).round().max(12.0)
+        ));
+        let _ = ctx.fill_text("SELECT BATTLEFIELD", mx + 30.0 * s, my + 52.0 * s);
 
         for b in modal_layout(lobby, w, h) {
-            draw_btn(ctx, &b);
+            draw_btn(ctx, &b, s);
             if let Click::PickMap(i) = b.click {
                 let sw = crate::voxel::MAP_SWATCH[i as usize];
                 ctx.set_fill_style_str(&format!("rgb({},{},{})", sw[0], sw[1], sw[2]));
-                ctx.fill_rect(b.x + 8.0, b.y + 7.0, 18.0, b.h - 14.0);
+                ctx.fill_rect(b.x + 8.0 * s, b.y + 7.0 * s, 18.0 * s, b.h - 14.0 * s);
             }
         }
 
         // Scrollbar track + thumb between the up/down buttons.
-        let (lx, ly, lw) = (mx + 30.0, my + 92.0, 300.0);
-        let sbx = lx + lw + 8.0;
-        let track = VIS_ROWS as f64 * ROW_H;
-        let (t0, th) = (ly + 32.0, track - 64.0);
+        let (lx, ly, lw) = (mx + 30.0 * s, my + 92.0 * s, 300.0 * s);
+        let sbx = lx + lw + 8.0 * s;
+        let track = VIS_ROWS as f64 * row_h;
+        let (t0, th) = (ly + 32.0 * s, track - 64.0 * s);
         ctx.set_fill_style_str("rgba(40,52,74,0.85)");
-        ctx.fill_rect(sbx, t0, 26.0, th);
+        ctx.fill_rect(sbx, t0, 26.0 * s, th);
         let count = crate::voxel::MAP_COUNT;
         let max_scroll = count.saturating_sub(VIS_ROWS).max(1) as f64;
-        let thumb_h = (th * VIS_ROWS as f64 / count as f64).max(20.0);
+        let thumb_h = (th * VIS_ROWS as f64 / count as f64).max(20.0 * s);
         let thumb_y = t0 + (lobby.map_scroll as f64 / max_scroll) * (th - thumb_h);
         ctx.set_fill_style_str("rgba(130,170,220,0.95)");
-        ctx.fill_rect(sbx, thumb_y, 26.0, thumb_h);
+        ctx.fill_rect(sbx, thumb_y, 26.0 * s, thumb_h);
 
         // Live preview of the highlighted world, right half of the modal.
         let mi = lobby.map as usize % count;
-        let px = lx + lw + 56.0;
-        let pcx = (px + mx + mw - 30.0) / 2.0;
+        let px = lx + lw + 56.0 * s;
+        let pcx = (px + mx + mw - 30.0 * s) / 2.0;
         ctx.set_text_align("center");
         ctx.set_fill_style_str("#cfe0f5");
-        ctx.set_font("bold 22px monospace");
-        let _ = ctx.fill_text(crate::voxel::MAP_NAMES[mi], pcx, my + 92.0);
-        let pa = (mx + mw - 30.0 - px) * 0.46;
+        ctx.set_font(&format!(
+            "bold {}px monospace",
+            (22.0 * s).round().max(11.0)
+        ));
+        let _ = ctx.fill_text(crate::voxel::MAP_NAMES[mi], pcx, my + 92.0 * s);
+        let pa = (mx + mw - 30.0 * s - px) * 0.46;
         draw_diamond(ctx, pcx, my + mh * 0.52, pa, pa * 0.6, mi);
         ctx.set_text_align("left");
     }
@@ -483,39 +525,47 @@ mod web {
         ctx.fill_rect(0.0, 0.0, w, h * 0.5);
 
         ctx.set_text_baseline("alphabetic");
+        let s = ui_scale(w, h);
+        let font = |bold: bool, px: f64| {
+            format!(
+                "{}{}px monospace",
+                if bold { "bold " } else { "" },
+                (px * s).round().max(10.0)
+            )
+        };
         match screen {
             Screen::Menu => {
                 ctx.set_text_align("center");
                 ctx.set_fill_style_str("#e7eefa");
-                ctx.set_font("bold 64px monospace");
+                ctx.set_font(&font(true, 64.0));
                 let _ = ctx.fill_text("ASTROMANCERS", w / 2.0, h * 0.30);
                 ctx.set_fill_style_str("#7f9ec8");
-                ctx.set_font("18px monospace");
+                ctx.set_font(&font(false, 18.0));
                 let _ = ctx.fill_text(
                     "a deterministic lockstep RTS  -  two worlds, one wall",
                     w / 2.0,
-                    h * 0.30 + 34.0,
+                    h * 0.30 + 34.0 * s,
                 );
             }
             Screen::Lobby => {
                 ctx.set_text_align("left");
                 ctx.set_fill_style_str("#e7eefa");
-                ctx.set_font("bold 34px monospace");
-                let _ = ctx.fill_text("SKIRMISH  -  LOBBY", 60.0, 96.0);
+                ctx.set_font(&font(true, 34.0));
+                let _ = ctx.fill_text("SKIRMISH  -  LOBBY", 60.0 * s, 96.0 * s);
                 ctx.set_fill_style_str("#9ab2d8");
-                ctx.set_font("bold 16px monospace");
-                let _ = ctx.fill_text("CHOOSE YOUR FACTION", 60.0, 150.0);
+                ctx.set_font(&font(true, 16.0));
+                let _ = ctx.fill_text("CHOOSE YOUR FACTION", 60.0 * s, 150.0 * s);
 
                 // Right column: player slots, bot count, map.
-                let rx = w - 400.0;
+                let rx = w - 400.0 * s;
                 ctx.set_fill_style_str("#9ab2d8");
-                let _ = ctx.fill_text("PLAYERS", rx, 150.0);
-                ctx.set_font("16px monospace");
+                let _ = ctx.fill_text("PLAYERS", rx, 150.0 * s);
+                ctx.set_font(&font(false, 16.0));
                 ctx.set_fill_style_str("#dce6f6");
                 let _ = ctx.fill_text(
                     &format!("P1  YOU   -  {}", faction_name(lobby.faction)),
                     rx,
-                    188.0,
+                    188.0 * s,
                 );
                 let enemy = match lobby.faction {
                     Faction::Astromancer => Faction::Hollowmen,
@@ -525,26 +575,26 @@ mod web {
                     let _ = ctx.fill_text(
                         &format!("P{}  BOT   -  {}", i + 2, faction_name(enemy)),
                         rx,
-                        212.0 + i as f64 * 22.0,
+                        (212.0 + i as f64 * 22.0) * s,
                     );
                 }
                 ctx.set_fill_style_str("#9ab2d8");
-                ctx.set_font("bold 16px monospace");
-                let _ = ctx.fill_text(&format!("BOTS: {}", lobby.bots), rx + 70.0, 278.0);
+                ctx.set_font(&font(true, 16.0));
+                let _ = ctx.fill_text(&format!("BOTS: {}", lobby.bots), rx + 70.0 * s, 278.0 * s);
                 let mi = lobby.map as usize % crate::voxel::MAP_COUNT;
                 let map = crate::voxel::MAP_NAMES[mi];
                 let _ = ctx.fill_text(
                     &format!("MAP:  {map}   ({}/{})", mi + 1, crate::voxel::MAP_COUNT),
                     rx,
-                    326.0,
+                    326.0 * s,
                 );
-                draw_diamond(&ctx, rx + 190.0, 432.0, 180.0, 95.0, mi);
+                draw_diamond(&ctx, rx + 190.0 * s, 432.0 * s, 180.0 * s, 95.0 * s, mi);
             }
             Screen::InGame => {}
         }
 
         for b in layout(screen, lobby, w, h) {
-            draw_btn(&ctx, &b);
+            draw_btn(&ctx, &b, s);
         }
         // The map-select modal draws on top of the lobby.
         if screen == Screen::Lobby && lobby.map_open {

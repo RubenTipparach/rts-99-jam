@@ -46,18 +46,36 @@ fn resume_btn_css(w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
     (bx, by, bw, bh)
 }
 
+/// Fullscreen button rect in CSS pixels, directly under the Resume button.
+#[cfg(target_arch = "wasm32")]
+fn fullscreen_btn_css(w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
+    let (bx, by, bw, bh) = resume_btn_css(w_css, h_css);
+    (bx, by + bh + 14.0, bw, bh)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn css_to_phys(r: (f64, f64, f64, f64), d: f32) -> (f32, f32, f32, f32) {
+    (
+        r.0 as f32 * d,
+        r.1 as f32 * d,
+        (r.0 + r.2) as f32 * d,
+        (r.1 + r.3) as f32 * d,
+    )
+}
+
 /// Resume button rect in physical pixels `(x0, y0, x1, y1)`, for hit-testing the
 /// pause menu against raw cursor coordinates.
 #[cfg(target_arch = "wasm32")]
 pub fn resume_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
     let d = dpr();
-    let (x, y, bw, bh) = resume_btn_css(w_phys / d, h_phys / d);
-    (
-        x as f32 * d,
-        y as f32 * d,
-        (x + bw) as f32 * d,
-        (y + bh) as f32 * d,
-    )
+    css_to_phys(resume_btn_css(w_phys / d, h_phys / d), d)
+}
+
+/// Fullscreen button rect in physical pixels, for the pause-menu hit-test.
+#[cfg(target_arch = "wasm32")]
+pub fn fullscreen_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
+    let d = dpr();
+    css_to_phys(fullscreen_btn_css(w_phys / d, h_phys / d), d)
 }
 
 /// Draw the in-game cursor at `(x, y)` in CSS pixels. Used while the pointer is
@@ -91,9 +109,9 @@ fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32) {
     // Dim the whole scene.
     ctx.set_fill_style_str("rgba(4,8,16,0.72)");
     ctx.fill_rect(0.0, 0.0, wf, hf);
-    // Panel.
+    // Panel (tall enough for both buttons + hint).
     let pw = 360.0_f64;
-    let ph = 200.0_f64;
+    let ph = 270.0_f64;
     let px = (wf - pw) / 2.0;
     let py = hf / 2.0 - ph / 2.0 - 10.0;
     ctx.set_fill_style_str("rgba(10,16,30,0.96)");
@@ -106,20 +124,25 @@ fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32) {
     ctx.set_fill_style_str("#e7eefa");
     ctx.set_font("bold 30px monospace");
     let _ = ctx.fill_text("PAUSED", wf / 2.0, py + 60.0);
-    // Resume button.
-    let (bx, by, bw, bh) = resume_btn_css(w, h);
-    ctx.set_fill_style_str("rgba(40,80,140,0.95)");
-    ctx.fill_rect(bx, by, bw, bh);
-    ctx.set_stroke_style_str("rgba(150,190,240,0.95)");
-    ctx.set_line_width(1.5);
-    ctx.stroke_rect(bx, by, bw, bh);
-    ctx.set_fill_style_str("#eaf2ff");
-    ctx.set_font("bold 18px monospace");
-    let _ = ctx.fill_text("Resume", bx + bw / 2.0, by + 31.0);
+    // Resume + Fullscreen buttons.
+    let button = |rect: (f64, f64, f64, f64), label: &str| {
+        let (bx, by, bw, bh) = rect;
+        ctx.set_fill_style_str("rgba(40,80,140,0.95)");
+        ctx.fill_rect(bx, by, bw, bh);
+        ctx.set_stroke_style_str("rgba(150,190,240,0.95)");
+        ctx.set_line_width(1.5);
+        ctx.stroke_rect(bx, by, bw, bh);
+        ctx.set_fill_style_str("#eaf2ff");
+        ctx.set_font("bold 18px monospace");
+        let _ = ctx.fill_text(label, bx + bw / 2.0, by + 31.0);
+    };
+    button(resume_btn_css(w, h), "Resume");
+    button(fullscreen_btn_css(w, h), "Fullscreen");
     // Hint.
+    let (_, fy, _, fh) = fullscreen_btn_css(w, h);
     ctx.set_fill_style_str("#8aa3cc");
     ctx.set_font("13px monospace");
-    let _ = ctx.fill_text("Press Esc to resume", wf / 2.0, by + bh + 28.0);
+    let _ = ctx.fill_text("Press Esc to resume", wf / 2.0, fy + fh + 28.0);
     ctx.restore();
 }
 

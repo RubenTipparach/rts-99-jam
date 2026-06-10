@@ -207,6 +207,33 @@ fn hide_loading() {
     }
 }
 
+/// Toggle browser fullscreen on the whole page. Must be called from a user
+/// gesture (the FULLSCREEN button click); errors (e.g. iPhone Safari, which has
+/// no element fullscreen) are ignored.
+#[cfg(target_arch = "wasm32")]
+fn toggle_fullscreen() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if doc.fullscreen_element().is_some() {
+        doc.exit_fullscreen();
+    } else if let Some(root) = doc.document_element() {
+        let _ = root.request_fullscreen();
+    }
+}
+
+/// Mark the body as "in the front-end menus" so CSS can hide the mobile test
+/// controls there (they are gameplay affordances, not menu chrome).
+#[cfg(target_arch = "wasm32")]
+fn set_body_menu(on: bool) {
+    if let Some(body) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.body())
+    {
+        let _ = body.class_list().toggle_with_force("menu", on);
+    }
+}
+
 #[derive(Default)]
 struct Input {
     fwd: bool,
@@ -456,6 +483,8 @@ impl ApplicationHandler<UserEvent> for App {
         {
             mobile::install();
             ptrlock::install();
+            // Web boots into the menus: hide the mobile test controls there.
+            set_body_menu(self.screen != menu::Screen::InGame);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -571,6 +600,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.lobby.map_scroll = s.clamp(0, map_scroll_max() as i32) as u8;
                             }
                             menu::Click::Back => self.screen = menu::Screen::Menu,
+                            menu::Click::Fullscreen => toggle_fullscreen(),
                             menu::Click::Start => {
                                 self.game.set_player_faction(self.lobby.faction);
                                 // Load the chosen battlefield and rebuild its terrain.
@@ -579,6 +609,7 @@ impl ApplicationHandler<UserEvent> for App {
                                     g.set_world();
                                 }
                                 self.screen = menu::Screen::InGame;
+                                set_body_menu(false); // show the mobile test controls
                                 self.apply_cursor_grab();
                             }
                             menu::Click::None => {}
@@ -586,14 +617,18 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     return;
                 }
-                // While paused, only the Resume button responds; everything else
-                // is inert so clicks can't leak into the frozen game.
+                // While paused, only the pause-menu buttons respond; everything
+                // else is inert so clicks can't leak into the frozen game.
                 if self.paused {
                     #[cfg(target_arch = "wasm32")]
                     if button == MouseButton::Left && state == ElementState::Pressed {
-                        let (x0, y0, x1, y1) = hud::resume_button_rect(w, h);
-                        if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
+                        let hitr = |r: (f32, f32, f32, f32)| {
+                            cx >= r.0 && cx <= r.2 && cy >= r.1 && cy <= r.3
+                        };
+                        if hitr(hud::resume_button_rect(w, h)) {
                             self.set_paused(false);
+                        } else if hitr(hud::fullscreen_button_rect(w, h)) {
+                            toggle_fullscreen();
                         }
                     }
                     return;
