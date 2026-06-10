@@ -472,6 +472,62 @@ impl Game {
         self.fx.lights()
     }
 
+    /// Steady world lights: finished buildings switch on warm floodlights
+    /// that pool on the pad beneath them (Earth 2150 style), ore crystals
+    /// glow cool blue, and gas nodes glow green. Sorted nearest-first around
+    /// `(fx_, fz_)` (the camera focus) so slot overflow drops far lights.
+    pub fn world_lights(&self, fx_: f32, fz_: f32) -> Vec<FxLight> {
+        let mut out = Vec::new();
+        for s in &self.curr {
+            let (wx, wz) = self.lerped(s);
+            if !self.revealed(s, wx, wz) {
+                continue;
+            }
+            let ground = terrain::height(wx, wz);
+            let light = match s.kind {
+                // Floodlights only come on once construction is finished.
+                Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    if f(s.construct_frac) >= 0.999 =>
+                {
+                    let radius = match s.kind {
+                        Kind::Hq => 17.0,
+                        Kind::Barracks => 14.0,
+                        Kind::Supply => 11.0,
+                        _ => 9.0,
+                    };
+                    FxLight {
+                        pos: [wx, ground + 3.0, wz],
+                        radius,
+                        color: [0.85, 0.66, 0.38],
+                    }
+                }
+                Kind::OreNode | Kind::CarbonNode => {
+                    let glow = 0.4 + 0.6 * f(s.resource_frac);
+                    let color = if s.kind == Kind::OreNode {
+                        [0.30 * glow, 0.62 * glow, 1.05 * glow]
+                    } else {
+                        [0.28 * glow, 1.0 * glow, 0.45 * glow]
+                    };
+                    FxLight {
+                        pos: [wx, ground + 2.0, wz],
+                        radius: 10.0,
+                        color,
+                    }
+                }
+                _ => continue,
+            };
+            out.push(light);
+        }
+        out.sort_by(|a, b| {
+            let d = |l: &FxLight| {
+                let (dx, dz) = (l.pos[0] - fx_, l.pos[2] - fz_);
+                dx * dx + dz * dz
+            };
+            d(a).total_cmp(&d(b))
+        });
+        out
+    }
+
     /// Level a terrain pad under every building so structures sit on flat
     /// ground (presentation only; the sim has no heights). When the set
     /// changes, flag the ground mesh for a rebuild.
@@ -755,11 +811,13 @@ impl Game {
             let tint = team_color(s.owner);
             if matches!(s.kind, Kind::OreNode | Kind::CarbonNode) {
                 // Nodes shrink as they deplete (resource_frac runs 1 -> 0).
+                // Tint alpha -1 is the shader's crystal mode: glassy fresnel
+                // rim, sun glint, and screen-door translucency.
                 let scl = 0.55 + 0.45 * f(s.resource_frac);
                 let inst = InstanceRaw {
                     offset: [wx, ground, wz],
                     scale: [scl, scl, scl],
-                    color: [1.0, 1.0, 1.0, 0.0],
+                    color: [1.0, 1.0, 1.0, -1.0],
                     rot: ROT_NONE,
                     anim: ANIM_NONE,
                 };
@@ -794,30 +852,8 @@ impl Game {
                     },
                     anim: ANIM_NONE,
                 };
-                let radius = match s.kind {
-                    Kind::Turret => 4.0,
-                    Kind::Supply => 4.5,
-                    Kind::Hq => 9.0,
-                    _ => 8.0,
-                };
-                // Earth 2150-style ground lights: the building's floodlights
-                // pool warm light on the pad beneath it (two stacked soft
-                // discs; the levelled pad keeps them flat). Fades in with
-                // construction, hugging the footprint better than the old
-                // one-size shadow blob.
-                let glow = 0.16 * cf;
-                rings.push(RingRaw {
-                    center: [wx, ground, wz],
-                    radius: radius * 1.45,
-                    color: [1.0, 0.82, 0.50, glow * 0.5],
-                    inner: 0.0,
-                });
-                rings.push(RingRaw {
-                    center: [wx, ground, wz],
-                    radius: radius * 1.08,
-                    color: [1.0, 0.86, 0.55, glow],
-                    inner: 0.0,
-                });
+                // The Earth 2150-style floodlight pooling under the building
+                // is a real point light now: see `world_lights`.
                 match s.kind {
                     Kind::Turret => turrets.push(inst),
                     Kind::Supply => supplies.push(inst),
@@ -830,7 +866,6 @@ impl Game {
                         Faction::Hollowmen => barracks_hollow.push(inst),
                     },
                 }
-                let _ = radius; // brackets are sized from UnitInfo::radius
                 if selected {
                     // Selection reads via the shader brighten + the HUD's
                     // corner brackets (a ground ring this large clips slopes).

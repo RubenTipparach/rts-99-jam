@@ -87,8 +87,9 @@ pub struct FxLight {
     pub color: [f32; 3],
 }
 
-/// Point-light slots in the camera uniform (the fx layer prioritizes).
-pub const MAX_LIGHTS: usize = 16;
+/// Point-light slots in the camera uniform: transient fx lights plus the
+/// steady world lights (building floodlights, resource-node glow).
+pub const MAX_LIGHTS: usize = 48;
 
 /// One voxel-terrain vertex: position, normal, and soft texture blend weights
 /// (four tile slots + a hazard channel) the shader triplanar-blends from.
@@ -1337,13 +1338,15 @@ impl Gfx {
         });
         let fow_view = fow_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
+        // Linear filtering gives the ground tiles a soft painterly blur up
+        // close instead of hard texel blocks.
         let tile_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("tile-samp"),
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });

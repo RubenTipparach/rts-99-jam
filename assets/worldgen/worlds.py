@@ -66,10 +66,11 @@ ARCHETYPES = {
         "low": (92, 52, 36), "mid": (162, 98, 64), "high": (202, 150, 110),
         "accent": (224, 224, 230), "dark": (60, 38, 30), "scale": 4.5,
     },
-    # UNIQUE: Io. Sulfur yellows over black silicate volcanism, red pyroclastics.
+    # UNIQUE: Io. Sulfur yellows with red pyroclastics; black silicate stays in
+    # the speckle/lava channels only, so the plains read yellow, not charred.
     "io_sulfur": {
-        "low": (44, 36, 28), "mid": (202, 182, 92), "high": (226, 216, 178),
-        "accent": (212, 92, 42), "dark": (28, 22, 18), "scale": 4.0,
+        "low": (150, 122, 50), "mid": (212, 188, 86), "high": (232, 220, 168),
+        "accent": (214, 96, 40), "dark": (58, 46, 26), "scale": 4.0,
     },
     # UNIQUE: Titan. Orange organic haze, dark dunes, dark hydrocarbon lakes.
     "titan_haze": {

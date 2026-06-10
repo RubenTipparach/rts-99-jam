@@ -39,6 +39,11 @@ impl Camera {
         self.eye_target().0.to_array()
     }
 
+    /// The ground point the camera looks at (world x, z).
+    pub fn focus(&self) -> (f32, f32) {
+        (self.target.x, self.target.y)
+    }
+
     fn mat(&self, aspect: f32) -> Mat4 {
         let (eye, target) = self.eye_target();
         let view = Mat4::look_at_rh(eye, target, Vec3::Y);

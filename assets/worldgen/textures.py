@@ -11,7 +11,7 @@ surface with a low/lowland tile, a high/slope tile and an accent tile:
   high.png   - sunlit highs, ridges, fresh ice, slope rock
   accent.png - the defining splash: ejecta rays, lineae, lava, salts, dunes, lakes
 
-Tiles are nearest-sampled in engine (chunky PS1 look), so they are painted with
+Tiles are linear-sampled in engine (a soft painterly blur), painted with
 wrapping value noise plus scattered flecks, exactly like `assets/gen_textures.py`.
 """
 

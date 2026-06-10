@@ -6,8 +6,8 @@ struct Camera {
     eye: vec4<f32>,
     light_dir: vec4<f32>,
     params: vec4<f32>, // x = time, y = map half-size, z = sea level, w = light count
-    light_pos: array<vec4<f32>, 16>, // xyz = position, w = radius
-    light_col: array<vec4<f32>, 16>, // rgb
+    light_pos: array<vec4<f32>, 48>, // xyz = position, w = radius
+    light_col: array<vec4<f32>, 48>, // rgb
 };
 @group(0) @binding(0) var<uniform> cam: Camera;
 
@@ -247,6 +247,7 @@ fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
 
 // ---------------- units / buildings ----------------
 // The instance tint's alpha selects a render mode:
+//   < 0     crystal (glassy resource node: fresnel rim, glint, screen-door body)
 //   < 1.25  normal (lit, team-tinted via the mesh's team weight)
 //   1.25-2  selected building (brightened with a green lift)
 //   2-3     hologram (the build-placement ghost: unlit, rolling scanlines)
@@ -335,7 +336,28 @@ fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
         return vec4<f32>(in.albedo * (1.1 * scan), 1.0);
     }
     let n = normalize(in.normal);
-    let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
+    let l = normalize(cam.light_dir.xyz);
+    if in.mode < 0.0 {
+        // Crystal resource node: glassy and lit from within. A fresnel rim
+        // pulls glancing facets toward white, a sharp sun glint rides the
+        // faces, and face-on pixels drop one in four (screen-door) so the
+        // body reads translucent against the ground behind it.
+        let v = normalize(cam.eye.xyz - in.world);
+        let fres = pow(1.0 - max(dot(n, v), 0.0), 2.0);
+        let px = vec2<u32>(in.clip.xy);
+        if fres < 0.45 && (px.x & 1u) == 0u && (px.y & 1u) == 1u {
+            discard;
+        }
+        let spec = pow(max(dot(reflect(-l, n), v), 0.0), 40.0);
+        let ndl = max(dot(n, l), 0.0);
+        let lit = 0.5 + 0.6 * ndl;
+        var col = in.albedo * (vec3<f32>(lit, lit, lit) + point_lights(in.world, n));
+        col += in.albedo * 0.35;
+        col = mix(col, vec3<f32>(1.0, 1.0, 1.0), fres * 0.55);
+        col += vec3<f32>(1.0, 1.0, 1.0) * spec * 0.9;
+        return vec4<f32>(col, 1.0);
+    }
+    let ndl = max(dot(n, l), 0.0);
     let lit = 0.45 + 0.7 * ndl;
     let col = in.albedo * (vec3<f32>(lit, lit, lit) + point_lights(in.world, n));
     return vec4<f32>(col, 1.0);

@@ -359,7 +359,13 @@ impl App {
             let (inf, ba, bh, hqa, hqh, ac, en, ore, carbon, heavies, turrets, supplies, rings) =
                 self.game.render_data(ghost);
             let particles = self.game.fx_instances();
-            let fx_lights = self.game.fx_lights();
+            // Transient fx flashes take the light slots first; the steady
+            // world lights (floodlights, node glow) fill what remains,
+            // nearest to the camera focus first.
+            let mut fx_lights = self.game.fx_lights();
+            let (fcx, fcz) = self.camera.focus();
+            fx_lights.extend(self.game.world_lights(fcx, fcz));
+            fx_lights.truncate(gfx::MAX_LIGHTS);
             let fow = self.game.fow_bytes();
             let vp = self.camera.view_proj(aspect);
             gfx.render(
