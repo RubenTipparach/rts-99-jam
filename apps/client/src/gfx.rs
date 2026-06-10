@@ -827,6 +827,29 @@ fn turret_mesh() -> Vec<UnitVertex> {
     m
 }
 
+/// Supply depot: a squat habitat bunker (small 5x5 footprint tier) with a
+/// hazard skirt, a team-tinted habitat band, a domed roof, and a vent stack.
+/// Shared by both factions, like the turret.
+fn supply_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let steel = [0.50, 0.53, 0.57];
+    let dark = [0.26, 0.28, 0.32];
+    let haz = [0.80, 0.58, 0.20];
+    let team = [0.5, 0.5, 0.5];
+    // Pad + plated bunker body + hazard skirt.
+    push_box(&mut m, [-2.6, 0.0, -2.6], [2.6, 0.4, 2.6], dark, 0.0);
+    push_box(&mut m, [-2.2, 0.4, -2.2], [2.2, 2.2, 2.2], steel, 0.0);
+    push_box(&mut m, [-2.2, 0.4, -2.2], [2.2, 0.8, 2.2], haz, 0.0);
+    // Team-tinted habitat band + domed roof.
+    push_box(&mut m, [-2.3, 1.6, -2.3], [2.3, 2.0, 2.3], team, 1.0);
+    push_frustum(
+        &mut m, 0.0, 0.0, 2.0, 1.1, 2.2, 3.3, steel, 0.0, 8, 0.0, true,
+    );
+    // Vent stack on one corner.
+    push_prism(&mut m, 1.4, 1.4, 0.3, 2.2, 3.1, dark, 0.0, 6, 0.0, true);
+    m
+}
+
 /// Heavy assault unit (placeholder War-Mech / Golem): a stocky two-legged walker,
 /// team-tinted core, with shoulder guns. ~3.4 tall, facing -z.
 fn heavy_mesh() -> Vec<UnitVertex> {
@@ -1063,6 +1086,8 @@ pub struct Gfx {
     carbon_node_len: u32,
     turret_buf: wgpu::Buffer,
     turret_len: u32,
+    supply_buf: wgpu::Buffer,
+    supply_len: u32,
     heavy_buf: wgpu::Buffer,
     heavy_len: u32,
     walls_buf: wgpu::Buffer,
@@ -1590,6 +1615,12 @@ impl Gfx {
             bytemuck::cast_slice(&turret),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let supply = supply_mesh();
+        let supply_buf = mkbuf(
+            "supply",
+            bytemuck::cast_slice(&supply),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let heavy = heavy_mesh();
         let heavy_buf = mkbuf(
             "heavy",
@@ -1663,6 +1694,8 @@ impl Gfx {
             carbon_node_len: carbon_node.len() as u32,
             turret_buf,
             turret_len: turret.len() as u32,
+            supply_buf,
+            supply_len: supply.len() as u32,
             heavy_buf,
             heavy_len: heavy.len() as u32,
             walls_buf,
@@ -1833,6 +1866,7 @@ impl Gfx {
         carbon_nodes: &[InstanceRaw],
         heavies: &[InstanceRaw],
         turrets: &[InstanceRaw],
+        supplies: &[InstanceRaw],
         rings: &[RingRaw],
         fow: &[u8],
         view_proj: [[f32; 4]; 4],
@@ -1841,7 +1875,8 @@ impl Gfx {
     ) {
         // All meshes share one instance buffer, packed in order: infantry,
         // the faction barracks, the faction HQs, Acolytes, Engineers, ore
-        // nodes, carbon nodes, heavies, turrets. Each mesh draws its own range.
+        // nodes, carbon nodes, heavies, turrets, supply depots. Each mesh
+        // draws its own range.
         let groups = [
             infantry.len(),
             barracks_astro.len(),
@@ -1854,15 +1889,16 @@ impl Gfx {
             carbon_nodes.len(),
             heavies.len(),
             turrets.len(),
+            supplies.len(),
         ];
         // Clamp each group's count so the running total never exceeds the buffer.
-        let mut counts = [0usize; 11];
+        let mut counts = [0usize; 12];
         let mut used = 0usize;
         for (c, &g) in counts.iter_mut().zip(groups.iter()) {
             *c = g.min(MAX_INSTANCES - used);
             used += *c;
         }
-        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr] = counts;
+        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr, nsp] = counts;
         let ring_verts = ring_decals(rings);
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
         self.queue.write_buffer(
@@ -1909,6 +1945,7 @@ impl Gfx {
             &carbon_nodes[..ncar],
             &heavies[..nhv],
             &turrets[..ntr],
+            &supplies[..nsp],
         ];
         let mut off = 0u64;
         for s in slices {
@@ -2009,6 +2046,7 @@ impl Gfx {
                     (&self.carbon_node_buf, self.carbon_node_len, ncar),
                     (&self.heavy_buf, self.heavy_len, nhv),
                     (&self.turret_buf, self.turret_len, ntr),
+                    (&self.supply_buf, self.supply_len, nsp),
                 ];
                 let mut base = 0u32;
                 for (buf, vlen, count) in meshes {
@@ -2088,6 +2126,134 @@ mod tests {
         check_mesh(&ore_node_mesh(), "ore-node");
         check_mesh(&carbon_node_mesh(), "carbon-node");
         check_mesh(&turret_mesh(), "turret");
+        check_mesh(&supply_mesh(), "supply");
         check_mesh(&heavy_mesh(), "heavy");
+    }
+
+    /// Offline mesh preview: rasterizes a mesh with the game's iso camera
+    /// (yaw 45, pitch 0.95) and the unit shader's lighting, so the PNG shows
+    /// exactly what the renderer would draw. CPU-only (no GPU needed).
+    fn rasterize(mesh: &[UnitVertex], team: [f32; 3], w: u32, h: u32) -> image::RgbaImage {
+        let (yaw, pitch) = (std::f32::consts::FRAC_PI_4, 0.95_f32);
+        // The camera's eye direction; screen axes are perpendicular to it.
+        let eye = [
+            yaw.cos() * pitch.cos(),
+            pitch.sin(),
+            yaw.sin() * pitch.cos(),
+        ];
+        let right = [-yaw.sin(), 0.0, yaw.cos()];
+        let up = [
+            right[1] * eye[2] - right[2] * eye[1],
+            right[2] * eye[0] - right[0] * eye[2],
+            right[0] * eye[1] - right[1] * eye[0],
+        ];
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let project = |p: [f32; 3]| (dot(p, right), dot(p, up), dot(p, eye));
+
+        // Fit the mesh into the image with a margin.
+        let (mut u0, mut u1, mut v0, mut v1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for v in mesh {
+            let (u, vv, _) = project(v.pos);
+            u0 = u0.min(u);
+            u1 = u1.max(u);
+            v0 = v0.min(vv);
+            v1 = v1.max(vv);
+        }
+        let scale = ((w as f32 - 60.0) / (u1 - u0)).min((h as f32 - 60.0) / (v1 - v0));
+        let to_px = |u: f32, v: f32| {
+            (
+                (u - u0) * scale + (w as f32 - (u1 - u0) * scale) * 0.5,
+                // v points up; image y points down.
+                (v1 - v) * scale + (h as f32 - (v1 - v0) * scale) * 0.5,
+            )
+        };
+
+        // Same lighting as fs_unit: albedo * (0.45 + 0.7 * n.l).
+        let ll = (0.5_f32 * 0.5 + 1.0 + 0.35 * 0.35).sqrt();
+        let light = [0.5 / ll, 1.0 / ll, 0.35 / ll];
+
+        let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 14, 24, 255]));
+        let mut depth = vec![f32::MIN; (w * h) as usize];
+        for tri in mesh.chunks_exact(3) {
+            let albedo = |v: &UnitVertex| {
+                [
+                    v.color[0] + (team[0] - v.color[0]) * v.color[3],
+                    v.color[1] + (team[1] - v.color[1]) * v.color[3],
+                    v.color[2] + (team[2] - v.color[2]) * v.color[3],
+                ]
+            };
+            let shade = 0.45 + 0.7 * dot(tri[0].normal, light).max(0.0);
+            let base = albedo(&tri[0]);
+            let rgb = [
+                ((base[0] * shade).clamp(0.0, 1.0) * 255.0) as u8,
+                ((base[1] * shade).clamp(0.0, 1.0) * 255.0) as u8,
+                ((base[2] * shade).clamp(0.0, 1.0) * 255.0) as u8,
+            ];
+            let p: Vec<(f32, f32, f32)> = tri
+                .iter()
+                .map(|v| {
+                    let (u, vv, d) = project(v.pos);
+                    let (x, y) = to_px(u, vv);
+                    (x, y, d)
+                })
+                .collect();
+            let area =
+                (p[1].0 - p[0].0) * (p[2].1 - p[0].1) - (p[2].0 - p[0].0) * (p[1].1 - p[0].1);
+            if area.abs() < 1e-6 {
+                continue;
+            }
+            let xmin = p.iter().map(|q| q.0).fold(f32::MAX, f32::min).max(0.0) as u32;
+            let xmax = (p
+                .iter()
+                .map(|q| q.0)
+                .fold(f32::MIN, f32::max)
+                .min(w as f32 - 1.0)) as u32;
+            let ymin = p.iter().map(|q| q.1).fold(f32::MAX, f32::min).max(0.0) as u32;
+            let ymax = (p
+                .iter()
+                .map(|q| q.1)
+                .fold(f32::MIN, f32::max)
+                .min(h as f32 - 1.0)) as u32;
+            for py in ymin..=ymax {
+                for px in xmin..=xmax {
+                    let (fx, fy) = (px as f32 + 0.5, py as f32 + 0.5);
+                    let w0 = ((p[1].0 - fx) * (p[2].1 - fy) - (p[2].0 - fx) * (p[1].1 - fy)) / area;
+                    let w1 = ((p[2].0 - fx) * (p[0].1 - fy) - (p[0].0 - fx) * (p[2].1 - fy)) / area;
+                    let w2 = 1.0 - w0 - w1;
+                    if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                        continue;
+                    }
+                    let d = w0 * p[0].2 + w1 * p[1].2 + w2 * p[2].2;
+                    let i = (py * w + px) as usize;
+                    if d > depth[i] {
+                        depth[i] = d;
+                        img.put_pixel(px, py, image::Rgba([rgb[0], rgb[1], rgb[2], 255]));
+                    }
+                }
+            }
+        }
+        img
+    }
+
+    /// Renders a preview PNG of every building mesh to `target/previews/`.
+    /// A dev tool, not a check: run on demand with
+    /// `cargo test -p client render_building_previews -- --ignored`.
+    #[test]
+    #[ignore = "writes preview PNGs to target/previews; run on demand"]
+    fn render_building_previews() {
+        let team = [0.25, 0.55, 1.0]; // the player's blue
+        let jobs: [(&str, Vec<UnitVertex>); 6] = [
+            ("hq-spire-astromancer", hq_mesh_astro()),
+            ("hq-command-hollowmen", hq_mesh_hollow()),
+            ("barracks-astromancer", barracks_mesh_astro()),
+            ("barracks-hollowmen", barracks_mesh_hollow()),
+            ("turret", turret_mesh()),
+            ("supply-depot", supply_mesh()),
+        ];
+        std::fs::create_dir_all("target/previews").unwrap();
+        for (name, mesh) in jobs {
+            let img = rasterize(&mesh, team, 560, 640);
+            img.save(format!("target/previews/{name}.png")).unwrap();
+        }
     }
 }

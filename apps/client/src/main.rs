@@ -241,6 +241,10 @@ struct Input {
     back: bool,
     left: bool,
     right: bool,
+    /// Shift held: clicks/boxes add to the selection instead of replacing it.
+    shift: bool,
+    /// Ctrl held: a right-click is an explicit attack-move.
+    ctrl: bool,
     cursor: (f32, f32),
     cursor_in: bool,
     left_press: Option<(f32, f32)>,
@@ -329,8 +333,17 @@ impl App {
     fn render_scene(&mut self) {
         if let Some(gfx) = self.gfx.as_mut() {
             let aspect = gfx.aspect();
-            let (inf, ba, bh, hqa, hqh, ac, en, ore, carbon, heavies, turrets, rings) =
-                self.game.render_data();
+            // Build-placement preview: the pending building ghosted under the
+            // cursor (holographic, green when the site is clear).
+            let (w, h) = (gfx.width as f32, gfx.height as f32);
+            let ghost = self.build_mode.and_then(|kind| {
+                let (cx, cy) = self.input.cursor;
+                self.camera
+                    .ground_pick(cx, cy, w, h)
+                    .map(|(wx, wz)| (kind, wx, wz))
+            });
+            let (inf, ba, bh, hqa, hqh, ac, en, ore, carbon, heavies, turrets, supplies, rings) =
+                self.game.render_data(ghost);
             let fow = self.game.fow_bytes();
             let vp = self.camera.view_proj(aspect);
             gfx.render(
@@ -345,6 +358,7 @@ impl App {
                 &carbon,
                 &heavies,
                 &turrets,
+                &supplies,
                 &rings,
                 &fow,
                 vp,
@@ -621,6 +635,10 @@ impl ApplicationHandler<UserEvent> for App {
                     gfx.resize(size.width, size.height);
                 }
             }
+            WindowEvent::ModifiersChanged(mods) => {
+                self.input.shift = mods.state().shift_key();
+                self.input.ctrl = mods.state().control_key();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 let down = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
@@ -687,6 +705,9 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyN if down && self.game.has_worker_selected() => {
                             self.build_mode = Some(protocol::BuildingKind::Hq)
                         }
+                        KeyCode::KeyG if down && self.game.has_worker_selected() => {
+                            self.build_mode = Some(protocol::BuildingKind::Supply)
+                        }
                         KeyCode::Digit1 if down => self.game.toggle_fog_unexplored(),
                         KeyCode::Digit2 if down => self.game.toggle_fog_explored(),
                         _ => {}
@@ -746,11 +767,12 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.input.minimap_drag = false;
                             }
                             if let Some((px, py)) = self.input.left_press.take() {
+                                let add = self.input.shift;
                                 if (px - cx).hypot(py - cy) < 8.0 {
-                                    self.game.select_single(&self.camera, w, h, cx, cy);
+                                    self.game.select_single(&self.camera, w, h, cx, cy, add);
                                 } else {
                                     let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
-                                    self.game.select_box_screen(&self.camera, w, h, rect);
+                                    self.game.select_box_screen(&self.camera, w, h, rect, add);
                                 }
                             }
                         }
@@ -760,7 +782,7 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     MouseButton::Right if state == ElementState::Pressed => {
                         if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                            self.game.order(wx, wz);
+                            self.game.order(wx, wz, self.input.ctrl);
                         }
                     }
                     _ => {}
@@ -841,13 +863,13 @@ impl ApplicationHandler<UserEvent> for App {
                             let rc = false;
                             if rc {
                                 if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                                    self.game.order(wx, wz);
+                                    self.game.order(wx, wz, false);
                                 }
                             } else if (px - cx).hypot(py - cy) < 8.0 {
-                                self.game.select_single(&self.camera, w, h, cx, cy);
+                                self.game.select_single(&self.camera, w, h, cx, cy, false);
                             } else {
                                 let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
-                                self.game.select_box_screen(&self.camera, w, h, rect);
+                                self.game.select_box_screen(&self.camera, w, h, rect, false);
                             }
                         }
                     }
@@ -999,6 +1021,7 @@ impl ApplicationHandler<UserEvent> for App {
                     protocol::BuildingKind::Hq => "HQ",
                     protocol::BuildingKind::Barracks => "BARRACKS",
                     protocol::BuildingKind::Turret => "TURRET",
+                    protocol::BuildingKind::Supply => "SUPPLY DEPOT",
                 });
                 hud::draw(
                     &self.camera,

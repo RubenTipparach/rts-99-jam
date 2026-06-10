@@ -10,9 +10,9 @@
 //!
 //! ```text
 //! name <map name>
-//! hq|barracks|turret     <player> <x> <z>
-//! infantry|worker|heavy  <player> <x> <z>
-//! ore|carbon             <x> <z>
+//! hq|barracks|turret|supply  <player> <x> <z>
+//! infantry|worker|heavy      <player> <x> <z>
+//! ore|carbon                 <x> <z>
 //! ```
 //!
 //! `#` starts a comment, blank lines are skipped, and coordinates are integer
@@ -69,7 +69,7 @@ pub fn parse(src: &str) -> Result<MapFile, String> {
                 }
                 name = Some(args.join(" "));
             }
-            "hq" | "barracks" | "turret" | "infantry" | "worker" | "heavy" => {
+            "hq" | "barracks" | "turret" | "supply" | "infantry" | "worker" | "heavy" => {
                 let [p, x, z] = args[..] else {
                     return Err(format!("line {line}: expected '{word} <player> <x> <z>'"));
                 };
@@ -91,6 +91,12 @@ pub fn parse(src: &str) -> Result<MapFile, String> {
                     "turret" => Command::SpawnBuilding {
                         owner,
                         kind: BuildingKind::Turret,
+                        x,
+                        y,
+                    },
+                    "supply" => Command::SpawnBuilding {
+                        owner,
+                        kind: BuildingKind::Supply,
                         x,
                         y,
                     },

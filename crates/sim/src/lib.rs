@@ -40,6 +40,8 @@ pub enum Kind {
     Barracks,
     /// Defensive emplacement: immobile, auto-fires on nearby enemies.
     Turret,
+    /// Supply depot: raises the owner's unit cap. Inert otherwise.
+    Supply,
     /// Ore crystals: harvested into the ore stockpile.
     OreNode,
     /// Carbon gas geyser: harvested into the carbon stockpile.
@@ -58,7 +60,7 @@ fn is_fighter(k: Kind) -> bool {
 
 /// A building (occupies a footprint, owned, can be a drop-off / target).
 fn is_building(k: Kind) -> bool {
-    matches!(k, Kind::Hq | Kind::Barracks | Kind::Turret)
+    matches!(k, Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply)
 }
 
 /// Buildings that run a production queue (HQ makes workers, Barracks fighters).
@@ -174,6 +176,15 @@ fn stats(kind: Kind) -> Stats {
             attack_cd: Fx::from_int(14),
             aggro2: Fx::from_int(144),
         },
+        // Supply depot: cheap, unarmed, just a wall of habitat plating.
+        Kind::Supply => Stats {
+            max_hp: Fx::from_int(300),
+            speed: Fx::ZERO,
+            range2: Fx::ZERO,
+            damage: Fx::ZERO,
+            attack_cd: Fx::ZERO,
+            aggro2: Fx::ZERO,
+        },
         // Resource nodes are inert: tons of "hp" so stray AoE can't pop them.
         Kind::OreNode | Kind::CarbonNode => Stats {
             max_hp: Fx::from_int(100000),
@@ -194,8 +205,14 @@ const MINE_RANGE2: Fx = Fx::from_int(36); // mine within range 6 of a node
 const DEPOSIT_RANGE2: Fx = Fx::from_int(100); // deposit within range 10 of a building
 
 const PROD_TICKS: i32 = 55;
-const TEAM_UNIT_CAP: usize = 30;
 const MAX_QUEUE: u32 = 6;
+
+// Supply: every unit on the field occupies one supply. The HQ provides a base
+// block and each Supply depot adds more, up to a hard ceiling. Production
+// holds (without dropping the queue) while the owner is at their cap.
+pub const SUPPLY_PER_HQ: u32 = 10;
+pub const SUPPLY_PER_DEPOT: u32 = 8;
+pub const MAX_SUPPLY: u32 = 60;
 
 // Economy: ore + carbon. Players start with an ore stockpile, gain a trickle of
 // ore per completed building, and pay per trained unit / built structure. Nobody
@@ -222,6 +239,7 @@ fn building_cost(kind: BuildingKind) -> (Fx, Fx) {
         BuildingKind::Hq => (Fx::from_int(400), Fx::ZERO),
         BuildingKind::Barracks => (Fx::from_int(150), Fx::ZERO),
         BuildingKind::Turret => (Fx::from_int(90), Fx::from_int(50)),
+        BuildingKind::Supply => (Fx::from_int(100), Fx::ZERO),
     }
 }
 
@@ -234,7 +252,7 @@ const BUILD_CLEAR2: Fx = Fx::from_int(196); // sites must be >= 14 from other bu
 
 // Bot commander tuning.
 const BOT_THINK_TICKS: u64 = 15; // re-plan cadence (every ~0.75s at 20 Hz)
-const BOT_MAX_BUILDINGS: usize = 4; // counts the starting HQ
+const BOT_MAX_BUILDINGS: usize = 3; // production/defense structures (HQ and depots excluded)
 const BOT_TARGET_WORKERS: usize = 6; // staff the mining crew up to this
 
 // Obstacle avoidance: mobile units are pushed out of these static footprints so
@@ -246,6 +264,7 @@ fn obstacle_radius(k: Kind) -> Option<Fx> {
         Kind::Hq => Some(Fx::from_int(7)),
         Kind::Barracks => Some(Fx::from_int(6)),
         Kind::Turret => Some(Fx::from_ratio(5, 2)), // 2.5
+        Kind::Supply => Some(Fx::from_int(3)),      // small 5x5 tier
         Kind::OreNode | Kind::CarbonNode => Some(Fx::from_ratio(7, 2)), // 3.5
         _ => None,
     }
@@ -498,14 +517,32 @@ impl World {
         id
     }
 
-    fn team_unit_count(&self, owner: PlayerId) -> usize {
+    /// Supply in use: every living mobile unit (fighters and workers) is one.
+    pub fn supply_used(&self, owner: PlayerId) -> u32 {
         let mut n = 0;
         for i in 0..self.arena.capacity() {
-            if self.arena.alive[i] && is_fighter(self.kind[i]) && self.owner[i] == owner {
+            if self.arena.alive[i] && is_mobile(self.kind[i]) && self.owner[i] == owner {
                 n += 1;
             }
         }
         n
+    }
+
+    /// Supply ceiling: a block per completed HQ plus a block per completed
+    /// Supply depot, clamped to [`MAX_SUPPLY`].
+    pub fn supply_cap(&self, owner: PlayerId) -> u32 {
+        let mut cap = 0;
+        for i in 0..self.arena.capacity() {
+            if !self.arena.alive[i] || self.owner[i] != owner || self.construct[i] > Fx::ZERO {
+                continue;
+            }
+            cap += match self.kind[i] {
+                Kind::Hq => SUPPLY_PER_HQ,
+                Kind::Supply => SUPPLY_PER_DEPOT,
+                _ => 0,
+            };
+        }
+        cap.min(MAX_SUPPLY)
     }
 
     /// Nearest living entity of a different owner: returns `(index, dist2)`.
@@ -624,7 +661,6 @@ impl World {
                     }
                     Kind::Hq => {
                         hqs.push(i as u32);
-                        building_count += 1;
                         if hq_base.is_none() {
                             hq_base = Some(self.pos[i]);
                         }
@@ -650,29 +686,41 @@ impl World {
             let base = hq_base.or(barracks_base);
             let ore = self.ore(owner);
             let carbon = self.carbon(owner);
-            // Expand economy first (a 2nd Barracks), then sprinkle Turrets.
-            let next_build = if building_count.is_multiple_of(2) {
-                BuildingKind::Turret
-            } else {
+            // Supply first when the cap is close; otherwise production up to
+            // two Barracks, then sprinkle Turrets.
+            let supply_tight = self.supply_used(owner) + 3 >= self.supply_cap(owner);
+            let next_build = if supply_tight {
+                BuildingKind::Supply
+            } else if barracks.len() < 2 {
                 BuildingKind::Barracks
+            } else {
+                BuildingKind::Turret
             };
             let (build_ore, build_carbon) = building_cost(next_build);
 
-            // 1) Construct: when flush and under the cap, send a worker to build.
+            // 1) Construct: when flush and under the cap (depots are exempt
+            // from the cap: the bot always builds out of a supply block).
             let mut builder: Option<u32> = None;
-            if building_count < BOT_MAX_BUILDINGS
+            if (supply_tight || building_count < BOT_MAX_BUILDINGS)
                 && !worker_building
                 && ore >= build_ore + Fx::from_int(60)
                 && carbon >= build_carbon
             {
                 builder = idle_workers.first().copied().or(any_worker);
                 if let (Some(w), Some(bp)) = (builder, base) {
-                    let off = ((building_count % 3) as i32 - 1) * 24;
+                    // Depots fill their own row behind the production line, a
+                    // slot per depot built, so sites never collide.
+                    let (off, dy) = if next_build == BuildingKind::Supply {
+                        let slot = (self.supply_cap(owner) / SUPPLY_PER_DEPOT) as i32 % 5;
+                        ((slot - 2) * 14, 44)
+                    } else {
+                        (((building_count % 3) as i32 - 1) * 24, 26)
+                    };
                     out.push(Command::Build {
                         unit: w,
                         kind: next_build,
                         x: bp.x + Fx::from_int(off),
-                        y: bp.y + Fx::from_int(26),
+                        y: bp.y + Fx::from_int(dy),
                     });
                 }
             }
@@ -789,6 +837,7 @@ impl World {
                         BuildingKind::Hq => Kind::Hq,
                         BuildingKind::Barracks => Kind::Barracks,
                         BuildingKind::Turret => Kind::Turret,
+                        BuildingKind::Supply => Kind::Supply,
                     };
                     self.spawn(k, owner, x, y);
                 }
@@ -900,8 +949,10 @@ impl World {
             if self.prod[i] > Fx::ZERO {
                 continue;
             }
-            // Built - but hold (without consuming the queue) if at the unit cap.
-            if self.team_unit_count(self.owner[i]) >= TEAM_UNIT_CAP {
+            // Built - but hold (without consuming the queue) while at the
+            // supply cap; a new depot releases it.
+            let owner = self.owner[i];
+            if self.supply_used(owner) >= self.supply_cap(owner) {
                 continue;
             }
             self.queue[i] -= 1;
@@ -1040,6 +1091,7 @@ impl World {
                             BuildingKind::Hq => Kind::Hq,
                             BuildingKind::Barracks => Kind::Barracks,
                             BuildingKind::Turret => Kind::Turret,
+                            BuildingKind::Supply => Kind::Supply,
                         };
                         let id = self.spawn(k, owner, x, y);
                         self.construct[id.index as usize] = Fx::from_int(CONSTRUCT_TICKS);
@@ -1343,6 +1395,7 @@ impl World {
                 Kind::Heavy => 5,
                 Kind::Turret => 6,
                 Kind::Hq => 7,
+                Kind::Supply => 8,
             });
             h.write_u32(self.owner[i] as u32);
             h.write_i64(self.pos[i].x.to_raw());
@@ -1531,32 +1584,41 @@ mod tests {
     #[test]
     fn player_barracks_trains_only_on_command() {
         let mut w = World::new(7);
-        w.step(&[Command::SpawnBuilding {
-            owner: 0,
-            kind: BuildingKind::Barracks,
-            x: fx(0),
-            y: fx(0),
-        }]);
+        // An HQ for the supply block, plus the barracks under test.
+        w.step(&[
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Hq,
+                x: fx(40),
+                y: fx(0),
+            },
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Barracks,
+                x: fx(0),
+                y: fx(0),
+            },
+        ]);
         // The player's barracks must not auto-produce.
         for _ in 0..120 {
             w.step(&[]);
         }
-        assert_eq!(w.alive_count(), 1);
+        assert_eq!(w.alive_count(), 2);
         // Queue training; units build over time.
         w.step(&[
             Command::Train {
-                building: 0,
+                building: 1,
                 kind: UnitKind::Infantry,
             },
             Command::Train {
-                building: 0,
+                building: 1,
                 kind: UnitKind::Infantry,
             },
         ]);
         for _ in 0..200 {
             w.step(&[]);
         }
-        assert!(w.alive_count() > 1);
+        assert!(w.alive_count() > 2);
     }
 
     #[test]
@@ -1590,6 +1652,64 @@ mod tests {
             snap.iter().any(|s| s.kind == Kind::Worker),
             "HQ should have produced a worker"
         );
+    }
+
+    #[test]
+    fn supply_caps_production_until_a_depot_rises() {
+        let mut w = World::new(13);
+        let mut setup = vec![
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Hq,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Barracks,
+                x: fx(30),
+                y: fx(0),
+            },
+        ];
+        // Fill the HQ's whole supply block (10) with spawned infantry.
+        for k in 0..10 {
+            setup.push(Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(-30 - 3 * k),
+                y: fx(0),
+            });
+        }
+        w.step(&setup);
+        assert_eq!(w.supply_used(0), 10);
+        assert_eq!(w.supply_cap(0), SUPPLY_PER_HQ);
+        // Queue two more: production must hold at the cap.
+        w.step(&[
+            Command::Train {
+                building: 1,
+                kind: UnitKind::Infantry,
+            },
+            Command::Train {
+                building: 1,
+                kind: UnitKind::Infantry,
+            },
+        ]);
+        for _ in 0..200 {
+            w.step(&[]);
+        }
+        assert_eq!(w.supply_used(0), 10, "production must hold at the cap");
+        // A depot raises the cap and releases the held queue.
+        w.step(&[Command::SpawnBuilding {
+            owner: 0,
+            kind: BuildingKind::Supply,
+            x: fx(0),
+            y: fx(30),
+        }]);
+        assert_eq!(w.supply_cap(0), SUPPLY_PER_HQ + SUPPLY_PER_DEPOT);
+        for _ in 0..200 {
+            w.step(&[]);
+        }
+        assert_eq!(w.supply_used(0), 12, "queued units flow once supply frees");
     }
 
     #[test]

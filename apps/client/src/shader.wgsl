@@ -228,6 +228,8 @@ struct UnitOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
     @location(1) albedo: vec3<f32>,
+    @location(2) ghost: f32,
+    @location(3) world_y: f32,
 };
 @vertex
 fn vs_unit(
@@ -240,14 +242,26 @@ fn vs_unit(
 ) -> UnitOut {
     var o: UnitOut;
     o.normal = normal;
+    // tcol.a >= 2.0 marks a hologram (the build-placement ghost): the whole
+    // mesh takes the tint color, materials ignored.
+    let ghost = select(0.0, 1.0, tcol.a >= 2.0);
     // mcol.a is the team-tint weight: blend the material toward the faction
     // color so banners/tabards/plumes read as team color, metal/skin stay neutral.
-    o.albedo = mix(mcol.rgb, tcol.rgb, mcol.a);
-    o.clip = cam.view_proj * vec4<f32>(pos * scale + offset, 1.0);
+    o.albedo = mix(mix(mcol.rgb, tcol.rgb, mcol.a), tcol.rgb, ghost);
+    o.ghost = ghost;
+    let world = pos * scale + offset;
+    o.world_y = world.y;
+    o.clip = cam.view_proj * vec4<f32>(world, 1.0);
     return o;
 }
 @fragment
 fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
+    if in.ghost > 0.5 {
+        // Holographic build preview: unshaded, with scanlines slowly rolling
+        // up the mesh (cam.params.x is time).
+        let scan = 0.7 + 0.3 * sin(in.world_y * 5.0 - cam.params.x * 6.0);
+        return vec4<f32>(in.albedo * (1.1 * scan), 1.0);
+    }
     let n = normalize(in.normal);
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
     return vec4<f32>(in.albedo * (0.45 + 0.7 * ndl), 1.0);

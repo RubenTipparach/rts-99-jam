@@ -42,11 +42,36 @@ pub enum Faction {
     Hollowmen,
 }
 
+/// Order feedback: what a short-lived ground ping is telling the player.
+#[derive(Clone, Copy)]
+enum Ping {
+    /// Move order: a green blip at the destination.
+    Move,
+    /// Attack order: a red highlight on the target (or the attack-move point).
+    Attack,
+    /// Harvest order: a cyan highlight on the resource node.
+    Harvest,
+}
+
+/// A short-lived order-feedback decal. If `target` is set the ping rides that
+/// entity while it lives; otherwise it stays at the ordered point.
+struct Effect {
+    ping: Ping,
+    wx: f32,
+    wz: f32,
+    target: Option<u32>,
+    born: f32,
+}
+
+/// Seconds an order ping stays on screen.
+const PING_LIFE: f32 = 0.9;
+
 /// Per-mesh instance lists + selection rings, in draw order: infantry, the two
 /// faction barracks, the two faction HQs, the two faction workers, the two
-/// resource nodes, heavies, turrets, then rings. Matches `Gfx::render`'s
-/// argument order.
+/// resource nodes, heavies, turrets, supply depots, then rings. Matches
+/// `Gfx::render`'s argument order.
 pub type RenderData = (
+    Vec<InstanceRaw>,
     Vec<InstanceRaw>,
     Vec<InstanceRaw>,
     Vec<InstanceRaw>,
@@ -90,6 +115,8 @@ pub struct Game {
     /// Faction per side: index 0 = the player (owner 0), index 1 = everyone
     /// else. Defaults to Hollowmen vs Astromancers; the lobby overrides it.
     factions: [Faction; 2],
+    /// Live order-feedback pings (move blips, attack/harvest highlights).
+    effects: Vec<Effect>,
 }
 
 impl Default for Game {
@@ -122,6 +149,7 @@ impl Game {
             fog_unexplored: true,
             fog_explored: true,
             factions: [Faction::Hollowmen, Faction::Astromancer],
+            effects: Vec::new(),
         };
         // The enemy is driven by the in-sim bot commander (mines, builds, trains).
         g.world.set_bot(1, true);
@@ -157,6 +185,8 @@ impl Game {
             self.step_now();
             self.acc -= self.tick_dt;
         }
+        let now = self.time;
+        self.effects.retain(|e| now - e.born < PING_LIFE);
     }
 
     /// Keep wall-clock bookkeeping current without stepping the sim, used while
@@ -354,10 +384,14 @@ impl Game {
     /// Instances for each mesh - infantry, the two faction barracks (Astromancer,
     /// Hollowmen), the two faction HQs (Spire, Command HQ), the two faction
     /// workers (Acolyte, Engineer), the two resource nodes (ore, carbon) - plus
-    /// selection rings. Meshes are authored at world scale, so instance scale is
-    /// ~1 (nodes shrink with depletion).
+    /// selection rings and order pings. Meshes are authored at world scale, so
+    /// instance scale is ~1 (nodes shrink with depletion).
+    ///
+    /// `ghost` is the build-placement preview: the pending building kind and
+    /// the cursor's ground point. It draws as a holographic mesh (green when
+    /// the site is clear, red when blocked) plus a footprint ring.
     #[allow(clippy::type_complexity)]
-    pub fn render_data(&self) -> RenderData {
+    pub fn render_data(&self, ghost: Option<(BuildingKind, f32, f32)>) -> RenderData {
         let sel: HashSet<u32> = self.selected.iter().copied().collect();
         let mut infantry = Vec::new();
         let mut barracks_astro = Vec::new();
@@ -370,6 +404,7 @@ impl Game {
         let mut carbon_nodes = Vec::new();
         let mut heavies = Vec::new();
         let mut turrets = Vec::new();
+        let mut supplies = Vec::new();
         let mut rings = Vec::new();
         for s in &self.curr {
             let (wx, wz) = self.lerped(s);
@@ -391,7 +426,10 @@ impl Game {
                 } else {
                     carbon_nodes.push(inst);
                 }
-            } else if matches!(s.kind, Kind::Hq | Kind::Barracks | Kind::Turret) {
+            } else if matches!(
+                s.kind,
+                Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+            ) {
                 // Buildings rise out of the ground as they are constructed
                 // (construct_frac 0 -> 1); a finished one is at full height.
                 let cf = f(s.construct_frac).clamp(0.08, 1.0);
@@ -402,11 +440,13 @@ impl Game {
                 };
                 let radius = match s.kind {
                     Kind::Turret => 4.0,
+                    Kind::Supply => 4.5,
                     Kind::Hq => 9.0,
                     _ => 8.0,
                 };
                 match s.kind {
                     Kind::Turret => turrets.push(inst),
+                    Kind::Supply => supplies.push(inst),
                     Kind::Hq => match self.faction_of(s.owner) {
                         Faction::Astromancer => hq_astro.push(inst),
                         Faction::Hollowmen => hq_hollow.push(inst),
@@ -498,6 +538,70 @@ impl Game {
                 }
             }
         }
+        // Build-placement hologram: the pending building at the cursor, tinted
+        // by whether the site is clear, with a footprint ring (StarCraft-style).
+        if let Some((kind, gx, gz)) = ghost {
+            let ok = self.site_ok(gx, gz);
+            // Alpha >= 2.0 flags the hologram path in the unit shader.
+            let holo = if ok {
+                [0.30, 1.0, 0.55, 2.0]
+            } else {
+                [1.0, 0.30, 0.25, 2.0]
+            };
+            let ground = terrain::height(gx, gz);
+            let inst = InstanceRaw {
+                offset: [gx, ground, gz],
+                scale: [1.0, 1.0, 1.0],
+                color: holo,
+            };
+            let radius = match kind {
+                BuildingKind::Hq => 9.0,
+                BuildingKind::Barracks => 8.0,
+                BuildingKind::Turret => 4.0,
+                BuildingKind::Supply => 4.5,
+            };
+            match kind {
+                BuildingKind::Hq => match self.faction_of(0) {
+                    Faction::Astromancer => hq_astro.push(inst),
+                    Faction::Hollowmen => hq_hollow.push(inst),
+                },
+                BuildingKind::Barracks => match self.faction_of(0) {
+                    Faction::Astromancer => barracks_astro.push(inst),
+                    Faction::Hollowmen => barracks_hollow.push(inst),
+                },
+                BuildingKind::Turret => turrets.push(inst),
+                BuildingKind::Supply => supplies.push(inst),
+            }
+            rings.push(RingRaw {
+                center: [gx, ground, gz],
+                radius,
+                color: [holo[0], holo[1], holo[2], 0.85],
+            });
+        }
+
+        // Order pings: short-lived feedback decals. A ping with a target rides
+        // the (living) target entity; the rest fade in place.
+        for e in &self.effects {
+            let age = ((self.time - e.born) / PING_LIFE).clamp(0.0, 1.0);
+            let (mut wx, mut wz) = (e.wx, e.wz);
+            if let Some(t) = e.target {
+                if let Some(s) = self.curr.iter().find(|s| s.index == t) {
+                    (wx, wz) = self.lerped(s);
+                }
+            }
+            let fade = 1.0 - age;
+            let (radius, color) = match e.ping {
+                Ping::Move => (0.5 + 2.4 * fade, [0.35, 1.0, 0.45, 0.9 * fade]),
+                Ping::Attack => (4.6 - 1.8 * age, [1.0, 0.25, 0.2, 0.95 * fade]),
+                Ping::Harvest => (4.6 - 1.8 * age, [0.4, 0.95, 1.0, 0.9 * fade]),
+            };
+            rings.push(RingRaw {
+                center: [wx, terrain::height(wx, wz), wz],
+                radius,
+                color,
+            });
+        }
+
         (
             infantry,
             barracks_astro,
@@ -510,13 +614,41 @@ impl Game {
             carbon_nodes,
             heavies,
             turrets,
+            supplies,
             rings,
         )
     }
 
+    /// True if a building can be placed at `(wx, wz)`: far enough from every
+    /// existing building and resource node (mirrors the sim's `BUILD_CLEAR2`).
+    fn site_ok(&self, wx: f32, wz: f32) -> bool {
+        for s in &self.curr {
+            let solid = matches!(
+                s.kind,
+                Kind::Hq
+                    | Kind::Barracks
+                    | Kind::Turret
+                    | Kind::Supply
+                    | Kind::OreNode
+                    | Kind::CarbonNode
+            );
+            if !solid {
+                continue;
+            }
+            let (ex, ez) = (f(s.pos.x), f(s.pos.y));
+            if (ex - wx).hypot(ez - wz) < 14.0 {
+                return false;
+            }
+        }
+        true
+    }
+
     fn info(&self, s: &Snap) -> UnitInfo {
         let (wx, wz) = self.lerped(s);
-        let barracks = matches!(s.kind, Kind::Hq | Kind::Barracks | Kind::Turret);
+        let barracks = matches!(
+            s.kind,
+            Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+        );
         UnitInfo {
             owner: s.owner,
             barracks,
@@ -574,8 +706,8 @@ impl Game {
             match (s.owner, s.kind) {
                 (0, Kind::Infantry | Kind::Heavy) => c.0 += 1,
                 (_, Kind::Infantry | Kind::Heavy) => c.1 += 1,
-                (0, Kind::Hq | Kind::Barracks | Kind::Turret) => c.2 += 1,
-                (_, Kind::Hq | Kind::Barracks | Kind::Turret) => c.3 += 1,
+                (0, Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply) => c.2 += 1,
+                (_, Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply) => c.3 += 1,
                 // Workers and resource nodes are not part of this army tally.
                 (_, Kind::Worker) | (_, Kind::OreNode) | (_, Kind::CarbonNode) => {}
             }
@@ -616,8 +748,21 @@ impl Game {
     /// Select the player entity nearest the click, in screen space (units
     /// first, then buildings). Screen-space picking works on slopes, where a
     /// ground-plane pick would land past an elevated unit and miss it.
-    pub fn select_single(&mut self, cam: &Camera, w: f32, h: f32, sx: f32, sy: f32) {
-        self.selected.clear();
+    ///
+    /// `additive` (shift held): keep the current selection and toggle the
+    /// clicked entity in or out of it instead of replacing it.
+    pub fn select_single(
+        &mut self,
+        cam: &Camera,
+        w: f32,
+        h: f32,
+        sx: f32,
+        sy: f32,
+        additive: bool,
+    ) {
+        if !additive {
+            self.selected.clear();
+        }
         let mut best: Option<(u32, f32)> = None;
 
         // Nearest selectable unit within a click radius.
@@ -655,7 +800,11 @@ impl Game {
         }
 
         if let Some((i, _)) = best {
-            self.selected.push(i);
+            if additive && self.selected.contains(&i) {
+                self.selected.retain(|&u| u != i);
+            } else {
+                self.selected.push(i);
+            }
         }
     }
 
@@ -744,6 +893,12 @@ impl Game {
         sim::WORKER_COST as f32
     }
 
+    /// The local player's supply `(used, cap)` (for the HUD).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn player_supply(&self) -> (u32, u32) {
+        (self.world.supply_used(0), self.world.supply_cap(0))
+    }
+
     /// (queued, build-progress 0..1) for the selected production building
     /// (HQ or Barracks), for the HUD.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -759,9 +914,20 @@ impl Game {
     /// the drag preview exactly: each unit is projected to the screen and tested
     /// against the rect. A world-space box would disagree with the preview under
     /// the tilted camera (a screen rect maps to a ground trapezoid, not a box).
-    pub fn select_box_screen(&mut self, cam: &Camera, w: f32, h: f32, rect: (f32, f32, f32, f32)) {
+    ///
+    /// `additive` (shift held): the boxed units join the current selection.
+    pub fn select_box_screen(
+        &mut self,
+        cam: &Camera,
+        w: f32,
+        h: f32,
+        rect: (f32, f32, f32, f32),
+        additive: bool,
+    ) {
         let (x0, y0, x1, y1) = rect;
-        self.selected.clear();
+        if !additive {
+            self.selected.clear();
+        }
         for s in &self.curr {
             if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
                 continue;
@@ -770,7 +936,8 @@ impl Game {
             // Same body point the preview projects (info().wy - 2.0).
             let wy = terrain::height(wx, wz) + 1.4;
             if let Some((sx, sy)) = cam.project(glam::Vec3::new(wx, wy, wz), w, h) {
-                if sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1 {
+                if sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1 && !self.selected.contains(&s.index)
+                {
                     self.selected.push(s.index);
                 }
             }
@@ -799,7 +966,19 @@ impl Game {
             .any(|s| s.index == unit && s.kind == Kind::Worker)
     }
 
-    pub fn order(&mut self, wx: f32, wz: f32) {
+    fn ping(&mut self, ping: Ping, wx: f32, wz: f32, target: Option<u32>) {
+        self.effects.push(Effect {
+            ping,
+            wx,
+            wz,
+            target,
+            born: self.time,
+        });
+    }
+
+    /// Right-click order at a ground point. `attack` (Ctrl held) forces an
+    /// attack-move: the group advances and engages anything on the way.
+    pub fn order(&mut self, wx: f32, wz: f32, attack: bool) {
         if self.selected.is_empty() {
             return;
         }
@@ -807,9 +986,11 @@ impl Game {
         // any non-worker in the selection just moves to the spot.
         if let Some(node) = self.nearest_node(wx, wz, 10.0) {
             let sel = self.selected.clone();
+            let mut harvesting = false;
             for u in sel {
                 if self.is_worker(u) {
                     self.pending.push(Command::Harvest { unit: u, node });
+                    harvesting = true;
                 } else {
                     self.pending.push(Command::Move {
                         unit: u,
@@ -818,12 +999,18 @@ impl Game {
                     });
                 }
             }
+            if harvesting {
+                self.ping(Ping::Harvest, wx, wz, Some(node));
+            } else {
+                self.ping(Ping::Move, wx, wz, None);
+            }
             return;
         }
         if let Some(target) = self.nearest_enemy(wx, wz, 4.0) {
             for &u in &self.selected {
                 self.pending.push(Command::Attack { unit: u, target });
             }
+            self.ping(Ping::Attack, wx, wz, Some(target));
         } else {
             // Spread the group across a centered grid so they march to distinct
             // cells instead of one shared point; the sim's separation then keeps
@@ -837,12 +1024,15 @@ impl Game {
                 let r = (k / cols as usize) as f32;
                 let ox = (c - (cols - 1.0) * 0.5) * spacing;
                 let oz = (r - (rows - 1.0) * 0.5) * spacing;
-                self.pending.push(Command::AttackMove {
-                    unit: u,
-                    x: fx(wx + ox),
-                    y: fx(wz + oz),
+                let (x, y) = (fx(wx + ox), fx(wz + oz));
+                self.pending.push(if attack {
+                    Command::AttackMove { unit: u, x, y }
+                } else {
+                    Command::Move { unit: u, x, y }
                 });
             }
+            let ping = if attack { Ping::Attack } else { Ping::Move };
+            self.ping(ping, wx, wz, None);
         }
     }
 }

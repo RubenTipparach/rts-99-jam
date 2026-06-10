@@ -17,9 +17,9 @@ lines are ignored, and tokens are separated by whitespace.
 
 ```text
 name <map name>                      # required, once
-hq|barracks|turret     <player> <x> <z>
-infantry|worker|heavy  <player> <x> <z>
-ore|carbon             <x> <z>
+hq|barracks|turret|supply  <player> <x> <z>
+infantry|worker|heavy      <player> <x> <z>
+ore|carbon                 <x> <z>
 ```
 
 - Coordinates are integer world units; the battlefield spans `-512..512` on

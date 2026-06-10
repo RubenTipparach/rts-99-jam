@@ -387,22 +387,89 @@ pub fn draw(
     ctx.stroke_rect(1.0, hf - bar + 1.0, wf - 2.0, bar - 2.0);
 
     let (pu, eu, pb, eb) = game.counts();
+    let faction_name = match game.faction_of(0) {
+        crate::game::Faction::Astromancer => "ASTROMANCERS",
+        crate::game::Faction::Hollowmen => "HOLLOWMEN",
+    };
     ctx.set_fill_style_str("#e7eefa");
     ctx.set_font("bold 16px monospace");
+    let _ = ctx.fill_text(faction_name, 14.0, 24.0);
+
+    // Resource readout with proper icons: an ore crystal, a carbon geyser
+    // puff, and a supply depot. Icons are tiny canvas paths so they ship with
+    // the WASM HUD (no image assets).
+    let icon_y = 17.0_f64;
+
+    // Ore: a faceted crystal (diamond + bright top facet).
+    let ox = 162.0_f64;
+    ctx.begin_path();
+    ctx.move_to(ox + 6.0, icon_y - 8.0);
+    ctx.line_to(ox + 12.0, icon_y);
+    ctx.line_to(ox + 6.0, icon_y + 8.0);
+    ctx.line_to(ox, icon_y);
+    ctx.close_path();
+    ctx.set_fill_style_str("#69c8e8");
+    ctx.fill();
+    ctx.begin_path();
+    ctx.move_to(ox + 6.0, icon_y - 8.0);
+    ctx.line_to(ox + 12.0, icon_y);
+    ctx.line_to(ox + 6.0, icon_y);
+    ctx.close_path();
+    ctx.set_fill_style_str("#c4eefb");
+    ctx.fill();
+    ctx.set_fill_style_str("#e7eefa");
+    let _ = ctx.fill_text(&format!("{}", game.player_ore() as i64), ox + 18.0, 24.0);
+
+    // Carbon: a geyser puff (stacked green clouds over a dark vent).
+    let cx2 = 252.0_f64;
+    ctx.set_fill_style_str("#3a4540");
+    ctx.fill_rect(cx2 + 3.0, icon_y + 3.0, 6.0, 5.0);
+    ctx.set_fill_style_str("#5ad97c");
+    ctx.begin_path();
+    let _ = ctx.arc(cx2 + 6.0, icon_y, 5.0, 0.0, std::f64::consts::TAU);
+    ctx.fill();
+    ctx.set_fill_style_str("#a9f3bd");
+    ctx.begin_path();
+    let _ = ctx.arc(cx2 + 4.0, icon_y - 3.0, 3.0, 0.0, std::f64::consts::TAU);
+    ctx.fill();
+    ctx.set_fill_style_str("#e7eefa");
+    let _ = ctx.fill_text(
+        &format!("{}", game.player_carbon() as i64),
+        cx2 + 18.0,
+        24.0,
+    );
+
+    // Supply: a depot glyph (box + roof); the count turns red when capped.
+    let (sup_used, sup_cap) = game.player_supply();
+    let sx = 342.0_f64;
+    ctx.set_fill_style_str("#9fb6da");
+    ctx.fill_rect(sx + 1.0, icon_y - 1.0, 10.0, 8.0);
+    ctx.begin_path();
+    ctx.move_to(sx - 1.0, icon_y - 1.0);
+    ctx.line_to(sx + 6.0, icon_y - 7.0);
+    ctx.line_to(sx + 13.0, icon_y - 1.0);
+    ctx.close_path();
+    ctx.fill();
+    ctx.set_fill_style_str(if sup_used >= sup_cap {
+        "#ff6a5e"
+    } else {
+        "#e7eefa"
+    });
+    let _ = ctx.fill_text(&format!("{sup_used}/{sup_cap}"), sx + 18.0, 24.0);
+
+    ctx.set_fill_style_str("#e7eefa");
     let _ = ctx.fill_text(
         &format!(
-            "ASTROMANCERS  ore {ore}  carbon {carbon}      your force: {pu} inf / {pb} barracks      visible enemy: {eu} inf / {eb} barracks      selected: {}",
+            "your force: {pu} inf / {pb} bldg      visible enemy: {eu} inf / {eb} bldg      selected: {}",
             game.selected_count(),
-            ore = game.player_ore() as i64,
-            carbon = game.player_carbon() as i64,
         ),
-        14.0,
+        452.0,
         24.0,
     );
     ctx.set_fill_style_str("#8aa3cc");
     ctx.set_font("12px monospace");
     let _ = ctx.fill_text(
-        "left: select / drag-box    right: move / attack (worker + ore/carbon: harvest)    middle-drag or WASD: pan    wheel: zoom    Esc: pause",
+        "left: select (shift: add)    right: move / harvest / attack (ctrl: attack-move)    middle-drag or WASD: pan    wheel: zoom    Esc: pause",
         14.0,
         hf - bar + 22.0,
     );
@@ -483,7 +550,7 @@ pub fn draw(
         ctx.set_fill_style_str("#9fb6da");
         ctx.set_font("12px monospace");
         let _ = ctx.fill_text(
-            "[B] Barracks 150 ore   [V] Turret 90+50   [N] HQ 400 ore",
+            "[B] Barracks 150   [V] Turret 90+50   [N] HQ 400   [G] Depot 100",
             bx,
             by + 16.0,
         );

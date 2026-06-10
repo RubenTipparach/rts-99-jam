@@ -34,6 +34,9 @@ pub enum BuildingKind {
     /// Defensive emplacement: immobile, auto-fires on nearby enemies. Costs ore
     /// and carbon.
     Turret,
+    /// Supply depot: raises the owner's unit cap (the HQ provides a base
+    /// amount; each depot adds more). Builds nothing and has no weapon.
+    Supply,
 }
 
 /// Harvestable resource nodes.
