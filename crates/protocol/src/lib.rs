@@ -18,12 +18,18 @@ pub enum UnitKind {
     /// Builder/harvester (Astromancer Acolyte, Hollowmen Engineer): mobile but
     /// non-combatant. Gathers materials and raises structures.
     Worker,
+    /// Heavy assault unit (Astromancer Golem, Hollowmen War-Mech): slow, tanky,
+    /// hits hard. Costs ore and carbon.
+    Heavy,
 }
 
 /// Kinds of structure.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum BuildingKind {
     Barracks,
+    /// Defensive emplacement: immobile, auto-fires on nearby enemies. Costs ore
+    /// and carbon.
+    Turret,
 }
 
 /// Harvestable resource nodes.
@@ -58,14 +64,21 @@ pub enum Command {
     SpawnResource { kind: ResourceKind, x: Fx, y: Fx },
     /// Send a worker to harvest a resource node (mine, then return to deposit).
     Harvest { unit: u32, node: u32 },
+    /// Send a worker to construct a building at a point (costs ore on arrival).
+    Build {
+        unit: u32,
+        kind: BuildingKind,
+        x: Fx,
+        y: Fx,
+    },
     /// Move to a point (no auto-engage on the way).
     Move { unit: u32, x: Fx, y: Fx },
     /// Move to a point, attacking any enemy encountered.
     AttackMove { unit: u32, x: Fx, y: Fx },
     /// Attack a specific entity (chase it).
     Attack { unit: u32, target: u32 },
-    /// Queue one unit for production at a building.
-    Train { building: u32 },
+    /// Queue one unit of `kind` for production at a building.
+    Train { building: u32, kind: UnitKind },
     /// Hold position.
     Stop { unit: u32 },
     /// Set where a building's new units gather.

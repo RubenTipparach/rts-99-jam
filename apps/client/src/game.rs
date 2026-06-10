@@ -39,12 +39,28 @@ fn team_color(owner: u16) -> [f32; 4] {
 /// Which faction a player fields. Drives which placeholder building/unit meshes
 /// are drawn for that player; set from the skirmish lobby. Only the two launch
 /// factions exist so far.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub enum Faction {
     Astromancer,
     Hollowmen,
 }
+
+/// Per-mesh instance lists + selection rings, in draw order: infantry, the two
+/// faction barracks, the two faction workers, the two resource nodes, heavies,
+/// turrets, then rings. Matches `Gfx::render`'s argument order.
+pub type RenderData = (
+    Vec<InstanceRaw>,
+    Vec<InstanceRaw>,
+    Vec<InstanceRaw>,
+    Vec<InstanceRaw>,
+    Vec<InstanceRaw>,
+    Vec<InstanceRaw>,
+    Vec<InstanceRaw>,
+    Vec<InstanceRaw>,
+    Vec<InstanceRaw>,
+    Vec<RingRaw>,
+);
 
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -172,6 +188,8 @@ impl Game {
             fog_explored: true,
             factions: [Faction::Hollowmen, Faction::Astromancer],
         };
+        // The enemy is driven by the in-sim bot commander (mines, builds, trains).
+        g.world.set_bot(1, true);
         g.step_now();
         g.prev = g.curr.clone();
         g.recompute_fow();
@@ -399,18 +417,7 @@ impl Game {
     /// nodes (ore, carbon) - plus selection rings. Meshes are authored at world
     /// scale, so instance scale is ~1 (nodes shrink with depletion).
     #[allow(clippy::type_complexity)]
-    pub fn render_data(
-        &self,
-    ) -> (
-        Vec<InstanceRaw>,
-        Vec<InstanceRaw>,
-        Vec<InstanceRaw>,
-        Vec<InstanceRaw>,
-        Vec<InstanceRaw>,
-        Vec<InstanceRaw>,
-        Vec<InstanceRaw>,
-        Vec<RingRaw>,
-    ) {
+    pub fn render_data(&self) -> RenderData {
         let sel: HashSet<u32> = self.selected.iter().copied().collect();
         let mut infantry = Vec::new();
         let mut barracks_astro = Vec::new();
@@ -419,6 +426,8 @@ impl Game {
         let mut engineers = Vec::new();
         let mut ore_nodes = Vec::new();
         let mut carbon_nodes = Vec::new();
+        let mut heavies = Vec::new();
+        let mut turrets = Vec::new();
         let mut rings = Vec::new();
         for s in &self.curr {
             let (wx, wz) = self.lerped(s);
@@ -440,20 +449,27 @@ impl Game {
                 } else {
                     carbon_nodes.push(inst);
                 }
-            } else if s.kind == Kind::Barracks {
+            } else if matches!(s.kind, Kind::Barracks | Kind::Turret) {
+                // Buildings rise out of the ground as they are constructed
+                // (construct_frac 0 -> 1); a finished one is at full height.
+                let cf = f(s.construct_frac).clamp(0.08, 1.0);
                 let inst = InstanceRaw {
                     offset: [wx, ground, wz],
-                    scale: [1.0, 1.0, 1.0],
+                    scale: [1.0, cf, 1.0],
                     color: tint,
                 };
-                match self.faction_of(s.owner) {
-                    Faction::Astromancer => barracks_astro.push(inst),
-                    Faction::Hollowmen => barracks_hollow.push(inst),
+                let radius = if s.kind == Kind::Turret { 4.0 } else { 8.0 };
+                match s.kind {
+                    Kind::Turret => turrets.push(inst),
+                    _ => match self.faction_of(s.owner) {
+                        Faction::Astromancer => barracks_astro.push(inst),
+                        Faction::Hollowmen => barracks_hollow.push(inst),
+                    },
                 }
                 if sel.contains(&s.index) {
                     rings.push(RingRaw {
                         center: [wx, ground, wz],
-                        radius: 8.0,
+                        radius,
                         color: [0.4, 1.0, 0.5, 0.95],
                     });
                 }
@@ -502,22 +518,31 @@ impl Game {
                     });
                 }
             } else {
-                // A little deterministic size variety plus a march bob.
+                // Infantry or Heavy: a combat unit with a march bob. Heavy reads
+                // larger and gets a bigger selection ring.
+                let heavy = s.kind == Kind::Heavy;
                 let v = (s.index.wrapping_mul(2_654_435_761) % 1000) as f32 / 1000.0;
-                let scl = 0.92 + v * 0.16;
+                let scl = if heavy { 1.55 } else { 0.92 + v * 0.16 };
                 let mut y = ground;
                 if s.moving {
-                    y += ((self.time * 9.0) + s.index as f32 * 1.3).sin() * 0.12;
+                    let amp = if heavy { 0.08 } else { 0.12 };
+                    let rate = if heavy { 6.0 } else { 9.0 };
+                    y += ((self.time * rate) + s.index as f32 * 1.3).sin() * amp;
                 }
-                infantry.push(InstanceRaw {
+                let inst = InstanceRaw {
                     offset: [wx, y, wz],
                     scale: [scl, scl, scl],
                     color: tint,
-                });
+                };
+                if heavy {
+                    heavies.push(inst);
+                } else {
+                    infantry.push(inst);
+                }
                 if sel.contains(&s.index) {
                     rings.push(RingRaw {
                         center: [wx, ground, wz],
-                        radius: 2.2,
+                        radius: if heavy { 3.0 } else { 2.2 },
                         color: [0.4, 1.0, 0.5, 0.95],
                     });
                 }
@@ -531,13 +556,15 @@ impl Game {
             engineers,
             ore_nodes,
             carbon_nodes,
+            heavies,
+            turrets,
             rings,
         )
     }
 
     fn info(&self, s: &Snap) -> UnitInfo {
         let (wx, wz) = self.lerped(s);
-        let barracks = s.kind == Kind::Barracks;
+        let barracks = matches!(s.kind, Kind::Barracks | Kind::Turret);
         UnitInfo {
             owner: s.owner,
             barracks,
@@ -577,7 +604,9 @@ impl Game {
     pub fn player_units(&self) -> Vec<UnitInfo> {
         self.curr
             .iter()
-            .filter(|s| s.owner == 0 && matches!(s.kind, Kind::Infantry | Kind::Worker))
+            .filter(|s| {
+                s.owner == 0 && matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy)
+            })
             .map(|s| self.info(s))
             .collect()
     }
@@ -591,10 +620,10 @@ impl Game {
                 continue;
             }
             match (s.owner, s.kind) {
-                (0, Kind::Infantry) => c.0 += 1,
-                (_, Kind::Infantry) => c.1 += 1,
-                (0, Kind::Barracks) => c.2 += 1,
-                (_, Kind::Barracks) => c.3 += 1,
+                (0, Kind::Infantry | Kind::Heavy) => c.0 += 1,
+                (_, Kind::Infantry | Kind::Heavy) => c.1 += 1,
+                (0, Kind::Barracks | Kind::Turret) => c.2 += 1,
+                (_, Kind::Barracks | Kind::Turret) => c.3 += 1,
                 // Workers and resource nodes are not part of this army tally.
                 (_, Kind::Worker) | (_, Kind::OreNode) | (_, Kind::CarbonNode) => {}
             }
@@ -638,7 +667,7 @@ impl Game {
         // Nearest selectable unit within a click radius.
         let unit_r = (h * 0.03).max(18.0);
         for s in &self.curr {
-            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker) {
+            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
                 continue;
             }
             let (wx, wz) = self.lerped(s);
@@ -686,10 +715,35 @@ impl Game {
             .map(|s| s.index)
     }
 
-    /// Queue a unit at the selected building.
-    pub fn train_selected(&mut self) {
+    /// Queue a unit of `kind` at the selected building.
+    pub fn train_selected(&mut self, kind: UnitKind) {
         if let Some(b) = self.selected_barracks() {
-            self.pending.push(Command::Train { building: b });
+            self.pending.push(Command::Train { building: b, kind });
+        }
+    }
+
+    /// True if at least one of the selected units is a worker (can build).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn has_worker_selected(&self) -> bool {
+        let sel: HashSet<u32> = self.selected.iter().copied().collect();
+        self.curr
+            .iter()
+            .any(|s| s.kind == Kind::Worker && sel.contains(&s.index))
+    }
+
+    /// Order every selected worker to construct `kind` at `(wx, wz)`.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn build_selected(&mut self, kind: BuildingKind, wx: f32, wz: f32) {
+        let sel: Vec<u32> = self.selected.clone();
+        for u in sel {
+            if self.is_worker(u) {
+                self.pending.push(Command::Build {
+                    unit: u,
+                    kind,
+                    x: fx(wx),
+                    y: fx(wz),
+                });
+            }
         }
     }
 
@@ -729,7 +783,7 @@ impl Game {
         let (x0, y0, x1, y1) = rect;
         self.selected.clear();
         for s in &self.curr {
-            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker) {
+            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
                 continue;
             }
             let (wx, wz) = self.lerped(s);

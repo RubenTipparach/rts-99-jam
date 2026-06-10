@@ -4,6 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Astromancers</title>
+    <!-- Mobile debugging: append ?debug (or ?eruda) to the URL to load the eruda
+         on-screen console. Off by default so normal players don't fetch it. -->
+    <script>
+      if (/[?&](debug|eruda)\b/.test(location.search)) {
+        var s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/eruda";
+        s.onload = function () { window.eruda && eruda.init(); };
+        document.head.appendChild(s);
+      }
+    </script>
     <meta name="description" content="Astromancers - Space · Magic · Real-Time Strategy." />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Astromancers" />
@@ -16,12 +26,18 @@
     <style>
       html, body { margin: 0; height: 100%; width: 100%; overflow: hidden; background: #070b14; }
       canvas { display: block; touch-action: none; }
-      #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+      /* The HUD buffer is sized in PHYSICAL pixels; without an explicit CSS size
+         an absolutely-positioned canvas renders at its intrinsic (buffer) size,
+         which on any DPI > 1 screen overflows the viewport (broken menus on
+         phones / HiDPI desktops). Pin it to the viewport. */
+      #hud { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
       /* Mobile test controls - DOM is allowed ONLY here, so a developer can drive
          desktop interactions (pan / zoom / right-click) from a touch device.
-         All real game UI lives in WASM. Hidden unless the pointer is coarse. */
+         All real game UI lives in WASM. Hidden unless the pointer is coarse,
+         and hidden on the menu screens (Rust toggles body.menu). */
       #mobile { display: none; position: fixed; inset: 0; z-index: 15; pointer-events: none; }
       @media (pointer: coarse) { #mobile { display: block; } }
+      body.menu #mobile { display: none; }
       #mobile button {
         position: absolute; pointer-events: auto; touch-action: none; user-select: none;
         width: 56px; height: 56px; border-radius: 12px;

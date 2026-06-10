@@ -1,0 +1,10 @@
+[package]
+name = "mesher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Marching-tetrahedra mesher for the map editor, compiled to WebAssembly"
+
+[lib]
+crate-type = ["cdylib", "rlib"]

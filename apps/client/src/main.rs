@@ -207,6 +207,33 @@ fn hide_loading() {
     }
 }
 
+/// Toggle browser fullscreen on the whole page. Must be called from a user
+/// gesture (the FULLSCREEN button click); errors (e.g. iPhone Safari, which has
+/// no element fullscreen) are ignored.
+#[cfg(target_arch = "wasm32")]
+fn toggle_fullscreen() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if doc.fullscreen_element().is_some() {
+        doc.exit_fullscreen();
+    } else if let Some(root) = doc.document_element() {
+        let _ = root.request_fullscreen();
+    }
+}
+
+/// Mark the body as "in the front-end menus" so CSS can hide the mobile test
+/// controls there (they are gameplay affordances, not menu chrome).
+#[cfg(target_arch = "wasm32")]
+fn set_body_menu(on: bool) {
+    if let Some(body) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.body())
+    {
+        let _ = body.class_list().toggle_with_force("menu", on);
+    }
+}
+
 #[derive(Default)]
 struct Input {
     fwd: bool,
@@ -255,6 +282,10 @@ struct App {
     last_css: (u32, u32),
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     first_frame_done: bool,
+    /// When set, the next left-click places this building (worker construction
+    /// mode); right-click / Esc cancels.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    build_mode: Option<protocol::BuildingKind>,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     proxy: EventLoopProxy<UserEvent>,
 }
@@ -280,6 +311,7 @@ impl App {
             lobby: menu::Lobby::default(),
             last_css: (0, 0),
             first_frame_done: false,
+            build_mode: None,
             proxy,
         }
     }
@@ -289,6 +321,34 @@ impl App {
             .as_ref()
             .map(|g| (g.width as f32, g.height as f32))
             .unwrap_or((1.0, 1.0))
+    }
+
+    /// Draw the 3D scene (terrain, water, every unit/building mesh, rings) from
+    /// the current sim snapshot and camera.
+    fn render_scene(&mut self) {
+        if let Some(gfx) = self.gfx.as_mut() {
+            let aspect = gfx.aspect();
+            let (inf, ba, bh, ac, en, ore, carbon, heavies, turrets, rings) =
+                self.game.render_data();
+            let fow = self.game.fow_bytes();
+            let vp = self.camera.view_proj(aspect);
+            gfx.render(
+                &inf,
+                &ba,
+                &bh,
+                &ac,
+                &en,
+                &ore,
+                &carbon,
+                &heavies,
+                &turrets,
+                &rings,
+                &fow,
+                vp,
+                self.camera.eye(),
+                self.game.time(),
+            );
+        }
     }
 
     /// Confine the cursor to the window while playing and release it while
@@ -367,7 +427,7 @@ impl App {
         }
         let (x0, y0, x1, y1) = hud::train_button_rect(w, h);
         if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
-            self.game.train_selected();
+            self.game.train_selected(protocol::UnitKind::Infantry);
             true
         } else {
             false
@@ -423,6 +483,58 @@ impl App {
         let wz = (-du * c + dv * s) * terrain::HALF;
         self.camera.look_at(wx, wz);
     }
+
+    /// Apply a front-end (menu / lobby) click or tap at physical `(cx, cy)`.
+    /// Shared by mouse clicks and touch taps so phones can drive the menus.
+    #[cfg(target_arch = "wasm32")]
+    fn front_end_click(&mut self, cx: f32, cy: f32) {
+        let (w, h) = self.dims();
+        let click = menu::hit(self.screen, &self.lobby, cx, cy, w, h);
+        log::info!("front_end_click at ({cx:.0},{cy:.0}) dims={w:.0}x{h:.0} -> {click:?}");
+        match click {
+            menu::Click::Skirmish => self.screen = menu::Screen::Lobby,
+            menu::Click::SetFaction(f) => self.lobby.faction = f,
+            menu::Click::AddBot => self.lobby.bots = (self.lobby.bots + 1).min(3),
+            menu::Click::RemoveBot => self.lobby.bots = self.lobby.bots.saturating_sub(1).max(1),
+            menu::Click::OpenMap => {
+                self.lobby.map_open = true;
+                // Scroll so the current selection is visible.
+                self.lobby.map_scroll = self.lobby.map.saturating_sub(2).min(map_scroll_max());
+            }
+            menu::Click::CloseMap => self.lobby.map_open = false,
+            menu::Click::PickMap(i) => self.lobby.map = i,
+            menu::Click::ScrollMap(d) => {
+                let s = self.lobby.map_scroll as i32 + d as i32;
+                self.lobby.map_scroll = s.clamp(0, map_scroll_max() as i32) as u8;
+            }
+            menu::Click::Back => self.screen = menu::Screen::Menu,
+            menu::Click::Fullscreen => toggle_fullscreen(),
+            menu::Click::Start => {
+                self.game.set_player_faction(self.lobby.faction);
+                // Load the chosen battlefield and rebuild its terrain.
+                crate::voxel::set_active(Some(self.lobby.map as usize));
+                if let Some(g) = self.gfx.as_mut() {
+                    g.set_world();
+                }
+                self.screen = menu::Screen::InGame;
+                set_body_menu(false); // show the mobile test controls
+                self.apply_cursor_grab();
+            }
+            menu::Click::None => {}
+        }
+    }
+
+    /// Apply a pause-menu click or tap at physical `(cx, cy)`.
+    #[cfg(target_arch = "wasm32")]
+    fn pause_click(&mut self, cx: f32, cy: f32) {
+        let (w, h) = self.dims();
+        let hitr = |r: (f32, f32, f32, f32)| cx >= r.0 && cx <= r.2 && cy >= r.1 && cy <= r.3;
+        if hitr(hud::resume_button_rect(w, h)) {
+            self.set_paused(false);
+        } else if hitr(hud::fullscreen_button_rect(w, h)) {
+            toggle_fullscreen();
+        }
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -456,6 +568,8 @@ impl ApplicationHandler<UserEvent> for App {
         {
             mobile::install();
             ptrlock::install();
+            // Web boots into the menus: hide the mobile test controls there.
+            set_body_menu(self.screen != menu::Screen::InGame);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -502,9 +616,13 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 let down = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    // Esc: in the lobby step back to the menu; otherwise (in a
-                    // match) toggle pause and release the confined cursor.
+                    // Esc: cancel a pending build first; in the lobby step back to
+                    // the menu; otherwise (in a match) toggle pause.
                     if code == KeyCode::Escape && down {
+                        if self.build_mode.is_some() {
+                            self.build_mode = None;
+                            return;
+                        }
                         #[cfg(target_arch = "wasm32")]
                         {
                             if self.screen == menu::Screen::Lobby {
@@ -537,7 +655,19 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
                         KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
                         KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
-                        KeyCode::KeyT if down => self.game.train_selected(),
+                        KeyCode::KeyT if down => {
+                            self.game.train_selected(protocol::UnitKind::Infantry)
+                        }
+                        KeyCode::KeyH if down => {
+                            self.game.train_selected(protocol::UnitKind::Heavy)
+                        }
+                        // Worker build: B = barracks, V = turret -> placement mode.
+                        KeyCode::KeyB if down && self.game.has_worker_selected() => {
+                            self.build_mode = Some(protocol::BuildingKind::Barracks)
+                        }
+                        KeyCode::KeyV if down && self.game.has_worker_selected() => {
+                            self.build_mode = Some(protocol::BuildingKind::Turret)
+                        }
                         KeyCode::Digit1 if down => self.game.toggle_fog_unexplored(),
                         KeyCode::Digit2 if down => self.game.toggle_fog_explored(),
                         _ => {}
@@ -550,56 +680,36 @@ impl ApplicationHandler<UserEvent> for App {
                 // Front-end screens (web): clicks drive the menu/lobby, not the game.
                 #[cfg(target_arch = "wasm32")]
                 if self.screen != menu::Screen::InGame {
+                    log::info!("menu MouseInput {button:?} {state:?} at ({cx:.0},{cy:.0})");
                     if button == MouseButton::Left && state == ElementState::Pressed {
-                        match menu::hit(self.screen, &self.lobby, cx, cy) {
-                            menu::Click::Skirmish => self.screen = menu::Screen::Lobby,
-                            menu::Click::SetFaction(f) => self.lobby.faction = f,
-                            menu::Click::AddBot => self.lobby.bots = (self.lobby.bots + 1).min(3),
-                            menu::Click::RemoveBot => {
-                                self.lobby.bots = self.lobby.bots.saturating_sub(1).max(1)
-                            }
-                            menu::Click::OpenMap => {
-                                self.lobby.map_open = true;
-                                // Scroll so the current selection is visible.
-                                self.lobby.map_scroll =
-                                    self.lobby.map.saturating_sub(2).min(map_scroll_max());
-                            }
-                            menu::Click::CloseMap => self.lobby.map_open = false,
-                            menu::Click::PickMap(i) => self.lobby.map = i,
-                            menu::Click::ScrollMap(d) => {
-                                let s = self.lobby.map_scroll as i32 + d as i32;
-                                self.lobby.map_scroll = s.clamp(0, map_scroll_max() as i32) as u8;
-                            }
-                            menu::Click::Back => self.screen = menu::Screen::Menu,
-                            menu::Click::Start => {
-                                self.game.set_player_faction(self.lobby.faction);
-                                // Load the chosen battlefield and rebuild its terrain.
-                                crate::voxel::set_active(Some(self.lobby.map as usize));
-                                if let Some(g) = self.gfx.as_mut() {
-                                    g.set_world();
-                                }
-                                self.screen = menu::Screen::InGame;
-                                self.apply_cursor_grab();
-                            }
-                            menu::Click::None => {}
-                        }
+                        self.front_end_click(cx, cy);
                     }
                     return;
                 }
-                // While paused, only the Resume button responds; everything else
-                // is inert so clicks can't leak into the frozen game.
+                // While paused, only the pause-menu buttons respond; everything
+                // else is inert so clicks can't leak into the frozen game.
                 if self.paused {
                     #[cfg(target_arch = "wasm32")]
                     if button == MouseButton::Left && state == ElementState::Pressed {
-                        let (x0, y0, x1, y1) = hud::resume_button_rect(w, h);
-                        if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
-                            self.set_paused(false);
-                        }
+                        self.pause_click(cx, cy);
                     }
                     return;
                 }
                 // A click is a user gesture: (re)confine the cursor to the window.
                 self.apply_cursor_grab();
+                // Build placement: a left-click drops the pending building at the
+                // ground point; a right-click cancels. Consumes the click.
+                if let Some(kind) = self.build_mode {
+                    if button == MouseButton::Left && state == ElementState::Pressed {
+                        if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
+                            self.game.build_selected(kind, wx, wz);
+                        }
+                        self.build_mode = None;
+                    } else if button == MouseButton::Right && state == ElementState::Pressed {
+                        self.build_mode = None;
+                    }
+                    return;
+                }
                 match button {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
@@ -674,6 +784,26 @@ impl ApplicationHandler<UserEvent> for App {
                 let (cx, cy) = (touch.location.x as f32, touch.location.y as f32);
                 self.input.cursor = (cx, cy);
                 self.pointer_is_touch = true;
+                #[cfg(target_arch = "wasm32")]
+                if matches!(touch.phase, TouchPhase::Started | TouchPhase::Ended) {
+                    log::info!("touch {:?} at ({cx:.0},{cy:.0})", touch.phase);
+                }
+                // Menus and the pause overlay: a tap acts on release, like a
+                // click (taps never reach gameplay from these screens).
+                #[cfg(target_arch = "wasm32")]
+                if self.screen != menu::Screen::InGame {
+                    if touch.phase == TouchPhase::Ended {
+                        self.front_end_click(cx, cy);
+                    }
+                    return;
+                }
+                if self.paused {
+                    #[cfg(target_arch = "wasm32")]
+                    if touch.phase == TouchPhase::Ended {
+                        self.pause_click(cx, cy);
+                    }
+                    return;
+                }
                 match touch.phase {
                     TouchPhase::Started => self.input.left_press = Some((cx, cy)),
                     TouchPhase::Moved => {}
@@ -730,34 +860,14 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                 }
-                // Front-end screens (web): freeze the sim and draw the menu/lobby
-                // over a static render of the scene, then skip the game loop.
+                // Front-end screens (web): the match has not started, so freeze the
+                // sim and draw the menu/lobby on its own opaque backdrop. The 3D
+                // scene is not rendered (no map is chosen yet).
                 #[cfg(target_arch = "wasm32")]
                 if self.screen != menu::Screen::InGame {
                     self.game.skip_tick();
-                    if let Some(gfx) = self.gfx.as_mut() {
-                        let aspect = gfx.aspect();
-                        let (infantry, b_astro, b_hollow, acolytes, engineers, ore, carbon, rings) =
-                            self.game.render_data();
-                        let fow = self.game.fow_bytes();
-                        let vp = self.camera.view_proj(aspect);
-                        gfx.render(
-                            &infantry,
-                            &b_astro,
-                            &b_hollow,
-                            &acolytes,
-                            &engineers,
-                            &ore,
-                            &carbon,
-                            &rings,
-                            &fow,
-                            vp,
-                            self.camera.eye(),
-                            self.game.time(),
-                        );
-                    }
-                    menu::draw(self.screen, &self.lobby);
-                    #[cfg(target_arch = "wasm32")]
+                    let (w, h) = self.dims();
+                    menu::draw(self.screen, &self.lobby, w, h);
                     if self.gfx.is_some() && !self.first_frame_done {
                         self.first_frame_done = true;
                         hide_loading();
@@ -787,27 +897,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // sim's clock current so resuming doesn't replay a backlog.
                 if self.paused {
                     self.game.skip_tick();
-                    if let Some(gfx) = self.gfx.as_mut() {
-                        let aspect = gfx.aspect();
-                        let (infantry, b_astro, b_hollow, acolytes, engineers, ore, carbon, rings) =
-                            self.game.render_data();
-                        let fow = self.game.fow_bytes();
-                        let vp = self.camera.view_proj(aspect);
-                        gfx.render(
-                            &infantry,
-                            &b_astro,
-                            &b_hollow,
-                            &acolytes,
-                            &engineers,
-                            &ore,
-                            &carbon,
-                            &rings,
-                            &fow,
-                            vp,
-                            self.camera.eye(),
-                            self.game.time(),
-                        );
-                    }
+                    self.render_scene();
                     let (w, h) = self.dims();
                     // Paused: the OS cursor is back (lock released), so the HUD
                     // does not draw its own.
@@ -820,6 +910,7 @@ impl ApplicationHandler<UserEvent> for App {
                         true,
                         self.input.cursor,
                         false,
+                        None,
                     );
                     return;
                 }
@@ -881,30 +972,14 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 });
 
-                if let Some(gfx) = self.gfx.as_mut() {
-                    let aspect = gfx.aspect();
-                    let (infantry, b_astro, b_hollow, acolytes, engineers, ore, carbon, rings) =
-                        self.game.render_data();
-                    let fow = self.game.fow_bytes();
-                    let vp = self.camera.view_proj(aspect);
-                    gfx.render(
-                        &infantry,
-                        &b_astro,
-                        &b_hollow,
-                        &acolytes,
-                        &engineers,
-                        &ore,
-                        &carbon,
-                        &rings,
-                        &fow,
-                        vp,
-                        self.camera.eye(),
-                        self.game.time(),
-                    );
-                }
+                self.render_scene();
                 let (w, h) = self.dims();
                 // When the pointer is locked the browser hides the OS cursor, so
                 // the HUD draws our own at the tracked position.
+                let build_label = self.build_mode.map(|k| match k {
+                    protocol::BuildingKind::Barracks => "BARRACKS",
+                    protocol::BuildingKind::Turret => "TURRET",
+                });
                 hud::draw(
                     &self.camera,
                     &self.game,
@@ -914,6 +989,7 @@ impl ApplicationHandler<UserEvent> for App {
                     false,
                     self.input.cursor,
                     self.cursor_locked,
+                    build_label,
                 );
 
                 // Remove the loading overlay once the first frame is on screen.
