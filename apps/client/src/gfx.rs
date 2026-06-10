@@ -1852,6 +1852,16 @@ impl Gfx {
             .write_buffer(&self.world_buf, 0, bytemuck::bytes_of(&w));
     }
 
+    /// Rebuild the heightmap ground mesh after the building pads changed
+    /// (`terrain::set_pads`). The grid topology is fixed, so only the vertex
+    /// buffer is rewritten. Voxel battlefields are unaffected (their surface
+    /// comes from the baked map, not the height function).
+    pub fn rebuild_terrain(&mut self) {
+        let (tv, _) = terrain_mesh();
+        self.queue
+            .write_buffer(&self.terrain_vbuf, 0, bytemuck::cast_slice(&tv));
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,

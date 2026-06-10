@@ -66,6 +66,20 @@ struct Effect {
 /// Seconds an order ping stays on screen.
 const PING_LIFE: f32 = 0.9;
 
+/// Most a building pad may cut or fill: sites where the natural ground
+/// deviates more than this from the centre height are too steep to build on.
+const MAX_PAD_CUT: f32 = 3.0;
+
+/// Levelled-pad radius for a building footprint (matches the selection ring).
+fn pad_radius(kind: BuildingKind) -> f32 {
+    match kind {
+        BuildingKind::Hq => 9.0,
+        BuildingKind::Barracks => 8.0,
+        BuildingKind::Turret => 4.0,
+        BuildingKind::Supply => 4.5,
+    }
+}
+
 /// Per-mesh instance lists + selection rings, in draw order: infantry, the two
 /// faction barracks, the two faction HQs, the two faction workers, the two
 /// resource nodes, heavies, turrets, supply depots, then rings. Matches
@@ -117,6 +131,8 @@ pub struct Game {
     factions: [Faction; 2],
     /// Live order-feedback pings (move blips, attack/harvest highlights).
     effects: Vec<Effect>,
+    /// The building pads changed this tick; the ground mesh must rebuild.
+    terrain_dirty: bool,
 }
 
 impl Default for Game {
@@ -150,6 +166,7 @@ impl Game {
             fog_explored: true,
             factions: [Faction::Hollowmen, Faction::Astromancer],
             effects: Vec::new(),
+            terrain_dirty: false,
         };
         // The enemy is driven by the in-sim bot commander (mines, builds, trains).
         g.world.set_bot(1, true);
@@ -173,6 +190,39 @@ impl Game {
             .map(|s| s.index)
             .collect();
         self.selected.retain(|i| live.contains(i));
+        self.sync_pads();
+    }
+
+    /// Level a terrain pad under every building so structures sit on flat
+    /// ground (presentation only; the sim has no heights). When the set
+    /// changes, flag the ground mesh for a rebuild.
+    fn sync_pads(&mut self) {
+        let mut pads = Vec::new();
+        for s in &self.curr {
+            let r = match s.kind {
+                Kind::Hq => 9.0,
+                Kind::Barracks => 8.0,
+                Kind::Turret => 4.0,
+                Kind::Supply => 4.5,
+                _ => continue,
+            };
+            let (wx, wz) = (f(s.pos.x), f(s.pos.y));
+            pads.push(terrain::Pad {
+                x: wx,
+                z: wz,
+                r,
+                h: terrain::natural_height(wx, wz),
+            });
+        }
+        if terrain::set_pads(pads) {
+            self.terrain_dirty = true;
+        }
+    }
+
+    /// True once after the building pads changed (the caller rebuilds the
+    /// ground mesh).
+    pub fn take_terrain_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.terrain_dirty)
     }
 
     pub fn update(&mut self) {
@@ -541,7 +591,7 @@ impl Game {
         // Build-placement hologram: the pending building at the cursor, tinted
         // by whether the site is clear, with a footprint ring (StarCraft-style).
         if let Some((kind, gx, gz)) = ghost {
-            let ok = self.site_ok(gx, gz);
+            let ok = self.site_ok(kind, gx, gz);
             // Alpha >= 2.0 flags the hologram path in the unit shader.
             let holo = if ok {
                 [0.30, 1.0, 0.55, 2.0]
@@ -619,9 +669,11 @@ impl Game {
         )
     }
 
-    /// True if a building can be placed at `(wx, wz)`: far enough from every
-    /// existing building and resource node (mirrors the sim's `BUILD_CLEAR2`).
-    fn site_ok(&self, wx: f32, wz: f32) -> bool {
+    /// True if a building of `kind` can be placed at `(wx, wz)`: far enough
+    /// from every existing building and resource node (mirrors the sim's
+    /// `BUILD_CLEAR2`), and on ground gentle enough to level - the pad can
+    /// only cut or fill [`MAX_PAD_CUT`] across the footprint.
+    fn site_ok(&self, kind: BuildingKind, wx: f32, wz: f32) -> bool {
         for s in &self.curr {
             let solid = matches!(
                 s.kind,
@@ -637,6 +689,16 @@ impl Game {
             }
             let (ex, ez) = (f(s.pos.x), f(s.pos.y));
             if (ex - wx).hypot(ez - wz) < 14.0 {
+                return false;
+            }
+        }
+        // Slope limit: sample the natural ground around the footprint rim.
+        let r = pad_radius(kind);
+        let h0 = terrain::natural_height(wx, wz);
+        for k in 0..8 {
+            let a = k as f32 * std::f32::consts::TAU / 8.0;
+            let h = terrain::natural_height(wx + a.cos() * r, wz + a.sin() * r);
+            if (h - h0).abs() > MAX_PAD_CUT {
                 return false;
             }
         }
@@ -853,9 +915,14 @@ impl Game {
             .any(|s| s.kind == Kind::Worker && sel.contains(&s.index))
     }
 
-    /// Order every selected worker to construct `kind` at `(wx, wz)`.
+    /// Order every selected worker to construct `kind` at `(wx, wz)`. Refused
+    /// when the site is blocked or too steep - the same rule the placement
+    /// ghost shows in red (the sim separately enforces clearance on arrival).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn build_selected(&mut self, kind: BuildingKind, wx: f32, wz: f32) {
+        if !self.site_ok(kind, wx, wz) {
+            return;
+        }
         let sel: Vec<u32> = self.selected.clone();
         for u in sel {
             if self.is_worker(u) {

@@ -1003,6 +1003,13 @@ impl ApplicationHandler<UserEvent> for App {
 
                 self.game.update();
                 self.game.recompute_fow();
+                // Buildings level the ground under them; rebuild the terrain
+                // mesh whenever the pad set changed.
+                if self.game.take_terrain_dirty() {
+                    if let Some(gfx) = self.gfx.as_mut() {
+                        gfx.rebuild_terrain();
+                    }
+                }
 
                 let drag_rect = self.input.left_press.and_then(|(px, py)| {
                     let (cx, cy) = self.input.cursor;
