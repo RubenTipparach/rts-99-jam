@@ -301,6 +301,9 @@ pub struct Snap {
     /// Buildings only: construction progress, 1.0 once functional. Below 1.0 the
     /// structure is still being raised (display-only fraction).
     pub construct_frac: Fx,
+    /// Production buildings only: where freshly trained units gather
+    /// (display-only; set by `Command::SetRally`).
+    pub rally: Vec3,
 }
 
 #[derive(Default)]
@@ -1370,6 +1373,7 @@ impl World {
                 queued: self.queue[i],
                 build_frac,
                 construct_frac,
+                rally: self.rally[i],
             });
         }
         out

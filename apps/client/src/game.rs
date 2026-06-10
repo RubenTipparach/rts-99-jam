@@ -483,10 +483,17 @@ impl Game {
                 // Buildings rise out of the ground as they are constructed
                 // (construct_frac 0 -> 1); a finished one is at full height.
                 let cf = f(s.construct_frac).clamp(0.08, 1.0);
+                let selected = sel.contains(&s.index);
+                // Selected buildings brighten (tint alpha 1.5 is the shader's
+                // highlight flag) on top of their ground ring.
+                let mut color = tint;
+                if selected {
+                    color[3] = 1.5;
+                }
                 let inst = InstanceRaw {
                     offset: [wx, ground, wz],
                     scale: [1.0, cf, 1.0],
-                    color: tint,
+                    color,
                 };
                 let radius = match s.kind {
                     Kind::Turret => 4.0,
@@ -506,12 +513,22 @@ impl Game {
                         Faction::Hollowmen => barracks_hollow.push(inst),
                     },
                 }
-                if sel.contains(&s.index) {
+                if selected {
                     rings.push(RingRaw {
                         center: [wx, ground, wz],
                         radius,
                         color: [0.4, 1.0, 0.5, 0.95],
                     });
+                    // A selected production building shows its rally point as
+                    // an amber marker (right-click moves it).
+                    if s.owner == 0 && matches!(s.kind, Kind::Hq | Kind::Barracks) {
+                        let (rx, rz) = (f(s.rally.x), f(s.rally.y));
+                        rings.push(RingRaw {
+                            center: [rx, terrain::height(rx, rz), rz],
+                            radius: 1.7,
+                            color: [1.0, 0.78, 0.3, 0.9],
+                        });
+                    }
                 }
             } else if s.kind == Kind::Worker {
                 // Workers animate per faction. The Acolyte hovers with a slow
@@ -948,18 +965,6 @@ impl Game {
         f(self.world.carbon(0))
     }
 
-    /// Ore cost to train one infantry (for the HUD).
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub fn train_cost(&self) -> f32 {
-        sim::TRAIN_COST as f32
-    }
-
-    /// Ore cost to train one worker (for the HUD).
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub fn worker_cost(&self) -> f32 {
-        sim::WORKER_COST as f32
-    }
-
     /// The local player's supply `(used, cap)` (for the HUD).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn player_supply(&self) -> (u32, u32) {
@@ -1041,6 +1046,22 @@ impl Game {
             target,
             born: self.time,
         });
+    }
+
+    /// Right-click while exactly one production building is selected: move its
+    /// rally point there instead of issuing a unit order. Returns whether the
+    /// click was consumed.
+    pub fn set_rally_selected(&mut self, wx: f32, wz: f32) -> bool {
+        let Some((b, _)) = self.selected_producer() else {
+            return false;
+        };
+        self.pending.push(Command::SetRally {
+            building: b,
+            x: fx(wx),
+            y: fx(wz),
+        });
+        self.ping(Ping::Move, wx, wz, None);
+        true
     }
 
     /// Right-click order at a ground point. `attack` (Ctrl held) forces an

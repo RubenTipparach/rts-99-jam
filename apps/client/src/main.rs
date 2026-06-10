@@ -435,25 +435,22 @@ impl App {
         self.apply_cursor_grab();
     }
 
-    /// If a production building is selected and the point is on its Train
-    /// button, queue its unit (HQ -> Worker, Barracks -> Infantry) and report
-    /// that the click was consumed (web HUD only).
+    /// If the point hits a command-card button, perform its action (queue a
+    /// unit, or arm build-placement mode) and report the click consumed
+    /// (web HUD only).
     #[cfg(target_arch = "wasm32")]
-    fn train_button_hit(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
-        let kind = if self.game.selected_hq().is_some() {
-            protocol::UnitKind::Worker
-        } else if self.game.selected_barracks().is_some() {
-            protocol::UnitKind::Infantry
-        } else {
-            return false;
-        };
-        let (x0, y0, x1, y1) = hud::train_button_rect(w, h);
-        if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
-            self.game.train_selected(kind);
-            true
-        } else {
-            false
+    fn card_click(&mut self, cx: f32, cy: f32, _w: f32, h: f32) -> bool {
+        for (k, (action, ..)) in hud::card_actions(&self.game).into_iter().enumerate() {
+            let (x0, y0, x1, y1) = hud::card_button_rect(k, h);
+            if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
+                match action {
+                    hud::CardAction::Train(kind) => self.game.train_selected(kind),
+                    hud::CardAction::Build(kind) => self.build_mode = Some(kind),
+                }
+                return true;
+            }
         }
+        false
     }
 
     /// If the point is on the minimap, recenter the camera there and report the
@@ -754,8 +751,8 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
                             #[cfg(target_arch = "wasm32")]
-                            let consumed = self.train_button_hit(cx, cy, w, h)
-                                || self.minimap_press(cx, cy, w, h);
+                            let consumed =
+                                self.card_click(cx, cy, w, h) || self.minimap_press(cx, cy, w, h);
                             #[cfg(not(target_arch = "wasm32"))]
                             let consumed = false;
                             if !consumed {
@@ -782,7 +779,11 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     MouseButton::Right if state == ElementState::Pressed => {
                         if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                            self.game.order(wx, wz, self.input.ctrl);
+                            // A selected production building takes the click
+                            // as its new rally point; otherwise a unit order.
+                            if !self.game.set_rally_selected(wx, wz) {
+                                self.game.order(wx, wz, self.input.ctrl);
+                            }
                         }
                     }
                     _ => {}
@@ -853,7 +854,7 @@ impl ApplicationHandler<UserEvent> for App {
                         let pressed = self.input.left_press.take();
                         let (w, h) = self.dims();
                         #[cfg(target_arch = "wasm32")]
-                        if self.train_button_hit(cx, cy, w, h) || self.minimap_jump(cx, cy, w, h) {
+                        if self.card_click(cx, cy, w, h) || self.minimap_jump(cx, cy, w, h) {
                             return;
                         }
                         if let Some((px, py)) = pressed {
@@ -863,7 +864,9 @@ impl ApplicationHandler<UserEvent> for App {
                             let rc = false;
                             if rc {
                                 if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                                    self.game.order(wx, wz, false);
+                                    if !self.game.set_rally_selected(wx, wz) {
+                                        self.game.order(wx, wz, false);
+                                    }
                                 }
                             } else if (px - cx).hypot(py - cy) < 8.0 {
                                 self.game.select_single(&self.camera, w, h, cx, cy, false);
@@ -1024,12 +1027,6 @@ impl ApplicationHandler<UserEvent> for App {
                 let (w, h) = self.dims();
                 // When the pointer is locked the browser hides the OS cursor, so
                 // the HUD draws our own at the tracked position.
-                let build_label = self.build_mode.map(|k| match k {
-                    protocol::BuildingKind::Hq => "HQ",
-                    protocol::BuildingKind::Barracks => "BARRACKS",
-                    protocol::BuildingKind::Turret => "TURRET",
-                    protocol::BuildingKind::Supply => "SUPPLY DEPOT",
-                });
                 hud::draw(
                     &self.camera,
                     &self.game,
@@ -1039,7 +1036,7 @@ impl ApplicationHandler<UserEvent> for App {
                     false,
                     self.input.cursor,
                     self.cursor_locked,
-                    build_label,
+                    self.build_mode,
                 );
 
                 // Remove the loading overlay once the first frame is on screen.

@@ -3,6 +3,9 @@
 
 use crate::camera::Camera;
 use crate::game::Game;
+use protocol::BuildingKind;
+#[cfg(target_arch = "wasm32")]
+use protocol::UnitKind;
 
 /// Device pixel ratio (web); the HUD draws in CSS pixels scaled by this.
 #[cfg(target_arch = "wasm32")]
@@ -13,20 +16,79 @@ fn dpr() -> f32 {
         .unwrap_or(1.0)
 }
 
-/// Train button rect in CSS pixels `(x, y, w, h)`, given the CSS canvas height.
+/// A command-card button's effect when clicked.
 #[cfg(target_arch = "wasm32")]
-fn train_btn_css(h_css: f32) -> (f64, f64, f64, f64) {
-    let bar = 96.0;
-    (14.0, (h_css - bar + 44.0) as f64, 170.0, 34.0)
+#[derive(Clone, Copy, PartialEq)]
+pub enum CardAction {
+    Train(UnitKind),
+    Build(BuildingKind),
 }
 
-/// Train button rect in physical pixels `(x0, y0, x1, y1)`, for hit-testing
-/// against raw cursor/touch coordinates.
+/// The command card for the current selection: one entry per button, as
+/// `(action, label, hotkey, ore cost, carbon cost)`. A production building
+/// offers its trainable units; selected workers offer the construction kit.
+/// Shared by the renderer and the click hit-test so they can never disagree.
 #[cfg(target_arch = "wasm32")]
-pub fn train_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
-    let _ = w_phys;
+pub fn card_actions(game: &Game) -> Vec<(CardAction, &'static str, &'static str, i64, i64)> {
+    let mut out = Vec::new();
+    if game.selected_hq().is_some() {
+        out.push((CardAction::Train(UnitKind::Worker), "Worker", "T", 40, 0));
+    } else if game.selected_barracks().is_some() {
+        out.push((
+            CardAction::Train(UnitKind::Infantry),
+            "Infantry",
+            "T",
+            50,
+            0,
+        ));
+        out.push((CardAction::Train(UnitKind::Heavy), "Heavy", "H", 120, 60));
+    }
+    if game.has_worker_selected() {
+        out.push((
+            CardAction::Build(BuildingKind::Barracks),
+            "Barracks",
+            "B",
+            150,
+            0,
+        ));
+        out.push((
+            CardAction::Build(BuildingKind::Turret),
+            "Turret",
+            "V",
+            90,
+            50,
+        ));
+        out.push((
+            CardAction::Build(BuildingKind::Supply),
+            "Depot",
+            "G",
+            100,
+            0,
+        ));
+        out.push((CardAction::Build(BuildingKind::Hq), "HQ", "N", 400, 0));
+    }
+    out
+}
+
+/// Command-card button `k`'s rect in CSS pixels `(x, y, w, h)`.
+#[cfg(target_arch = "wasm32")]
+fn card_btn_css(k: usize, h_css: f32) -> (f64, f64, f64, f64) {
+    let bar = 96.0;
+    let bw = 132.0;
+    (
+        14.0 + k as f64 * (bw + 8.0),
+        (h_css - bar + 34.0) as f64,
+        bw,
+        44.0,
+    )
+}
+
+/// Command-card button `k`'s rect in physical pixels `(x0, y0, x1, y1)`, for
+/// hit-testing against raw cursor/touch coordinates.
+#[cfg(target_arch = "wasm32")]
+pub fn card_button_rect(k: usize, h_phys: f32) -> (f32, f32, f32, f32) {
     let d = dpr();
-    let (x, y, bw, bh) = train_btn_css(h_phys / d);
+    let (x, y, bw, bh) = card_btn_css(k, h_phys / d);
     (
         x as f32 * d,
         y as f32 * d,
@@ -290,7 +352,7 @@ pub fn draw(
     _paused: bool,
     _cursor: (f32, f32),
     _draw_cursor: bool,
-    _build_label: Option<&str>,
+    _build_mode: Option<BuildingKind>,
 ) {
 }
 
@@ -305,7 +367,7 @@ pub fn draw(
     paused: bool,
     cursor: (f32, f32),
     draw_cursor: bool,
-    build_label: Option<&str>,
+    build_mode: Option<BuildingKind>,
 ) {
     use crate::terrain;
     use wasm_bindgen::JsCast;
@@ -469,7 +531,7 @@ pub fn draw(
     ctx.set_fill_style_str("#8aa3cc");
     ctx.set_font("12px monospace");
     let _ = ctx.fill_text(
-        "left: select (shift: add)    right: move / harvest / attack (ctrl: attack-move)    middle-drag or WASD: pan    wheel: zoom    Esc: pause",
+        "left: select (shift: add)    right: move / harvest / attack (ctrl: attack-move; building: rally)    WASD: pan    wheel: zoom    Esc: pause",
         14.0,
         hf - bar + 22.0,
     );
@@ -489,74 +551,82 @@ pub fn draw(
         44.0,
     );
 
-    // Production command card when one of your production buildings is
-    // selected: the HQ trains workers, a Barracks trains fighters.
-    if let Some((queued, frac)) = game.selected_production() {
-        let hq = game.selected_hq().is_some();
-        let (bx, by, bw, bh) = train_btn_css(h);
-        let cost = if hq {
-            game.worker_cost()
-        } else {
-            game.train_cost()
-        };
-        let afford = game.player_ore() >= cost;
-        let name = if hq {
-            // The HQ carries its faction's name (see docs/factions.md).
-            match game.faction_of(0) {
-                crate::game::Faction::Astromancer => "SPIRE (HQ)",
-                crate::game::Faction::Hollowmen => "COMMAND HQ",
-            }
-        } else {
-            "BARRACKS"
-        };
-        let unit = if hq { "Worker" } else { "Infantry" };
-        ctx.set_fill_style_str("#cfe0ff");
-        ctx.set_font("12px monospace");
-        let _ = ctx.fill_text(&format!("{name} - queue {queued}/6"), bx, by - 6.0);
-        ctx.set_fill_style_str(if afford {
-            "rgba(40,80,140,0.95)"
-        } else {
-            "rgba(48,54,66,0.92)"
-        });
-        ctx.fill_rect(bx, by, bw, bh);
-        ctx.set_stroke_style_str("rgba(150,190,240,0.95)");
-        ctx.set_line_width(1.5);
-        ctx.stroke_rect(bx, by, bw, bh);
-        ctx.set_fill_style_str(if afford { "#eaf2ff" } else { "#8a93a4" });
-        ctx.set_font("bold 14px monospace");
-        let _ = ctx.fill_text(
-            &format!("Train {unit} [T] - {}", cost as i64),
-            bx + 10.0,
-            by + 22.0,
-        );
-        if frac > 0.0 {
-            ctx.set_fill_style_str("rgba(255,211,107,0.95)");
-            ctx.fill_rect(bx, by + bh - 3.0, bw * frac.clamp(0.0, 1.0) as f64, 3.0);
-        }
-        if !hq {
-            ctx.set_fill_style_str("#9fb6da");
+    // Command card: clickable buttons for training units (HQ -> Worker,
+    // Barracks -> Infantry/Heavy) and for worker construction. Hotkeys still
+    // work; the buttons mirror them. Header names the selected producer.
+    let actions = card_actions(game);
+    if !actions.is_empty() {
+        if game.selected_hq().is_some() || game.selected_barracks().is_some() {
+            let name = if game.selected_hq().is_some() {
+                // The HQ carries its faction's name (see docs/factions.md).
+                match game.faction_of(0) {
+                    crate::game::Faction::Astromancer => "SPIRE (HQ)",
+                    crate::game::Faction::Hollowmen => "COMMAND HQ",
+                }
+            } else {
+                "BARRACKS"
+            };
+            let (bx, by, ..) = card_btn_css(0, h);
+            ctx.set_fill_style_str("#cfe0ff");
             ctx.set_font("12px monospace");
-            let _ = ctx.fill_text("[H] Heavy  120 ore + 60 carbon", bx, by + bh + 16.0);
+            let _ = ctx.fill_text(name, bx, by - 5.0);
         }
-    }
-
-    // Worker command card: build hotkeys when one of your workers is selected.
-    if game.has_worker_selected() {
-        let (bx, _, _, _) = train_btn_css(h);
-        let by = h as f64 - 96.0 + 70.0;
-        ctx.set_fill_style_str("#cfe0ff");
-        ctx.set_font("bold 13px monospace");
-        let _ = ctx.fill_text("WORKER", bx, by);
-        ctx.set_fill_style_str("#9fb6da");
-        ctx.set_font("12px monospace");
-        let _ = ctx.fill_text(
-            "[B] Barracks 150   [V] Turret 90+50   [N] HQ 400   [G] Depot 100",
-            bx,
-            by + 16.0,
-        );
+        let prod = game.selected_production();
+        let ore_have = game.player_ore() as i64;
+        let carbon_have = game.player_carbon() as i64;
+        let mut prod_shown = false;
+        for (k, &(action, label, hotkey, ore, carbon)) in actions.iter().enumerate() {
+            let (bx, by, bw, bh) = card_btn_css(k, h);
+            let afford = ore_have >= ore && carbon_have >= carbon;
+            // The button whose building is being placed right now glows green.
+            let active = matches!((action, build_mode), (CardAction::Build(b), Some(m)) if b == m);
+            ctx.set_fill_style_str(if active {
+                "rgba(50,110,60,0.95)"
+            } else if afford {
+                "rgba(40,80,140,0.95)"
+            } else {
+                "rgba(48,54,66,0.92)"
+            });
+            ctx.fill_rect(bx, by, bw, bh);
+            ctx.set_stroke_style_str(if active {
+                "rgba(150,255,170,0.95)"
+            } else {
+                "rgba(150,190,240,0.95)"
+            });
+            ctx.set_line_width(1.5);
+            ctx.stroke_rect(bx, by, bw, bh);
+            ctx.set_fill_style_str(if afford { "#eaf2ff" } else { "#8a93a4" });
+            ctx.set_font("bold 13px monospace");
+            let _ = ctx.fill_text(&format!("{label} [{hotkey}]"), bx + 8.0, by + 17.0);
+            ctx.set_font("11px monospace");
+            ctx.set_fill_style_str(if afford { "#bcd2f2" } else { "#7d8698" });
+            let cost = if carbon > 0 {
+                format!("{ore} ore + {carbon} c")
+            } else {
+                format!("{ore} ore")
+            };
+            let _ = ctx.fill_text(&cost, bx + 8.0, by + 33.0);
+            // The first train button carries the building's queue + progress.
+            if let (CardAction::Train(_), Some((queued, frac)), false) = (action, prod, prod_shown)
+            {
+                prod_shown = true;
+                ctx.set_fill_style_str("#ffd36b");
+                let _ = ctx.fill_text(&format!("{queued}/6"), bx + bw - 32.0, by + 17.0);
+                if frac > 0.0 {
+                    ctx.set_fill_style_str("rgba(255,211,107,0.95)");
+                    ctx.fill_rect(bx, by + bh - 3.0, bw * frac.clamp(0.0, 1.0) as f64, 3.0);
+                }
+            }
+        }
     }
 
     // Build placement banner: the next click drops the building.
+    let build_label = build_mode.map(|k| match k {
+        BuildingKind::Hq => "HQ",
+        BuildingKind::Barracks => "BARRACKS",
+        BuildingKind::Turret => "TURRET",
+        BuildingKind::Supply => "SUPPLY DEPOT",
+    });
     if let Some(label) = build_label {
         ctx.set_text_align("center");
         ctx.set_fill_style_str("rgba(40,80,140,0.92)");

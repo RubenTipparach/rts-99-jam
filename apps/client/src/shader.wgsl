@@ -243,11 +243,16 @@ fn vs_unit(
     var o: UnitOut;
     o.normal = normal;
     // tcol.a >= 2.0 marks a hologram (the build-placement ghost): the whole
-    // mesh takes the tint color, materials ignored.
+    // mesh takes the tint color, materials ignored. 1.25 <= tcol.a < 2.0
+    // marks a selected building: the shell brightens with a green lift so
+    // the selection reads on the structure itself, not just its ground ring.
     let ghost = select(0.0, 1.0, tcol.a >= 2.0);
+    let sel = select(0.0, 1.0, tcol.a >= 1.25 && tcol.a < 2.0);
     // mcol.a is the team-tint weight: blend the material toward the faction
     // color so banners/tabards/plumes read as team color, metal/skin stay neutral.
-    o.albedo = mix(mix(mcol.rgb, tcol.rgb, mcol.a), tcol.rgb, ghost);
+    var albedo = mix(mix(mcol.rgb, tcol.rgb, mcol.a), tcol.rgb, ghost);
+    albedo = mix(albedo, albedo * 1.25 + vec3<f32>(0.05, 0.18, 0.07), sel);
+    o.albedo = albedo;
     o.ghost = ghost;
     let world = pos * scale + offset;
     o.world_y = world.y;
