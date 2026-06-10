@@ -33,16 +33,23 @@ fn team_color(owner: u16) -> [f32; 4] {
     }
 }
 
-/// Instance yaw `(cos, sin)` that points a mesh's authored forward (-z) along
-/// the entity's sim facing. Falls back to no rotation for a degenerate facing.
+/// Instance yaw `(cos, sin)` that points a mesh's authored face (+z: visors,
+/// eyes, tool arms) along the entity's sim facing. Falls back to no rotation
+/// for a degenerate facing.
 fn rot_of(s: &Snap) -> [f32; 2] {
     let (dx, dz) = (f(s.facing.x), f(s.facing.y));
     let len = dx.hypot(dz);
     if len < 1e-4 {
         ROT_NONE
     } else {
-        [-dz / len, -dx / len]
+        [dz / len, dx / len]
     }
+}
+
+/// As [`rot_of`], for meshes authored facing -z (the turret's barrels).
+fn rot_of_neg_z(s: &Snap) -> [f32; 2] {
+    let [c, sn] = rot_of(s);
+    [-c, -sn]
 }
 
 /// Squared ground distance between two snapshots (floats; presentation only).
@@ -628,7 +635,7 @@ impl Game {
                     color,
                     // Turrets swivel toward their target; other buildings sit.
                     rot: if s.kind == Kind::Turret {
-                        rot_of(s)
+                        rot_of_neg_z(s)
                     } else {
                         ROT_NONE
                     },

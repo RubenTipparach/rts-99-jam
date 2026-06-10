@@ -130,7 +130,7 @@ fn stats(kind: Kind) -> Stats {
         Kind::Infantry => Stats {
             max_hp: Fx::from_int(50),
             speed: Fx::from_ratio(30, 100),
-            range: Fx::from_int(5),
+            range: Fx::from_int(7),
             damage: Fx::from_int(5),
             attack_cd: Fx::from_int(12),
             aggro2: Fx::from_int(256), // aggro 16
@@ -149,10 +149,10 @@ fn stats(kind: Kind) -> Stats {
         Kind::Heavy => Stats {
             max_hp: Fx::from_int(180),
             speed: Fx::from_ratio(18, 100),
-            range: Fx::from_int(6),
+            range: Fx::from_int(9),
             damage: Fx::from_int(14),
             attack_cd: Fx::from_int(20),
-            aggro2: Fx::from_int(289), // aggro 17
+            aggro2: Fx::from_int(324), // aggro 18
         },
         // HQ: the base anchor; the toughest structure on the field.
         Kind::Hq => Stats {
@@ -278,9 +278,12 @@ fn obstacle_radius(k: Kind) -> Option<Fx> {
 // crowd drifts apart and a group-move settles into distinct cells rather than
 // stacking on one point. `SEP_FACTOR` (each pair resolves half the overlap) and
 // the `SEP_MAX` step clamp keep it a smooth drift instead of a teleport.
-const SEP_DIST: Fx = Fx::from_ratio(5, 2); // desired min spacing between centers
+// The tolerance is tight and the per-tick push caps *below* move speed, so a
+// unit shouldering through a crowd keeps most of its momentum instead of
+// stalling against neighbours.
+const SEP_DIST: Fx = Fx::from_ratio(2, 1); // desired min spacing between centers
 const SEP_FACTOR: Fx = Fx::from_ratio(1, 2);
-const SEP_MAX: Fx = Fx::from_ratio(30, 100); // max push per tick (= infantry speed)
+const SEP_MAX: Fx = Fx::from_ratio(18, 100); // max push per tick (< infantry speed)
 
 /// One entity as seen by the renderer/HUD (read-only; client converts to floats).
 #[derive(Clone, Copy)]

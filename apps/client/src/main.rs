@@ -296,6 +296,9 @@ struct App {
     /// pressed flash on the HUD button.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     card_flash: Option<(usize, Instant)>,
+    /// A front-end (menu/lobby) button was just clicked; same flash treatment.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    menu_flash: Option<(menu::Click, Instant)>,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     proxy: EventLoopProxy<UserEvent>,
 }
@@ -323,6 +326,7 @@ impl App {
             first_frame_done: false,
             build_mode: None,
             card_flash: None,
+            menu_flash: None,
             proxy,
         }
     }
@@ -521,6 +525,9 @@ impl App {
         let (w, h) = self.dims();
         let click = menu::hit(self.screen, &self.lobby, cx, cy, w, h);
         log::info!("front_end_click at ({cx:.0},{cy:.0}) dims={w:.0}x{h:.0} -> {click:?}");
+        if click != menu::Click::None {
+            self.menu_flash = Some((click, Instant::now()));
+        }
         match click {
             menu::Click::Skirmish => self.screen = menu::Screen::Lobby,
             menu::Click::SetFaction(f) => self.lobby.faction = f,
@@ -922,7 +929,15 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.screen != menu::Screen::InGame {
                     self.game.skip_tick();
                     let (w, h) = self.dims();
-                    menu::draw(self.screen, &self.lobby, w, h);
+                    menu::draw(
+                        self.screen,
+                        &self.lobby,
+                        w,
+                        h,
+                        self.input.cursor,
+                        self.menu_flash
+                            .and_then(|(c, t)| (t.elapsed().as_secs_f32() < 0.15).then_some(c)),
+                    );
                     if self.gfx.is_some() && !self.first_frame_done {
                         self.first_frame_done = true;
                         hide_loading();

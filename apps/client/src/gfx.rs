@@ -661,8 +661,10 @@ fn hq_mesh_hollow() -> Vec<UnitVertex> {
 // visor/shoulder. The Acolyte is authored to sit just above y=0 and is lifted
 // into a hover by the instance offset.
 
-/// Astromancer Acolyte: a hooded caster that hovers, with a team-tinted focus
-/// core and glowing eyes; grows structures and draws motes of matter.
+/// Astromancer Acolyte: a grown automaton held together by magic instead of
+/// joints - the head, torso, pelvis pod, and bare forearms all hover with
+/// visible gaps between them (marionette-style), around a team-tinted core.
+/// Faces +z (eyes), like the Engineer's visor.
 fn acolyte_mesh() -> Vec<UnitVertex> {
     let mut m = Vec::new();
     let shell = [0.86, 0.84, 0.76];
@@ -670,25 +672,60 @@ fn acolyte_mesh() -> Vec<UnitVertex> {
     let gold = [0.86, 0.75, 0.45];
     let eyes = [0.55, 0.92, 0.86];
     let team = [0.5, 0.5, 0.5];
-    // Trailing robe point flaring up into the body.
+    // Pelvis pod: a small tapered keel, lowest floating segment.
     push_frustum(
-        &mut m, 0.0, 0.0, 0.18, 0.62, 0.30, 0.95, shell2, 0.0, 6, 0.0, false,
+        &mut m, 0.0, 0.0, 0.30, 0.16, 0.95, 0.40, shell2, 0.0, 6, 0.0, true,
+    );
+    // Team-tinted core, exposed in the gap between pelvis and chest.
+    push_prism(&mut m, 0.0, 0.0, 0.14, 1.02, 1.30, team, 1.0, 6, 0.3, true);
+    // Chest shell: a faceted barrel with a gold collar plate; clear gap below.
+    push_frustum(
+        &mut m, 0.0, 0.0, 0.30, 0.42, 1.38, 1.78, shell, 0.0, 6, 0.0, false,
     );
     push_frustum(
-        &mut m, 0.0, 0.0, 0.62, 0.46, 0.95, 1.90, shell, 0.0, 6, 0.0, false,
+        &mut m, 0.0, 0.0, 0.42, 0.30, 1.78, 2.10, shell, 0.0, 6, 0.0, false,
     );
-    push_box(&mut m, [-0.5, 1.3, -0.14], [0.5, 1.5, 0.14], gold, 0.0); // sash
-                                                                       // Shoulder mantle + hood.
+    push_prism(&mut m, 0.0, 0.0, 0.32, 2.10, 2.20, gold, 0.0, 6, 0.0, true);
+    // Head: a separate capsule floating above the collar (visible neck gap),
+    // glowing eye band on the +z face.
     push_frustum(
-        &mut m, 0.0, 0.0, 0.46, 0.34, 1.90, 2.25, shell2, 0.0, 6, 0.0, false,
+        &mut m, 0.0, 0.0, 0.20, 0.24, 2.38, 2.62, shell, 0.0, 6, 0.0, false,
     );
     push_frustum(
-        &mut m, 0.0, 0.0, 0.34, 0.26, 2.25, 2.55, shell, 0.0, 6, 0.0, false,
+        &mut m, 0.0, 0.0, 0.24, 0.14, 2.62, 2.85, shell2, 0.0, 6, 0.0, true,
     );
-    push_pyramid(&mut m, 0.0, 0.0, 0.32, 2.40, 2.95, shell2, 0.0, 6, 0.0);
-    push_box(&mut m, [-0.16, 2.05, 0.22], [0.16, 2.20, 0.34], eyes, 0.0); // glowing eyes
-                                                                          // Team-tinted focus core hovering at the chest.
-    push_prism(&mut m, 0.0, 0.34, 0.20, 1.25, 1.70, team, 1.0, 6, 0.0, true);
+    push_box(&mut m, [-0.15, 2.46, 0.20], [0.15, 2.57, 0.28], eyes, 0.0);
+    // Floating shoulder orbs and bare forearms: no upper arms at all, the
+    // "joints" are just gaps held by magic. Gold cuff caps each forearm.
+    for sx in [-1.0_f32, 1.0] {
+        push_prism(
+            &mut m,
+            sx * 0.62,
+            0.0,
+            0.13,
+            1.96,
+            2.20,
+            gold,
+            0.0,
+            6,
+            0.0,
+            true,
+        );
+        push_box(
+            &mut m,
+            [sx * 0.56 - 0.10, 1.30, -0.10],
+            [sx * 0.56 + 0.10, 1.42, 0.10],
+            gold,
+            0.0,
+        );
+        push_box(
+            &mut m,
+            [sx * 0.58 - 0.09, 0.92, -0.09],
+            [sx * 0.58 + 0.09, 1.28, 0.09],
+            shell,
+            0.0,
+        );
+    }
     m
 }
 
@@ -2313,13 +2350,15 @@ mod tests {
     #[ignore = "writes preview PNGs to target/previews; run on demand"]
     fn render_building_previews() {
         let team = [0.25, 0.55, 1.0]; // the player's blue
-        let jobs: [(&str, Vec<UnitVertex>); 6] = [
+        let jobs: [(&str, Vec<UnitVertex>); 8] = [
             ("hq-spire-astromancer", hq_mesh_astro()),
             ("hq-command-hollowmen", hq_mesh_hollow()),
             ("barracks-astromancer", barracks_mesh_astro()),
             ("barracks-hollowmen", barracks_mesh_hollow()),
             ("turret", turret_mesh()),
             ("supply-depot", supply_mesh()),
+            ("worker-acolyte", acolyte_mesh()),
+            ("worker-engineer", engineer_mesh()),
         ];
         std::fs::create_dir_all("target/previews").unwrap();
         for (name, mesh) in jobs {

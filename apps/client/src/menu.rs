@@ -42,7 +42,7 @@ impl Default for Lobby {
 }
 
 /// A click the front-end recognized, returned by `hit` for the app to act on.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub enum Click {
     None,
@@ -261,18 +261,36 @@ mod web {
         Some((ctx, w, h, d))
     }
 
-    fn draw_btn(ctx: &Ctx, b: &Btn, s: f64) {
+    /// Draw one button. `hover` lifts it (brighter fill, thicker border) and
+    /// `pressed` flashes it bright for a beat after a click, so every front-end
+    /// control visibly reacts to the cursor.
+    fn draw_btn(ctx: &Ctx, b: &Btn, s: f64, hover: bool, pressed: bool) {
+        let hover = hover && b.enabled;
         let (fill, border, text) = if !b.enabled {
             ("rgba(28,34,48,0.85)", "rgba(70,84,110,0.6)", "#5e6a82")
+        } else if pressed {
+            ("rgba(180,220,255,0.95)", "rgba(255,255,255,1.0)", "#0a1220")
         } else if b.selected {
-            ("rgba(40,86,150,0.95)", "rgba(150,200,255,0.95)", "#eaf2ff")
+            if hover {
+                ("rgba(56,110,182,0.97)", "rgba(190,225,255,1.0)", "#f4f9ff")
+            } else {
+                ("rgba(40,86,150,0.95)", "rgba(150,200,255,0.95)", "#eaf2ff")
+            }
+        } else if hover {
+            ("rgba(36,52,86,0.97)", "rgba(190,225,255,1.0)", "#f4f9ff")
         } else {
             ("rgba(18,26,44,0.92)", "rgba(120,160,210,0.9)", "#dce6f6")
         };
         ctx.set_fill_style_str(fill);
         ctx.fill_rect(b.x, b.y, b.w, b.h);
         ctx.set_stroke_style_str(border);
-        ctx.set_line_width(if b.selected { 2.5 } else { 1.5 });
+        ctx.set_line_width(if hover || pressed {
+            2.5
+        } else if b.selected {
+            2.5
+        } else {
+            1.5
+        });
         ctx.stroke_rect(b.x, b.y, b.w, b.h);
         ctx.set_fill_style_str(text);
         ctx.set_font(&format!(
@@ -451,7 +469,14 @@ mod web {
 
     /// The scrollable map-select modal: a list (with scrollbar) on the left and a
     /// live diamond preview of the highlighted world on the right.
-    fn draw_modal(ctx: &Ctx, lobby: &Lobby, w: f64, h: f64) {
+    fn draw_modal(
+        ctx: &Ctx,
+        lobby: &Lobby,
+        w: f64,
+        h: f64,
+        over: impl Fn(&Btn) -> bool,
+        flashed: impl Fn(&Btn) -> bool,
+    ) {
         let s = ui_scale(w, h);
         let row_h = 40.0 * s;
         ctx.set_fill_style_str("rgba(2,4,10,0.6)");
@@ -473,7 +498,7 @@ mod web {
         let _ = ctx.fill_text("SELECT BATTLEFIELD", mx + 30.0 * s, my + 52.0 * s);
 
         for b in modal_layout(lobby, w, h) {
-            draw_btn(ctx, &b, s);
+            draw_btn(ctx, &b, s, over(&b), flashed(&b));
             if let Click::PickMap(i) = b.click {
                 let sw = crate::voxel::MAP_SWATCH[i as usize];
                 ctx.set_fill_style_str(&format!("rgb({},{},{})", sw[0], sw[1], sw[2]));
@@ -511,10 +536,22 @@ mod web {
         ctx.set_text_align("left");
     }
 
-    pub fn draw(screen: Screen, lobby: &Lobby, w_phys: f32, h_phys: f32) {
-        let Some((ctx, w, h, _)) = ctx(w_phys as f64, h_phys as f64) else {
+    pub fn draw(
+        screen: Screen,
+        lobby: &Lobby,
+        w_phys: f32,
+        h_phys: f32,
+        cursor_phys: (f32, f32),
+        flash: Option<Click>,
+    ) {
+        let Some((ctx, w, h, d)) = ctx(w_phys as f64, h_phys as f64) else {
             return;
         };
+        let cursor = ((cursor_phys.0 / d) as f64, (cursor_phys.1 / d) as f64);
+        let over = |b: &Btn| {
+            cursor.0 >= b.x && cursor.0 <= b.x + b.w && cursor.1 >= b.y && cursor.1 <= b.y + b.h
+        };
+        let flashed = |b: &Btn| flash.is_some_and(|c| c != Click::None && c == b.click);
         ctx.clear_rect(0.0, 0.0, w, h);
         // Opaque backdrop: the match hasn't started (no map chosen yet), so the
         // front-end fully covers the scene rather than dimming it. Two dark bands
@@ -586,12 +623,17 @@ mod web {
             Screen::InGame => {}
         }
 
+        // While the modal is open it owns the cursor: the layer underneath
+        // neither hovers nor flashes.
+        let modal_open = screen == Screen::Lobby && lobby.map_open;
         for b in layout(screen, lobby, w, h) {
-            draw_btn(&ctx, &b, s);
+            let hover = !modal_open && over(&b);
+            let pressed = !modal_open && flashed(&b);
+            draw_btn(&ctx, &b, s, hover, pressed);
         }
         // The map-select modal draws on top of the lobby.
-        if screen == Screen::Lobby && lobby.map_open {
-            draw_modal(&ctx, lobby, w, h);
+        if modal_open {
+            draw_modal(&ctx, lobby, w, h, |b| over(b), |b| flashed(b));
         }
         // Restore defaults the in-game HUD relies on.
         ctx.set_text_align("left");
