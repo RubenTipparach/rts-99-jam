@@ -57,12 +57,42 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
   apart on arrival. Never issue the same destination to every selected unit.
 - If you add new mobile unit kinds, give them separation too (and a sensible
   per-kind spacing) so the no-stacking rule holds.
-- **No auto-production.** Every unit is queued by `Command::Train`; nothing
-  spawns on its own. Training costs **ore** (per-player stockpile in the sim,
-  income trickles in per building) - see `STARTING_ORE`/`TRAIN_COST`/
-  `INCOME_PER_BUILDING` in `crates/sim`. The player drives it from the HUD
-  command card (button / `T`); the enemy is static until an AI issues `Train`.
-  Ore is part of the state hash, so tuning it re-pins the golden value.
+- **No auto-production and no passive income.** Every unit is queued by
+  `Command::Train`, and every resource is mined by a worker carrying loads
+  from a node to a drop-off - buildings never generate income on their own.
+  See `STARTING_ORE`/`TRAIN_COST` in `crates/sim`. The player drives
+  production from the HUD command card; the enemy is static until an AI
+  issues `Train`. Ore is part of the state hash, so tuning it re-pins the
+  golden value.
+
+## Game feel / fx
+
+- **Every interaction gets visual feedback.** Whenever a unit interacts with
+  another object - mining, shooting, taking damage, dying, building - there
+  must be a visible response: an animation, particles, or a light, usually
+  via the client fx layer (`apps/client/src/fx.rs`) driven by sim snapshots
+  and the sim's per-tick `shots()` events. Never add an interaction that
+  happens silently.
+- **Lean on point lights.** The renderer is vertex-lit and supports many
+  dynamic point lights cheaply (`gfx::MAX_LIGHTS` slots fed each frame), so
+  fx should use them freely - muzzle flashes, mining glints, explosions all
+  carry a light, not just particles.
+
+## HUD text policy
+
+- **No tutorial, help, or debug text in the game HUD.** Never render control
+  explanations ("left: select", "Esc: pause"), force counters, faction
+  labels, or debug readouts on screen; debug info belongs in the console.
+  Hotkey hints may appear only as short labels on the command-card buttons
+  themselves ("Worker [T]"). UI affordances are communicated by the elements
+  themselves (hover/press states, glows, pings), not by explanatory text.
+
+## Branding
+
+- **Never say "deterministic" or "lockstep" in anything user-facing**: UI,
+  menus, taglines, store/promo copy, or branding assets. Deterministic
+  lockstep is not a selling point, it is the baseline gold standard for any
+  multiplayer RTS; keep the term in code and docs only.
 
 ## Web UI policy (DOM vs WASM)
 

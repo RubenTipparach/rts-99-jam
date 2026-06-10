@@ -15,7 +15,7 @@ mod rng;
 
 pub use rng::DetRng;
 
-use math::{Fx, Vec3};
+use math::{Fx, Vec2, Vec3};
 use protocol::{BuildingKind, Command, PlayerId, ResourceKind, UnitKind};
 
 /// A stable handle to an entity (generation guards against slot reuse).
@@ -29,8 +29,8 @@ pub struct EntityId {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Kind {
     Infantry,
-    /// Builder/harvester: moves and avoids stacking like infantry, but never
-    /// fights (no auto-aggro, no attack orders).
+    /// Builder/harvester: moves and avoids stacking like infantry. Carries a
+    /// feeble tool attack used only on explicit orders (no auto-aggro).
     Worker,
     /// Heavy assault unit: slow, high HP, hits hard.
     Heavy,
@@ -116,7 +116,10 @@ enum Order {
 struct Stats {
     max_hp: Fx,
     speed: Fx,
-    range2: Fx,
+    /// Attack reach measured to the target's *edge* (its obstacle radius is
+    /// added per target), so big buildings can be hit from outside their
+    /// footprint.
+    range: Fx,
     damage: Fx,
     attack_cd: Fx,
     aggro2: Fx,
@@ -127,25 +130,26 @@ fn stats(kind: Kind) -> Stats {
         Kind::Infantry => Stats {
             max_hp: Fx::from_int(50),
             speed: Fx::from_ratio(30, 100),
-            range2: Fx::from_int(25), // range 5
+            range: Fx::from_int(5),
             damage: Fx::from_int(5),
             attack_cd: Fx::from_int(12),
             aggro2: Fx::from_int(256), // aggro 16
         },
-        // Workers move like infantry but carry no weapon.
+        // Workers move like infantry; a feeble close-range tool attack, used
+        // only when explicitly ordered (no auto-aggro - see `is_fighter`).
         Kind::Worker => Stats {
             max_hp: Fx::from_int(40),
             speed: Fx::from_ratio(30, 100),
-            range2: Fx::ZERO,
-            damage: Fx::ZERO,
-            attack_cd: Fx::ZERO,
+            range: Fx::from_int(2),
+            damage: Fx::from_int(3),
+            attack_cd: Fx::from_int(16),
             aggro2: Fx::ZERO,
         },
         // Heavy: slow bruiser with lots of HP and a heavy hit.
         Kind::Heavy => Stats {
             max_hp: Fx::from_int(180),
             speed: Fx::from_ratio(18, 100),
-            range2: Fx::from_int(36), // range 6
+            range: Fx::from_int(6),
             damage: Fx::from_int(14),
             attack_cd: Fx::from_int(20),
             aggro2: Fx::from_int(289), // aggro 17
@@ -154,7 +158,7 @@ fn stats(kind: Kind) -> Stats {
         Kind::Hq => Stats {
             max_hp: Fx::from_int(900),
             speed: Fx::ZERO,
-            range2: Fx::ZERO,
+            range: Fx::ZERO,
             damage: Fx::ZERO,
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
@@ -162,7 +166,7 @@ fn stats(kind: Kind) -> Stats {
         Kind::Barracks => Stats {
             max_hp: Fx::from_int(500),
             speed: Fx::ZERO,
-            range2: Fx::ZERO,
+            range: Fx::ZERO,
             damage: Fx::ZERO,
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
@@ -171,7 +175,7 @@ fn stats(kind: Kind) -> Stats {
         Kind::Turret => Stats {
             max_hp: Fx::from_int(260),
             speed: Fx::ZERO,
-            range2: Fx::from_int(144), // range 12
+            range: Fx::from_int(12),
             damage: Fx::from_int(9),
             attack_cd: Fx::from_int(14),
             aggro2: Fx::from_int(144),
@@ -180,7 +184,7 @@ fn stats(kind: Kind) -> Stats {
         Kind::Supply => Stats {
             max_hp: Fx::from_int(300),
             speed: Fx::ZERO,
-            range2: Fx::ZERO,
+            range: Fx::ZERO,
             damage: Fx::ZERO,
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
@@ -189,7 +193,7 @@ fn stats(kind: Kind) -> Stats {
         Kind::OreNode | Kind::CarbonNode => Stats {
             max_hp: Fx::from_int(100000),
             speed: Fx::ZERO,
-            range2: Fx::ZERO,
+            range: Fx::ZERO,
             damage: Fx::ZERO,
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
@@ -214,14 +218,13 @@ pub const SUPPLY_PER_HQ: u32 = 10;
 pub const SUPPLY_PER_DEPOT: u32 = 8;
 pub const MAX_SUPPLY: u32 = 60;
 
-// Economy: ore + carbon. Players start with an ore stockpile, gain a trickle of
-// ore per completed building, and pay per trained unit / built structure. Nobody
-// auto-produces - every unit is queued by command. Advanced units and the turret
-// also cost carbon, so harvesting the gas geyser matters.
+// Economy: ore + carbon, both mined by workers - there is no passive income.
+// Players start with an ore stockpile and pay per trained unit / built
+// structure. Nobody auto-produces - every unit is queued by command. Advanced
+// units and the turret also cost carbon, so harvesting the gas geyser matters.
 const STARTING_ORE: i32 = 200;
 pub const TRAIN_COST: i32 = 50;
 pub const WORKER_COST: i32 = 40;
-const INCOME_PER_BUILDING: Fx = Fx::from_ratio(1, 2); // per building, per tick
 
 /// `(ore, carbon)` cost to train a unit of `kind`.
 fn unit_cost(kind: UnitKind) -> (Fx, Fx) {
@@ -304,6 +307,8 @@ pub struct Snap {
     /// Production buildings only: where freshly trained units gather
     /// (display-only; set by `Command::SetRally`).
     pub rally: Vec3,
+    /// Direction the entity faces (raw, un-normalized; renderer derives yaw).
+    pub facing: Vec2,
 }
 
 #[derive(Default)]
@@ -384,6 +389,13 @@ pub struct World {
     prod_kind: Vec<u8>,
     /// Per-player flag: this player is driven by the in-sim bot commander.
     bot: Vec<bool>,
+    /// Facing per entity: the raw (un-normalized) direction it last moved,
+    /// mined, or attacked toward. Part of the deterministic state (hashed);
+    /// the renderer normalizes it into a yaw.
+    facing: Vec<Vec2>,
+    /// Shots fired this tick, as `(attacker, target)` slot indices. Display
+    /// events for the client fx layer; cleared every step, never hashed.
+    shots: Vec<(u32, u32)>,
 }
 
 #[inline]
@@ -417,6 +429,8 @@ impl World {
             construct: Vec::new(),
             prod_kind: Vec::new(),
             bot: Vec::new(),
+            facing: Vec::new(),
+            shots: Vec::new(),
         }
     }
 
@@ -488,6 +502,8 @@ impl World {
             self.mining.push(false);
             self.construct.push(Fx::ZERO);
             self.prod_kind.push(0);
+            // Face "north" (toward -y) until the first move/attack.
+            self.facing.push(Vec2::new(Fx::ZERO, Fx::from_int(-1)));
         }
     }
 
@@ -512,6 +528,7 @@ impl World {
         // to ramp construction up over CONSTRUCT_TICKS.
         self.construct[i] = Fx::ZERO;
         self.prod_kind[i] = 0;
+        self.facing[i] = Vec2::new(Fx::ZERO, Fx::from_int(-1));
         if owner != NEUTRAL {
             let _ = self.ore_mut(owner); // materialize the owner's stockpile
         }
@@ -793,16 +810,47 @@ impl World {
     }
 
     pub fn step(&mut self, commands: &[Command]) {
+        self.shots.clear();
         self.apply_commands(commands);
         // Bot players issue their commands through the same path, deterministically.
         let ai = self.ai_commands();
         self.apply_commands(&ai);
         self.construction();
         self.acquire_targets();
-        self.economy();
         self.production();
         self.units_update();
         self.tick += 1;
+    }
+
+    /// Shots fired during the last step, as `(attacker, target)` slot indices.
+    /// Presentation events (muzzle flashes, tracers); not part of the hash.
+    pub fn shots(&self) -> &[(u32, u32)] {
+        &self.shots
+    }
+
+    /// Squared reach of an attack with `range` against target `t`: range is
+    /// measured to the target's *edge*, so a building's footprint (or a mobile
+    /// unit's body radius) extends it. This is what lets units hit buildings
+    /// whose center they can never reach, and short-range tools land on units
+    /// held apart by separation.
+    fn reach2(&self, range: Fx, t: usize) -> Fx {
+        let pad = obstacle_radius(self.kind[t]).unwrap_or(if is_mobile(self.kind[t]) {
+            UNIT_RADIUS
+        } else {
+            Fx::ZERO
+        });
+        let r = range + pad;
+        r * r
+    }
+
+    /// Turn entity `i` toward the point `(tx, ty)`. Stored raw (un-normalized);
+    /// zero-length turns are ignored so facing always stays meaningful.
+    fn face(&mut self, i: usize, tx: Fx, ty: Fx) {
+        let dx = tx - self.pos[i].x;
+        let dy = ty - self.pos[i].y;
+        if dx != Fx::ZERO || dy != Fx::ZERO {
+            self.facing[i] = Vec2::new(dx, dy);
+        }
     }
 
     /// Tick down construction on buildings being raised.
@@ -810,16 +858,6 @@ impl World {
         for i in 0..self.arena.capacity() {
             if self.arena.alive[i] && self.construct[i] > Fx::ZERO {
                 self.construct[i] = (self.construct[i] - Fx::ONE).max(Fx::ZERO);
-            }
-        }
-    }
-
-    /// Trickle ore income to each player for every completed building they own.
-    fn economy(&mut self) {
-        for i in 0..self.arena.capacity() {
-            if self.arena.alive[i] && is_building(self.kind[i]) && self.construct[i] <= Fx::ZERO {
-                let owner = self.owner[i];
-                *self.ore_mut(owner) += INCOME_PER_BUILDING;
             }
         }
     }
@@ -989,6 +1027,7 @@ impl World {
 
     /// Step entity `i` toward `(tx, ty)` at `speed`, snapping on arrival.
     fn step_toward(&mut self, i: usize, tx: Fx, ty: Fx, speed: Fx) {
+        self.face(i, tx, ty);
         let me = self.pos[i];
         let dx = tx - me.x;
         let dy = ty - me.y;
@@ -1050,6 +1089,7 @@ impl World {
                     // Walk to the node, then mine it.
                     let np = self.pos[n];
                     if dist2(me, np.x, np.y) <= MINE_RANGE2 {
+                        self.face(i, np.x, np.y);
                         let space = CARRY_CAP - self.carried[i];
                         let take = MINE_RATE.min(self.amount[n]).min(space);
                         self.amount[n] -= take;
@@ -1126,7 +1166,7 @@ impl World {
                     let t = target as usize;
                     if self.arena.alive[t] && self.owner[t] != self.owner[i] {
                         let tp = self.pos[t];
-                        if dist2(me, tp.x, tp.y) <= inf.range2 {
+                        if dist2(me, tp.x, tp.y) <= self.reach2(inf.range, t) {
                             attack = Some(t);
                         } else {
                             move_to = Some((tp.x, tp.y));
@@ -1138,7 +1178,7 @@ impl World {
                 Order::AttackMove { x, y } => {
                     let near = self.nearest_enemy(i).filter(|&(_, d2)| d2 <= inf.aggro2);
                     if let Some((t, d2)) = near {
-                        if d2 <= inf.range2 {
+                        if d2 <= self.reach2(inf.range, t as usize) {
                             attack = Some(t as usize);
                         } else {
                             let tp = self.pos[t as usize];
@@ -1154,9 +1194,12 @@ impl World {
 
             // Attack if ready; otherwise advance toward the move-target.
             if let Some(t) = attack {
+                // Square up to the target even between shots.
+                self.face(i, self.pos[t].x, self.pos[t].y);
                 if self.cooldown[i] <= Fx::ZERO {
                     damage[t] += inf.damage;
                     self.cooldown[i] = inf.attack_cd;
+                    self.shots.push((i as u32, t as u32));
                 }
             } else if let Some((tx, ty)) = move_to {
                 let dx = tx - me.x;
@@ -1166,6 +1209,7 @@ impl World {
                     let s = inf.speed / d;
                     self.pos[i].x = me.x + dx * s;
                     self.pos[i].y = me.y + dy * s;
+                    self.face(i, tx, ty);
                 } else {
                     self.pos[i].x = tx;
                     self.pos[i].y = ty;
@@ -1185,9 +1229,12 @@ impl World {
             let st = stats(Kind::Turret);
             if self.cooldown[i] <= Fx::ZERO {
                 if let Some((t, d2)) = self.nearest_enemy(i) {
-                    if d2 <= st.range2 {
-                        damage[t as usize] += st.damage;
+                    if d2 <= self.reach2(st.range, t as usize) {
+                        let t = t as usize;
+                        self.face(i, self.pos[t].x, self.pos[t].y);
+                        damage[t] += st.damage;
                         self.cooldown[i] = st.attack_cd;
+                        self.shots.push((i as u32, t as u32));
                     }
                 }
             }
@@ -1374,6 +1421,7 @@ impl World {
                 build_frac,
                 construct_frac,
                 rally: self.rally[i],
+                facing: self.facing[i],
             });
         }
         out
@@ -1413,6 +1461,8 @@ impl World {
             h.write_u64(self.carry_kind[i] as u64);
             h.write_i64(self.construct[i].to_raw());
             h.write_u64(self.prod_kind[i] as u64);
+            h.write_i64(self.facing[i].x.to_raw());
+            h.write_i64(self.facing[i].y.to_raw());
             let (tag, a, b) = match self.order[i] {
                 Order::Idle => (0u64, 0i64, 0i64),
                 Order::Move { x, y } => (1, x.to_raw(), y.to_raw()),
@@ -1517,12 +1567,15 @@ mod tests {
 
     #[test]
     fn bot_mines_and_constructs() {
+        // The classic opening: an HQ and a worker by an ore line, nothing
+        // else. With no passive income, everything the bot builds must be
+        // funded by mining.
         let mut w = World::new(11);
         w.set_bot(1, true);
         w.step(&[
             Command::SpawnBuilding {
                 owner: 1,
-                kind: BuildingKind::Barracks,
+                kind: BuildingKind::Hq,
                 x: fx(0),
                 y: fx(0),
             },
@@ -1538,21 +1591,83 @@ mod tests {
                 y: fx(0),
             },
         ]);
-        let start_buildings = barracks_count(&w, 1);
-        for _ in 0..3000 {
+        for _ in 0..9000 {
             w.step(&[]);
         }
-        // The ore node was mined down (worker harvested it)...
+        // The ore node was mined down (workers harvested it)...
         let node = w.snapshot().into_iter().find(|s| s.kind == Kind::OreNode);
         assert!(
             node.map(|n| n.resource_frac < Fx::ONE).unwrap_or(true),
             "bot should have mined the ore node"
         );
-        // ...and the surplus was spent constructing at least one more building.
+        // ...the mining crew was staffed from the HQ...
+        assert!(w.supply_used(1) > 1, "bot should have trained more workers");
+        // ...and the surplus built a production structure from nothing.
         assert!(
-            barracks_count(&w, 1) > start_buildings,
-            "bot should have constructed another building"
+            barracks_count(&w, 1) >= 1,
+            "bot should have constructed a barracks"
         );
+    }
+
+    #[test]
+    fn fighters_break_buildings() {
+        // Attack range is measured to the target's edge, so a unit can kill a
+        // building whose center it can never reach (the footprint pushes it
+        // out). This was the "units can't damage buildings" bug.
+        let mut w = World::new(21);
+        w.step(&[
+            Command::SpawnBuilding {
+                owner: 1,
+                kind: BuildingKind::Barracks,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(20),
+                y: fx(0),
+            },
+        ]);
+        w.step(&[Command::Attack { unit: 1, target: 0 }]);
+        // 500 hp at 5 damage per 12 ticks = 1200 ticks; leave headroom.
+        for _ in 0..2000 {
+            w.step(&[]);
+        }
+        assert!(
+            !w.snapshot().iter().any(|s| s.kind == Kind::Barracks),
+            "infantry should have destroyed the barracks"
+        );
+    }
+
+    #[test]
+    fn workers_attack_only_on_command() {
+        let mut w = World::new(23);
+        w.step(&[
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Worker,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnUnit {
+                owner: 1,
+                kind: UnitKind::Worker,
+                x: fx(8),
+                y: fx(0),
+            },
+        ]);
+        // No auto-aggro: idle workers near each other never fight.
+        for _ in 0..200 {
+            w.step(&[]);
+        }
+        assert_eq!(w.alive_count(), 2);
+        // Ordered to attack, the tool arm does real damage.
+        w.step(&[Command::Attack { unit: 0, target: 1 }]);
+        for _ in 0..600 {
+            w.step(&[]);
+        }
+        assert_eq!(w.alive_count(), 1, "the ordered worker should win");
     }
 
     #[test]

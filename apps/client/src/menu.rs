@@ -539,13 +539,6 @@ mod web {
                 ctx.set_fill_style_str("#e7eefa");
                 ctx.set_font(&font(true, 64.0));
                 let _ = ctx.fill_text("ASTROMANCERS", w / 2.0, h * 0.30);
-                ctx.set_fill_style_str("#7f9ec8");
-                ctx.set_font(&font(false, 18.0));
-                let _ = ctx.fill_text(
-                    "a deterministic lockstep RTS  -  two worlds, one wall",
-                    w / 2.0,
-                    h * 0.30 + 34.0 * s,
-                );
             }
             Screen::Lobby => {
                 ctx.set_text_align("left");

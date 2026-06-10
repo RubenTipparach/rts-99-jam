@@ -2,7 +2,8 @@
 //! commands, computes fog-of-war, and produces render + HUD data. Floats here.
 
 use crate::camera::Camera;
-use crate::gfx::{InstanceRaw, RingRaw, FOW_RES};
+use crate::fx::Fx as FxSystem;
+use crate::gfx::{FxLight, InstanceRaw, RingRaw, FOW_RES, ROT_NONE};
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
 use protocol::{BuildingKind, Command, UnitKind};
@@ -30,6 +31,25 @@ fn team_color(owner: u16) -> [f32; 4] {
     } else {
         [0.95, 0.30, 0.24, 1.0]
     }
+}
+
+/// Instance yaw `(cos, sin)` that points a mesh's authored forward (-z) along
+/// the entity's sim facing. Falls back to no rotation for a degenerate facing.
+fn rot_of(s: &Snap) -> [f32; 2] {
+    let (dx, dz) = (f(s.facing.x), f(s.facing.y));
+    let len = dx.hypot(dz);
+    if len < 1e-4 {
+        ROT_NONE
+    } else {
+        [-dz / len, -dx / len]
+    }
+}
+
+/// Squared ground distance between two snapshots (floats; presentation only).
+fn dist_f(a: &Snap, b: &Snap) -> f32 {
+    let dx = f(a.pos.x) - f(b.pos.x);
+    let dz = f(a.pos.y) - f(b.pos.y);
+    dx * dx + dz * dz
 }
 
 /// Which faction a player fields. Drives which placeholder building/unit meshes
@@ -133,6 +153,8 @@ pub struct Game {
     effects: Vec<Effect>,
     /// The building pads changed this tick; the ground mesh must rebuild.
     terrain_dirty: bool,
+    /// Particle/light effects (muzzle flashes, blood, mining sparks, ...).
+    fx: FxSystem,
 }
 
 impl Default for Game {
@@ -167,6 +189,7 @@ impl Game {
             factions: [Faction::Hollowmen, Faction::Astromancer],
             effects: Vec::new(),
             terrain_dirty: false,
+            fx: FxSystem::default(),
         };
         // The enemy is driven by the in-sim bot commander (mines, builds, trains).
         g.world.set_bot(1, true);
@@ -191,6 +214,103 @@ impl Game {
             .collect();
         self.selected.retain(|i| live.contains(i));
         self.sync_pads();
+        self.emit_fx();
+    }
+
+    /// Turn this tick's sim events into particles and lights: shots become
+    /// muzzle flashes + tracers, HP drops bleed or spark, deaths explode, and
+    /// mining workers chip glowing flecks off the node. Effects in unseen fog
+    /// are skipped.
+    fn emit_fx(&mut self) {
+        let at = |s: &Snap| {
+            let (wx, wz) = (f(s.pos.x), f(s.pos.y));
+            [wx, terrain::height(wx, wz), wz]
+        };
+        let find = |list: &[Snap], i: u32| list.iter().find(|s| s.index == i).copied();
+        // Shots: need both ends; the target may have just died, so fall back
+        // to its last known (prev) position.
+        let shots: Vec<([f32; 3], [f32; 3], bool)> = self
+            .world
+            .shots()
+            .iter()
+            .filter_map(|&(a, t)| {
+                let from = find(&self.curr, a).or_else(|| find(&self.prev, a))?;
+                let to = find(&self.curr, t).or_else(|| find(&self.prev, t))?;
+                let seen = from.owner == 0
+                    || to.owner == 0
+                    || self.cell_visible(f(from.pos.x), f(from.pos.y));
+                Some((at(&from), at(&to), seen))
+            })
+            .collect();
+        for (from, to, seen) in shots {
+            if seen {
+                self.fx.shot(from, to);
+            }
+        }
+        // HP drops and deaths, diffed against the previous snapshot.
+        let events: Vec<([f32; 3], bool, bool, bool)> = self
+            .prev
+            .iter()
+            .filter(|p| !matches!(p.kind, Kind::OreNode | Kind::CarbonNode))
+            .filter_map(|p| {
+                let organic = matches!(p.kind, Kind::Infantry | Kind::Worker);
+                let big = matches!(
+                    p.kind,
+                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                );
+                let seen = p.owner == 0 || self.cell_visible(f(p.pos.x), f(p.pos.y));
+                if !seen {
+                    return None;
+                }
+                match find(&self.curr, p.index) {
+                    Some(c) if c.generation == p.generation => {
+                        (c.hp < p.hp).then(|| (at(p), organic, big, false))
+                    }
+                    _ => Some((at(p), organic, big, true)),
+                }
+            })
+            .collect();
+        for (pos, organic, big, died) in events {
+            if died {
+                self.fx.explosion(pos, big);
+            } else {
+                self.fx.hit(pos, organic);
+            }
+        }
+        // Mining workers spark against their node.
+        let mines: Vec<([f32; 3], bool)> = self
+            .curr
+            .iter()
+            .filter(|s| s.mining)
+            .filter(|s| s.owner == 0 || self.cell_visible(f(s.pos.x), f(s.pos.y)))
+            .map(|s| {
+                let carbon = self
+                    .curr
+                    .iter()
+                    .filter(|n| matches!(n.kind, Kind::OreNode | Kind::CarbonNode))
+                    .min_by(|a, b| {
+                        let da = dist_f(s, a);
+                        let db = dist_f(s, b);
+                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|n| n.kind == Kind::CarbonNode)
+                    .unwrap_or(false);
+                (at(s), carbon)
+            })
+            .collect();
+        for (pos, carbon) in mines {
+            self.fx.mining(pos, carbon);
+        }
+    }
+
+    /// Emissive particle instances for the renderer.
+    pub fn fx_instances(&self) -> Vec<InstanceRaw> {
+        self.fx.instances()
+    }
+
+    /// Active fx point lights for the renderer.
+    pub fn fx_lights(&self) -> Vec<FxLight> {
+        self.fx.lights()
     }
 
     /// Level a terrain pad under every building so structures sit on flat
@@ -237,6 +357,7 @@ impl Game {
         }
         let now = self.time;
         self.effects.retain(|e| now - e.born < PING_LIFE);
+        self.fx.update(dt);
     }
 
     /// Keep wall-clock bookkeeping current without stepping the sim, used while
@@ -302,12 +423,6 @@ impl Game {
     pub fn toggle_fog_explored(&mut self) {
         self.fog_explored = !self.fog_explored;
     }
-    /// (unexplored fog on, explored fog on) - for the debug readout.
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub fn fog_flags(&self) -> (bool, bool) {
-        (self.fog_unexplored, self.fog_explored)
-    }
-
     pub fn recompute_fow(&mut self) {
         for v in self.visible.iter_mut() {
             *v = false;
@@ -408,8 +523,24 @@ impl Game {
         self.visible[(zc * res + xc) as usize]
     }
 
-    /// Entity is shown if it's ours, or an enemy currently in vision.
+    fn cell_explored(&self, wx: f32, wz: f32) -> bool {
+        let res = FOW_RES as i32;
+        let half = terrain::HALF;
+        let xc = ((wx + half) / (2.0 * half) * res as f32) as i32;
+        let zc = ((wz + half) / (2.0 * half) * res as f32) as i32;
+        if xc < 0 || zc < 0 || xc >= res || zc >= res {
+            return false;
+        }
+        self.explored[(zc * res + xc) as usize]
+    }
+
+    /// Entity is shown if it's ours, or an enemy currently in vision. Resource
+    /// nodes are terrain: once explored they stay on screen (StarCraft rule -
+    /// once you know it's there, it isn't going anywhere).
     fn revealed(&self, s: &Snap, wx: f32, wz: f32) -> bool {
+        if matches!(s.kind, Kind::OreNode | Kind::CarbonNode) {
+            return self.cell_explored(wx, wz);
+        }
         s.owner == 0 || self.cell_visible(wx, wz)
     }
 
@@ -470,6 +601,7 @@ impl Game {
                     offset: [wx, ground, wz],
                     scale: [scl, scl, scl],
                     color: [1.0, 1.0, 1.0, 0.0],
+                    rot: ROT_NONE,
                 };
                 if s.kind == Kind::OreNode {
                     ore_nodes.push(inst);
@@ -494,6 +626,12 @@ impl Game {
                     offset: [wx, ground, wz],
                     scale: [1.0, cf, 1.0],
                     color,
+                    // Turrets swivel toward their target; other buildings sit.
+                    rot: if s.kind == Kind::Turret {
+                        rot_of(s)
+                    } else {
+                        ROT_NONE
+                    },
                 };
                 let radius = match s.kind {
                     Kind::Turret => 4.0,
@@ -548,6 +686,7 @@ impl Game {
                             offset: [wx, y, wz],
                             scale: [1.0, 1.0, 1.0],
                             color: tint,
+                            rot: rot_of(s),
                         }
                     }
                     Faction::Hollowmen => {
@@ -560,6 +699,7 @@ impl Game {
                             offset: [wx, y, wz],
                             scale: [1.0, 1.0, 1.0],
                             color: tint,
+                            rot: rot_of(s),
                         }
                     }
                 };
@@ -590,6 +730,7 @@ impl Game {
                     offset: [wx, y, wz],
                     scale: [scl, scl, scl],
                     color: tint,
+                    rot: rot_of(s),
                 };
                 if heavy {
                     heavies.push(inst);
@@ -620,6 +761,7 @@ impl Game {
                 offset: [gx, ground, gz],
                 scale: [1.0, 1.0, 1.0],
                 color: holo,
+                rot: ROT_NONE,
             };
             let radius = match kind {
                 BuildingKind::Hq => 9.0,
@@ -772,31 +914,6 @@ impl Game {
             })
             .map(|s| self.info(s))
             .collect()
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub fn counts(&self) -> (u32, u32, u32, u32) {
-        let mut c = (0u32, 0u32, 0u32, 0u32);
-        for s in &self.curr {
-            let (wx, wz) = self.lerped(s);
-            if !self.revealed(s, wx, wz) {
-                continue;
-            }
-            match (s.owner, s.kind) {
-                (0, Kind::Infantry | Kind::Heavy) => c.0 += 1,
-                (_, Kind::Infantry | Kind::Heavy) => c.1 += 1,
-                (0, Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply) => c.2 += 1,
-                (_, Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply) => c.3 += 1,
-                // Workers and resource nodes are not part of this army tally.
-                (_, Kind::Worker) | (_, Kind::OreNode) | (_, Kind::CarbonNode) => {}
-            }
-        }
-        c
-    }
-
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub fn selected_count(&self) -> usize {
-        self.selected.len()
     }
 
     // ---- input → selection / orders ----

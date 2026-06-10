@@ -12,7 +12,12 @@ pub struct InstanceRaw {
     pub offset: [f32; 3],
     pub scale: [f32; 3],
     pub color: [f32; 4],
+    /// Yaw about +Y as `(cos, sin)`; `ROT_NONE` leaves the mesh unrotated.
+    pub rot: [f32; 2],
 }
+
+/// Identity rotation for [`InstanceRaw::rot`].
+pub const ROT_NONE: [f32; 2] = [1.0, 0.0];
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -54,8 +59,24 @@ struct CameraUniform {
     view_proj: [[f32; 4]; 4],
     eye: [f32; 4],
     light_dir: [f32; 4],
-    params: [f32; 4], // time, map_half, sea_level, _
+    params: [f32; 4], // time, map_half, sea_level, point-light count
+    /// Point lights for fx (muzzle flashes, mining sparks, explosions):
+    /// xyz = world position, w = radius.
+    light_pos: [[f32; 4]; MAX_LIGHTS],
+    /// Point light colors (rgb; w unused).
+    light_col: [[f32; 4]; MAX_LIGHTS],
 }
+
+/// A dynamic fx point light, consumed by [`Gfx::render`].
+#[derive(Clone, Copy)]
+pub struct FxLight {
+    pub pos: [f32; 3],
+    pub radius: f32,
+    pub color: [f32; 3],
+}
+
+/// Point-light slots in the camera uniform (the fx layer prioritizes).
+pub const MAX_LIGHTS: usize = 16;
 
 /// One voxel-terrain vertex: position, normal, and soft texture blend weights
 /// (four tile slots + a hazard channel) the shader triplanar-blends from.
@@ -850,6 +871,20 @@ fn supply_mesh() -> Vec<UnitVertex> {
     m
 }
 
+/// Fx particle: a unit cube around the origin. Drawn emissive (instance tint
+/// alpha >= 3.0), scaled per particle; the chunky cube reads PS1-appropriate.
+fn particle_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    push_box(
+        &mut m,
+        [-0.5, -0.5, -0.5],
+        [0.5, 0.5, 0.5],
+        [1.0, 1.0, 1.0],
+        0.0,
+    );
+    m
+}
+
 /// Heavy assault unit (placeholder War-Mech / Golem): a stocky two-legged walker,
 /// team-tinted core, with shoulder guns. ~3.4 tall, facing -z.
 fn heavy_mesh() -> Vec<UnitVertex> {
@@ -1088,6 +1123,8 @@ pub struct Gfx {
     turret_len: u32,
     supply_buf: wgpu::Buffer,
     supply_len: u32,
+    particle_buf: wgpu::Buffer,
+    particle_len: u32,
     heavy_buf: wgpu::Buffer,
     heavy_len: u32,
     walls_buf: wgpu::Buffer,
@@ -1443,7 +1480,7 @@ impl Gfx {
         let inst = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<InstanceRaw>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4],
+            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4, 6 => Float32x2],
         };
         let ring_v = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<RingVertex>() as u64,
@@ -1621,6 +1658,12 @@ impl Gfx {
             bytemuck::cast_slice(&supply),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let particle = particle_mesh();
+        let particle_buf = mkbuf(
+            "particle",
+            bytemuck::cast_slice(&particle),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let heavy = heavy_mesh();
         let heavy_buf = mkbuf(
             "heavy",
@@ -1639,6 +1682,7 @@ impl Gfx {
                 offset: [0.0, 0.0, 0.0],
                 scale: [1.0, 1.0, 1.0],
                 color: [0.0, 0.0, 0.0, 1.0],
+                rot: ROT_NONE,
             }),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
@@ -1696,6 +1740,8 @@ impl Gfx {
             turret_len: turret.len() as u32,
             supply_buf,
             supply_len: supply.len() as u32,
+            particle_buf,
+            particle_len: particle.len() as u32,
             heavy_buf,
             heavy_len: heavy.len() as u32,
             walls_buf,
@@ -1877,6 +1923,8 @@ impl Gfx {
         heavies: &[InstanceRaw],
         turrets: &[InstanceRaw],
         supplies: &[InstanceRaw],
+        particles: &[InstanceRaw],
+        fx_lights: &[FxLight],
         rings: &[RingRaw],
         fow: &[u8],
         view_proj: [[f32; 4]; 4],
@@ -1900,17 +1948,25 @@ impl Gfx {
             heavies.len(),
             turrets.len(),
             supplies.len(),
+            particles.len(),
         ];
         // Clamp each group's count so the running total never exceeds the buffer.
-        let mut counts = [0usize; 12];
+        let mut counts = [0usize; 13];
         let mut used = 0usize;
         for (c, &g) in counts.iter_mut().zip(groups.iter()) {
             *c = g.min(MAX_INSTANCES - used);
             used += *c;
         }
-        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr, nsp] = counts;
+        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr, nsp, npt] = counts;
         let ring_verts = ring_decals(rings);
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
+        let mut light_pos = [[0.0f32; 4]; MAX_LIGHTS];
+        let mut light_col = [[0.0f32; 4]; MAX_LIGHTS];
+        let nlights = fx_lights.len().min(MAX_LIGHTS);
+        for (k, l) in fx_lights.iter().take(nlights).enumerate() {
+            light_pos[k] = [l.pos[0], l.pos[1], l.pos[2], l.radius];
+            light_col[k] = [l.color[0], l.color[1], l.color[2], 0.0];
+        }
         self.queue.write_buffer(
             &self.camera_buf,
             0,
@@ -1918,7 +1974,9 @@ impl Gfx {
                 view_proj,
                 eye: [eye[0], eye[1], eye[2], 1.0],
                 light_dir: [0.5, 1.0, 0.35, 0.0],
-                params: [time, terrain::HALF, terrain::SEA_LEVEL, 0.0],
+                params: [time, terrain::HALF, terrain::SEA_LEVEL, nlights as f32],
+                light_pos,
+                light_col,
             }),
         );
         if fow.len() == FOW_RES * FOW_RES {
@@ -1956,6 +2014,7 @@ impl Gfx {
             &heavies[..nhv],
             &turrets[..ntr],
             &supplies[..nsp],
+            &particles[..npt],
         ];
         let mut off = 0u64;
         for s in slices {
@@ -2057,6 +2116,7 @@ impl Gfx {
                     (&self.heavy_buf, self.heavy_len, nhv),
                     (&self.turret_buf, self.turret_len, ntr),
                     (&self.supply_buf, self.supply_len, nsp),
+                    (&self.particle_buf, self.particle_len, npt),
                 ];
                 let mut base = 0u32;
                 for (buf, vlen, count) in meshes {
@@ -2137,6 +2197,7 @@ mod tests {
         check_mesh(&carbon_node_mesh(), "carbon-node");
         check_mesh(&turret_mesh(), "turret");
         check_mesh(&supply_mesh(), "supply");
+        check_mesh(&particle_mesh(), "particle");
         check_mesh(&heavy_mesh(), "heavy");
     }
 

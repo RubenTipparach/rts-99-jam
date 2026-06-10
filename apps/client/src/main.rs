@@ -2,6 +2,7 @@
 //! to move/attack, wheel to zoom, WASD/arrows to pan.
 
 mod camera;
+mod fx;
 mod game;
 mod gfx;
 mod hud;
@@ -291,6 +292,10 @@ struct App {
     /// mode); right-click / Esc cancels.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     build_mode: Option<protocol::BuildingKind>,
+    /// A command-card button was just clicked: `(index, when)` drives a brief
+    /// pressed flash on the HUD button.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    card_flash: Option<(usize, Instant)>,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     proxy: EventLoopProxy<UserEvent>,
 }
@@ -317,6 +322,7 @@ impl App {
             last_css: (0, 0),
             first_frame_done: false,
             build_mode: None,
+            card_flash: None,
             proxy,
         }
     }
@@ -344,6 +350,8 @@ impl App {
             });
             let (inf, ba, bh, hqa, hqh, ac, en, ore, carbon, heavies, turrets, supplies, rings) =
                 self.game.render_data(ghost);
+            let particles = self.game.fx_instances();
+            let fx_lights = self.game.fx_lights();
             let fow = self.game.fow_bytes();
             let vp = self.camera.view_proj(aspect);
             gfx.render(
@@ -359,6 +367,8 @@ impl App {
                 &heavies,
                 &turrets,
                 &supplies,
+                &particles,
+                &fx_lights,
                 &rings,
                 &fow,
                 vp,
@@ -447,6 +457,7 @@ impl App {
                     hud::CardAction::Train(kind) => self.game.train_selected(kind),
                     hud::CardAction::Build(kind) => self.build_mode = Some(kind),
                 }
+                self.card_flash = Some((k, Instant::now()));
                 return true;
             }
         }
@@ -955,6 +966,7 @@ impl ApplicationHandler<UserEvent> for App {
                         self.input.cursor,
                         false,
                         None,
+                        None,
                     );
                     return;
                 }
@@ -1037,6 +1049,8 @@ impl ApplicationHandler<UserEvent> for App {
                     self.input.cursor,
                     self.cursor_locked,
                     self.build_mode,
+                    self.card_flash
+                        .and_then(|(k, t)| (t.elapsed().as_secs_f32() < 0.15).then_some(k)),
                 );
 
                 // Remove the loading overlay once the first frame is on screen.

@@ -165,7 +165,7 @@ fn draw_cursor_arrow(ctx: &web_sys::CanvasRenderingContext2d, x: f64, y: f64) {
 
 /// The pause overlay: a dimmed screen, a centred panel, and a Resume button.
 #[cfg(target_arch = "wasm32")]
-fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32) {
+fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32, cursor: (f64, f64)) {
     let (wf, hf) = (w as f64, h as f64);
     ctx.save();
     // Dim the whole scene.
@@ -186,13 +186,22 @@ fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32) {
     ctx.set_fill_style_str("#e7eefa");
     ctx.set_font("bold 30px monospace");
     let _ = ctx.fill_text("PAUSED", wf / 2.0, py + 60.0);
-    // Resume + Fullscreen buttons.
+    // Resume + Fullscreen buttons (hover-reactive).
     let button = |rect: (f64, f64, f64, f64), label: &str| {
         let (bx, by, bw, bh) = rect;
-        ctx.set_fill_style_str("rgba(40,80,140,0.95)");
+        let hover = cursor.0 >= bx && cursor.0 <= bx + bw && cursor.1 >= by && cursor.1 <= by + bh;
+        ctx.set_fill_style_str(if hover {
+            "rgba(58,110,185,0.97)"
+        } else {
+            "rgba(40,80,140,0.95)"
+        });
         ctx.fill_rect(bx, by, bw, bh);
-        ctx.set_stroke_style_str("rgba(150,190,240,0.95)");
-        ctx.set_line_width(1.5);
+        ctx.set_stroke_style_str(if hover {
+            "rgba(210,235,255,1.0)"
+        } else {
+            "rgba(150,190,240,0.95)"
+        });
+        ctx.set_line_width(if hover { 2.5 } else { 1.5 });
         ctx.stroke_rect(bx, by, bw, bh);
         ctx.set_fill_style_str("#eaf2ff");
         ctx.set_font("bold 18px monospace");
@@ -353,6 +362,7 @@ pub fn draw(
     _cursor: (f32, f32),
     _draw_cursor: bool,
     _build_mode: Option<BuildingKind>,
+    _card_pressed: Option<usize>,
 ) {
 }
 
@@ -368,6 +378,7 @@ pub fn draw(
     cursor: (f32, f32),
     draw_cursor: bool,
     build_mode: Option<BuildingKind>,
+    card_pressed: Option<usize>,
 ) {
     use crate::terrain;
     use wasm_bindgen::JsCast;
@@ -448,22 +459,15 @@ pub fn draw(
     ctx.set_line_width(2.0);
     ctx.stroke_rect(1.0, hf - bar + 1.0, wf - 2.0, bar - 2.0);
 
-    let (pu, eu, pb, eb) = game.counts();
-    let faction_name = match game.faction_of(0) {
-        crate::game::Faction::Astromancer => "ASTROMANCERS",
-        crate::game::Faction::Hollowmen => "HOLLOWMEN",
-    };
-    ctx.set_fill_style_str("#e7eefa");
-    ctx.set_font("bold 16px monospace");
-    let _ = ctx.fill_text(faction_name, 14.0, 24.0);
-
     // Resource readout with proper icons: an ore crystal, a carbon geyser
     // puff, and a supply depot. Icons are tiny canvas paths so they ship with
-    // the WASM HUD (no image assets).
+    // the WASM HUD (no image assets). Per the HUD policy in CLAUDE.md this is
+    // the only top-bar content: no faction labels, counters, or help text.
+    ctx.set_font("bold 16px monospace");
     let icon_y = 17.0_f64;
 
     // Ore: a faceted crystal (diamond + bright top facet).
-    let ox = 162.0_f64;
+    let ox = 16.0_f64;
     ctx.begin_path();
     ctx.move_to(ox + 6.0, icon_y - 8.0);
     ctx.line_to(ox + 12.0, icon_y);
@@ -483,7 +487,7 @@ pub fn draw(
     let _ = ctx.fill_text(&format!("{}", game.player_ore() as i64), ox + 18.0, 24.0);
 
     // Carbon: a geyser puff (stacked green clouds over a dark vent).
-    let cx2 = 252.0_f64;
+    let cx2 = 106.0_f64;
     ctx.set_fill_style_str("#3a4540");
     ctx.fill_rect(cx2 + 3.0, icon_y + 3.0, 6.0, 5.0);
     ctx.set_fill_style_str("#5ad97c");
@@ -503,7 +507,7 @@ pub fn draw(
 
     // Supply: a depot glyph (box + roof); the count turns red when capped.
     let (sup_used, sup_cap) = game.player_supply();
-    let sx = 342.0_f64;
+    let sx = 196.0_f64;
     ctx.set_fill_style_str("#9fb6da");
     ctx.fill_rect(sx + 1.0, icon_y - 1.0, 10.0, 8.0);
     ctx.begin_path();
@@ -519,83 +523,63 @@ pub fn draw(
     });
     let _ = ctx.fill_text(&format!("{sup_used}/{sup_cap}"), sx + 18.0, 24.0);
 
-    ctx.set_fill_style_str("#e7eefa");
-    let _ = ctx.fill_text(
-        &format!(
-            "your force: {pu} inf / {pb} bldg      visible enemy: {eu} inf / {eb} bldg      selected: {}",
-            game.selected_count(),
-        ),
-        452.0,
-        24.0,
-    );
-    ctx.set_fill_style_str("#8aa3cc");
-    ctx.set_font("12px monospace");
-    let _ = ctx.fill_text(
-        "left: select (shift: add)    right: move / harvest / attack (ctrl: attack-move; building: rally)    WASD: pan    wheel: zoom    Esc: pause",
-        14.0,
-        hf - bar + 22.0,
-    );
-
-    // Debug readout (toggled with number keys).
-    let (fog_u, fog_e) = game.fog_flags();
-    let on = |b: bool| if b { "on" } else { "OFF" };
-    ctx.set_fill_style_str("#7fd0a0");
-    ctx.set_font("12px monospace");
-    let _ = ctx.fill_text(
-        &format!(
-            "DEBUG   [1] unexplored fog: {}    [2] explored fog: {}    (drag the minimap to look around)",
-            on(fog_u),
-            on(fog_e)
-        ),
-        14.0,
-        44.0,
-    );
-
     // Command card: clickable buttons for training units (HQ -> Worker,
     // Barracks -> Infantry/Heavy) and for worker construction. Hotkeys still
-    // work; the buttons mirror them. Header names the selected producer.
+    // work; the buttons mirror them.
     let actions = card_actions(game);
     if !actions.is_empty() {
-        if game.selected_hq().is_some() || game.selected_barracks().is_some() {
-            let name = if game.selected_hq().is_some() {
-                // The HQ carries its faction's name (see docs/factions.md).
-                match game.faction_of(0) {
-                    crate::game::Faction::Astromancer => "SPIRE (HQ)",
-                    crate::game::Faction::Hollowmen => "COMMAND HQ",
-                }
-            } else {
-                "BARRACKS"
-            };
-            let (bx, by, ..) = card_btn_css(0, h);
-            ctx.set_fill_style_str("#cfe0ff");
-            ctx.set_font("12px monospace");
-            let _ = ctx.fill_text(name, bx, by - 5.0);
-        }
         let prod = game.selected_production();
         let ore_have = game.player_ore() as i64;
         let carbon_have = game.player_carbon() as i64;
         let mut prod_shown = false;
+        let dc = dpr as f64;
         for (k, &(action, label, hotkey, ore, carbon)) in actions.iter().enumerate() {
             let (bx, by, bw, bh) = card_btn_css(k, h);
             let afford = ore_have >= ore && carbon_have >= carbon;
             // The button whose building is being placed right now glows green.
             let active = matches!((action, build_mode), (CardAction::Build(b), Some(m)) if b == m);
-            ctx.set_fill_style_str(if active {
-                "rgba(50,110,60,0.95)"
+            // Hover lifts the button; a just-clicked button flashes bright.
+            let (ccx, ccy) = (cursor.0 as f64 / dc, cursor.1 as f64 / dc);
+            let hover = ccx >= bx && ccx <= bx + bw && ccy >= by && ccy <= by + bh;
+            let pressed = card_pressed == Some(k);
+            ctx.set_fill_style_str(if pressed {
+                "rgba(180,220,255,0.95)"
+            } else if active {
+                if hover {
+                    "rgba(65,140,78,0.95)"
+                } else {
+                    "rgba(50,110,60,0.95)"
+                }
             } else if afford {
-                "rgba(40,80,140,0.95)"
+                if hover {
+                    "rgba(58,110,185,0.97)"
+                } else {
+                    "rgba(40,80,140,0.95)"
+                }
+            } else if hover {
+                "rgba(62,70,86,0.95)"
             } else {
                 "rgba(48,54,66,0.92)"
             });
             ctx.fill_rect(bx, by, bw, bh);
-            ctx.set_stroke_style_str(if active {
+            ctx.set_stroke_style_str(if pressed {
+                "rgba(255,255,255,1.0)"
+            } else if active {
                 "rgba(150,255,170,0.95)"
+            } else if hover {
+                "rgba(210,235,255,1.0)"
             } else {
                 "rgba(150,190,240,0.95)"
             });
-            ctx.set_line_width(1.5);
+            ctx.set_line_width(if hover || pressed { 2.5 } else { 1.5 });
             ctx.stroke_rect(bx, by, bw, bh);
-            ctx.set_fill_style_str(if afford { "#eaf2ff" } else { "#8a93a4" });
+            ctx.set_fill_style_str(if pressed {
+                "#0a1220"
+            } else if afford {
+                "#eaf2ff"
+            } else {
+                "#8a93a4"
+            });
             ctx.set_font("bold 13px monospace");
             let _ = ctx.fill_text(&format!("{label} [{hotkey}]"), bx + 8.0, by + 17.0);
             ctx.set_font("11px monospace");
@@ -618,32 +602,6 @@ pub fn draw(
                 }
             }
         }
-    }
-
-    // Build placement banner: the next click drops the building.
-    let build_label = build_mode.map(|k| match k {
-        BuildingKind::Hq => "HQ",
-        BuildingKind::Barracks => "BARRACKS",
-        BuildingKind::Turret => "TURRET",
-        BuildingKind::Supply => "SUPPLY DEPOT",
-    });
-    if let Some(label) = build_label {
-        ctx.set_text_align("center");
-        ctx.set_fill_style_str("rgba(40,80,140,0.92)");
-        let bw2 = 380.0;
-        let bx2 = (wf - bw2) / 2.0;
-        ctx.fill_rect(bx2, 12.0, bw2, 30.0);
-        ctx.set_stroke_style_str("rgba(150,190,240,0.95)");
-        ctx.set_line_width(1.5);
-        ctx.stroke_rect(bx2, 12.0, bw2, 30.0);
-        ctx.set_fill_style_str("#eaf2ff");
-        ctx.set_font("bold 14px monospace");
-        let _ = ctx.fill_text(
-            &format!("PLACE {label} - click to build, Esc to cancel"),
-            wf / 2.0,
-            32.0,
-        );
-        ctx.set_text_align("left");
     }
 
     // Minimap: a diamond radar in a framed panel, tucked into the bottom-right
@@ -747,6 +705,7 @@ pub fn draw(
 
     // Pause overlay sits on top of everything when the game is paused.
     if paused {
-        draw_pause(&ctx, w, h);
+        let dp = dpr as f64;
+        draw_pause(&ctx, w, h, (cursor.0 as f64 / dp, cursor.1 as f64 / dp));
     }
 }

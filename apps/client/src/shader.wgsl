@@ -5,9 +5,29 @@ struct Camera {
     view_proj: mat4x4<f32>,
     eye: vec4<f32>,
     light_dir: vec4<f32>,
-    params: vec4<f32>, // x = time, y = map half-size, z = sea level
+    params: vec4<f32>, // x = time, y = map half-size, z = sea level, w = light count
+    light_pos: array<vec4<f32>, 16>, // xyz = position, w = radius
+    light_col: array<vec4<f32>, 16>, // rgb
 };
 @group(0) @binding(0) var<uniform> cam: Camera;
+
+// Dynamic fx point lights (muzzle flashes, mining sparks, explosions):
+// quadratic falloff to the radius, diffuse against the surface normal.
+fn point_lights(world: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    var sum = vec3<f32>(0.0, 0.0, 0.0);
+    let count = u32(cam.params.w);
+    for (var i = 0u; i < count; i = i + 1u) {
+        let lp = cam.light_pos[i];
+        let to = lp.xyz - world;
+        let d = length(to);
+        if (d < lp.w) {
+            let att = 1.0 - d / lp.w;
+            let ndl = max(dot(n, to / max(d, 0.001)), 0.0);
+            sum = sum + cam.light_col[i].rgb * (att * att * ndl);
+        }
+    }
+    return sum;
+}
 
 // group 1: terrain tiles + fog-of-war (also bound to the water pipeline).
 @group(1) @binding(0) var t_grass: texture_2d<f32>;
@@ -90,7 +110,8 @@ fn fs_terrain(in: TerrainOut) -> @location(0) vec4<f32> {
     col = mix(col, rock, smoothstep(0.32, 0.55, slope));
 
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    col = col * (0.45 + 0.7 * ndl) * fow(in.world);
+    let lit = 0.45 + 0.7 * ndl;
+    col = col * (vec3<f32>(lit, lit, lit) + point_lights(in.world, n)) * fow(in.world);
     return vec4<f32>(col, 1.0);
 }
 
@@ -146,7 +167,8 @@ fn fs_voxel(in: VoxelOut) -> @location(0) vec4<f32> {
 
     let emis = vec3<f32>(1.0, 0.45, 0.12) * world.tint.a * haz;
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    let lit = (col * (0.4 + 0.7 * ndl) + emis) * fow(in.world);
+    let base = 0.4 + 0.7 * ndl;
+    let lit = (col * (vec3<f32>(base, base, base) + point_lights(in.world, n)) + emis) * fow(in.world);
     return vec4<f32>(lit, 1.0);
 }
 
@@ -224,12 +246,17 @@ fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
 }
 
 // ---------------- units / buildings ----------------
+// The instance tint's alpha selects a render mode:
+//   < 1.25  normal (lit, team-tinted via the mesh's team weight)
+//   1.25-2  selected building (brightened with a green lift)
+//   2-3     hologram (the build-placement ghost: unlit, rolling scanlines)
+//   >= 3    emissive (fx particles: pure tint color, no lighting)
 struct UnitOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
     @location(1) albedo: vec3<f32>,
-    @location(2) ghost: f32,
-    @location(3) world_y: f32,
+    @location(2) mode: f32,
+    @location(3) world: vec3<f32>,
 };
 @vertex
 fn vs_unit(
@@ -239,37 +266,48 @@ fn vs_unit(
     @location(2) offset: vec3<f32>,
     @location(3) scale: vec3<f32>,
     @location(4) tcol: vec4<f32>,
+    @location(6) rot: vec2<f32>,
 ) -> UnitOut {
     var o: UnitOut;
-    o.normal = normal;
-    // tcol.a >= 2.0 marks a hologram (the build-placement ghost): the whole
-    // mesh takes the tint color, materials ignored. 1.25 <= tcol.a < 2.0
-    // marks a selected building: the shell brightens with a green lift so
-    // the selection reads on the structure itself, not just its ground ring.
-    let ghost = select(0.0, 1.0, tcol.a >= 2.0);
+    // Yaw the mesh (and its normal) by the instance facing: rot = (cos, sin).
+    let sp = pos * scale;
+    let rp = vec3<f32>(sp.x * rot.x + sp.z * rot.y, sp.y, -sp.x * rot.y + sp.z * rot.x);
+    let rn = vec3<f32>(
+        normal.x * rot.x + normal.z * rot.y,
+        normal.y,
+        -normal.x * rot.y + normal.z * rot.x,
+    );
+    o.normal = rn;
+    let flat_tint = select(0.0, 1.0, tcol.a >= 2.0);
     let sel = select(0.0, 1.0, tcol.a >= 1.25 && tcol.a < 2.0);
     // mcol.a is the team-tint weight: blend the material toward the faction
     // color so banners/tabards/plumes read as team color, metal/skin stay neutral.
-    var albedo = mix(mix(mcol.rgb, tcol.rgb, mcol.a), tcol.rgb, ghost);
+    var albedo = mix(mix(mcol.rgb, tcol.rgb, mcol.a), tcol.rgb, flat_tint);
     albedo = mix(albedo, albedo * 1.25 + vec3<f32>(0.05, 0.18, 0.07), sel);
     o.albedo = albedo;
-    o.ghost = ghost;
-    let world = pos * scale + offset;
-    o.world_y = world.y;
+    o.mode = tcol.a;
+    let world = rp + offset;
+    o.world = world;
     o.clip = cam.view_proj * vec4<f32>(world, 1.0);
     return o;
 }
 @fragment
 fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
-    if in.ghost > 0.5 {
+    if in.mode >= 3.0 {
+        // Emissive fx particle: pure color, no lighting.
+        return vec4<f32>(in.albedo, 1.0);
+    }
+    if in.mode >= 2.0 {
         // Holographic build preview: unshaded, with scanlines slowly rolling
         // up the mesh (cam.params.x is time).
-        let scan = 0.7 + 0.3 * sin(in.world_y * 5.0 - cam.params.x * 6.0);
+        let scan = 0.7 + 0.3 * sin(in.world.y * 5.0 - cam.params.x * 6.0);
         return vec4<f32>(in.albedo * (1.1 * scan), 1.0);
     }
     let n = normalize(in.normal);
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    return vec4<f32>(in.albedo * (0.45 + 0.7 * ndl), 1.0);
+    let lit = 0.45 + 0.7 * ndl;
+    let col = in.albedo * (vec3<f32>(lit, lit, lit) + point_lights(in.world, n));
+    return vec4<f32>(col, 1.0);
 }
 
 // ---------------- selection rings (ground decals) ----------------
