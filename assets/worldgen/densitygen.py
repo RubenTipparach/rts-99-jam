@@ -24,12 +24,31 @@ import math
 from common import fbm, clamp, Rng
 import voxel as vox
 
-HALF = 600
-NXZ = 128
-NY = 48
+# World is 1024 x 1024 units (HALF = 512), and the XZ grid is 257 samples = 256
+# cells, so dx = dz = 1024 / 256 = exactly 4.0 units. That divides cleanly into
+# the sim's integer logical units and lines up 1:1 with the 256-cell fog grid
+# (apps/client gfx::FOW_RES). Keep these in step with terrain::HALF.
+HALF = 512
+NXZ = 257
+NY = 128
 YMIN, YMAX = -40.0, 150.0
 
+# World-space (resolution-independent) tuning, so the grid can be re-sampled at a
+# higher NXZ/NY without terrain getting "stricter": a flat-enough-to-build column
+# and the surface-skin thickness are physical sizes, not voxel counts.
+FLAT_TOL = 2.4   # max neighbour height delta (world units) still counted buildable
+SKIN_MIN, SKIN_VAR = 4.8, 6.5  # surface skin thickness range (world units)
+
 MAT_LOW, MAT_MID, MAT_HIGH, MAT_ACCENT, MAT_HAZARD = 0, 1, 2, 3, 4
+
+# Archetypes that are ice all the way down: a cut (crater wall, fissure, canyon,
+# cave) exposes clean/bright ice (MAT_ACCENT) under the dusty/grooved skin. Every
+# other body exposes bedrock (MAT_HIGH). This is the per-voxel subsurface, which
+# makes material a genuine 3D property instead of a per-column height lookup.
+ICE_ARCH = {
+    "dirty_ice", "grooved_ice", "bright_ice", "europa_ice", "triton_ice",
+    "pluto_tholin",
+}
 
 # Per-world buildable target (fraction of map that should be relatively flat).
 FLAT_TARGET = {
@@ -312,7 +331,7 @@ def build(world):
     target = FLAT_TARGET.get(key, 0.40)
     rough = 1.0 - target
     dy = (YMAX - YMIN) / (NY - 1)
-    tol = dy * 0.6
+    tol = FLAT_TOL
 
     # Mostly-flat worlds whose relief comes from discrete features, not terraced
     # mesas: airless rock/ice with no erosion (Moon, Ceres, Vesta, Callisto,
@@ -383,8 +402,19 @@ def build(world):
 
     wet = _liquid(grid, ht, world, dy)
 
+    # Subsurface material: what an exposed face / crater wall / cave reveals under
+    # the thin surface skin. This is what makes texture a genuine 3D property
+    # instead of a height lookup: ice bodies show clean ice underneath, everything
+    # else shows bedrock. (No format change: the .vxl already stores material per
+    # voxel and the renderer already textures from it.)
+    ice_under = world["archetype"] in ICE_ARCH
+    sub_m = MAT_ACCENT if ice_under else MAT_HIGH
+    sk = t["seed"]
+
     for k in range(NXZ):
+        v = k / (NXZ - 1)
         for i in range(NXZ):
+            u = i / (NXZ - 1)
             surf = ht[k][i]
             mx = 0.0
             for dk, di in ((1, 0), (-1, 0), (0, 1), (0, -1)):
@@ -394,22 +424,35 @@ def build(world):
             en = surf / span
             override = mat[k][i]
             if override is not None:
-                m = override
+                skin_m = override
             elif mx > step * 0.5:
-                m = MAT_HIGH
+                skin_m = MAT_HIGH
             elif en < 0.28:
-                m = MAT_LOW
+                skin_m = MAT_LOW
             elif en > 0.74:
-                m = MAT_ACCENT
+                skin_m = MAT_ACCENT
             else:
-                m = MAT_MID
+                skin_m = MAT_MID
+            # Height-independent mottle: break up flat plains with x/z-position
+            # noise so a plateau is not one uniform tile (skin only, never over a
+            # feature stamp).
+            if override is None and mx <= step * 0.5 and skin_m == MAT_MID:
+                mott = fbm(u * 4.5 + 11.0, v * 4.5 + 4.0, sk + 7, 3)
+                if mott > 0.66:
+                    skin_m = MAT_LOW
+                elif mott < 0.30:
+                    skin_m = sub_m
+            # Skin thickness wobbles in x/z so the skin->subsurface edge on a face
+            # is irregular, not a perfectly level band.
+            wob = fbm(u * 3.0 + 2.0, v * 3.0 + 9.0, sk + 13, 2)
+            skin = SKIN_MIN + SKIN_VAR * wob
             # buildable: flat, and dry land (not under ocean/lake/river)
             grid.buildable[k * NXZ + i] = 1 if (mx <= tol and (i, k) not in wet) else 0
             for j in range(NY):
                 y = YMIN + j * dy
                 d = 128.0 + (surf - y) * slope_per_unit
                 grid.density[grid.lin(i, j, k)] = int(clamp(d, 0, 255))
-                grid.material[grid.lin(i, j, k)] = m
+                grid.material[grid.lin(i, j, k)] = skin_m if (surf - y) <= skin else sub_m
 
     # 3D caves/arches into steep, dry, non-buildable ground.
     rng = Rng(t["seed"] * 977 + 3)

@@ -57,6 +57,28 @@ struct CameraUniform {
     params: [f32; 4], // time, map_half, sea_level, _
 }
 
+/// One voxel-terrain vertex: position, normal, and soft texture blend weights
+/// (four tile slots + a hazard channel) the shader triplanar-blends from.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct VoxelVertex {
+    pos: [f32; 3],
+    normal: [f32; 3],
+    weights: [f32; 4],
+    haz: f32,
+}
+
+/// Per-world appearance uniform (group 2): terrain tint + liquid body colour.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct WorldUniform {
+    tint: [f32; 4],   // rgb tint; a = lava emissive strength
+    liquid: [f32; 4], // rgb liquid colour; a = waviness
+}
+
+/// Earthlike ocean colour + chop, used when no voxel map is selected.
+const EARTH_WATER: [f32; 4] = [0.06, 0.22, 0.34, 1.0];
+
 pub const MAX_INSTANCES: usize = 8192;
 pub const MAX_RINGS: usize = 256;
 /// Segments per selection-ring decal, and the resulting vertex-buffer capacity.
@@ -834,40 +856,37 @@ pub struct Gfx {
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
-    /// Marching-cubes terrain for the active voxel map (buffer + vertex count),
-    /// or `None` to render the heightmap terrain in `terrain.rs` instead.
-    voxel_terrain: Option<(wgpu::Buffer, u32)>,
+    voxel_pipeline: wgpu::RenderPipeline,
+    /// Triplanar-textured marching-cubes terrain for the active voxel map
+    /// (vertex buffer + count + its tile bind group), or `None` for the heightmap.
+    voxel_terrain: Option<(wgpu::Buffer, u32, wgpu::BindGroup)>,
+    /// Per-column liquid surface mesh for the active voxel map (Titan/Earth).
+    voxel_water: Option<(wgpu::Buffer, u32)>,
     instance_buf: wgpu::Buffer,
     ring_buf: wgpu::Buffer,
     camera_buf: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
     terrain_bind: wgpu::BindGroup,
+    terrain_layout: wgpu::BindGroupLayout,
+    tile_sampler: wgpu::Sampler,
+    fow_sampler: wgpu::Sampler,
+    world_buf: wgpu::Buffer,
+    world_bind: wgpu::BindGroup,
     fow_tex: wgpu::Texture,
     pub width: u32,
     pub height: u32,
 }
 
-/// Mesh the active voxel battlefield (if any) into a vertex buffer for the unit
-/// pipeline. Returns `None` for the Earthlike heightmap default.
-fn build_voxel_terrain(device: &wgpu::Device, queue: &wgpu::Queue) -> Option<(wgpu::Buffer, u32)> {
-    let grid = crate::voxel::active()?;
-    let mesh = grid.build_mesh(crate::voxel::active_tint(), 1.0);
-    let verts: Vec<UnitVertex> = mesh
-        .iter()
-        .map(|v| UnitVertex {
-            pos: v.pos,
-            normal: v.normal,
-            color: [v.color[0], v.color[1], v.color[2], 0.0],
-        })
-        .collect();
-    let buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("voxel-terrain"),
-        size: (verts.len() * std::mem::size_of::<UnitVertex>()) as u64,
+/// Make a GPU vertex buffer from raw vertex bytes.
+fn vbuf(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, data: &[u8]) -> wgpu::Buffer {
+    let b = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: data.len() as u64,
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    queue.write_buffer(&buf, 0, bytemuck::cast_slice(&verts));
-    Some((buf, verts.len() as u32))
+    queue.write_buffer(&b, 0, data);
+    b
 }
 
 impl Gfx {
@@ -1081,6 +1100,43 @@ impl Gfx {
             ],
         });
 
+        // group 2: per-world appearance (voxel terrain tint + liquid colour).
+        let world_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("world-layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let world_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("world"),
+            size: std::mem::size_of::<WorldUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(
+            &world_buf,
+            0,
+            bytemuck::bytes_of(&WorldUniform {
+                tint: [1.0, 1.0, 1.0, 0.0],
+                liquid: EARTH_WATER,
+            }),
+        );
+        let world_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("world-bind"),
+            layout: &world_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: world_buf.as_entire_binding(),
+            }],
+        });
+
         let pl_tex = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pl-tex"),
             bind_group_layouts: &[Some(&camera_layout), Some(&terrain_layout)],
@@ -1089,6 +1145,16 @@ impl Gfx {
         let pl_plain = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pl-plain"),
             bind_group_layouts: &[Some(&camera_layout)],
+            immediate_size: 0,
+        });
+        // Voxel terrain + water sample the world uniform at group 2.
+        let pl_world = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pl-world"),
+            bind_group_layouts: &[
+                Some(&camera_layout),
+                Some(&terrain_layout),
+                Some(&world_layout),
+            ],
             immediate_size: 0,
         });
 
@@ -1131,6 +1197,11 @@ impl Gfx {
             array_stride: 12,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+        };
+        let voxel_vbl = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<VoxelVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32],
         };
         let inst = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<InstanceRaw>() as u64,
@@ -1191,9 +1262,18 @@ impl Gfx {
             &opaque_t,
             &depth_opaque,
         );
+        let voxel_pipeline = mk(
+            "voxel",
+            &pl_world,
+            "vs_voxel",
+            "fs_voxel",
+            std::slice::from_ref(&voxel_vbl),
+            &opaque_t,
+            &depth_opaque,
+        );
         let water_pipeline = mk(
             "water",
-            &pl_tex,
+            &pl_world,
             "vs_water",
             "fs_water",
             std::slice::from_ref(&pos3),
@@ -1296,9 +1376,10 @@ impl Gfx {
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
 
-        // If a voxel battlefield is selected, mesh it (marching cubes) into
-        // vertex-coloured triangles drawn via the unit pipeline. Default: none.
-        let voxel_terrain = build_voxel_terrain(&device, &queue);
+        // The voxel battlefield (terrain mesh + tiles + liquid) is built lazily
+        // by `set_world` when the lobby picks a map; the default is the heightmap.
+        let voxel_terrain: Option<(wgpu::Buffer, u32, wgpu::BindGroup)> = None;
+        let voxel_water: Option<(wgpu::Buffer, u32)> = None;
         let instance_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("instances"),
             size: (MAX_INSTANCES * std::mem::size_of::<InstanceRaw>()) as u64,
@@ -1343,12 +1424,19 @@ impl Gfx {
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
+            voxel_pipeline,
             voxel_terrain,
+            voxel_water,
             instance_buf,
             ring_buf,
             camera_buf,
             camera_bind,
             terrain_bind,
+            terrain_layout,
+            tile_sampler,
+            fow_sampler,
+            world_buf,
+            world_bind,
             fow_tex,
             width,
             height,
@@ -1372,11 +1460,119 @@ impl Gfx {
     }
 
     /// Rebuild the terrain for the currently selected voxel map (call after
-    /// `voxel::set_active`, e.g. when starting a match from the lobby). With no
-    /// map selected this clears back to the Earthlike heightmap.
+    /// `voxel::set_active`, e.g. when starting a match from the lobby): triplanar
+    /// terrain mesh + the world's tile set + its liquid surface + tint/liquid
+    /// uniform. With no map selected this clears back to the Earthlike heightmap.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // driven by the web lobby
     pub fn set_world(&mut self) {
-        self.voxel_terrain = build_voxel_terrain(&self.device, &self.queue);
+        let Some(grid) = crate::voxel::active() else {
+            self.voxel_terrain = None;
+            self.voxel_water = None;
+            self.write_world(WorldUniform {
+                tint: [1.0, 1.0, 1.0, 0.0],
+                liquid: EARTH_WATER,
+            });
+            return;
+        };
+
+        // Terrain mesh (pos/normal/material) for the triplanar voxel pipeline.
+        let verts: Vec<VoxelVertex> = grid
+            .build_mesh()
+            .iter()
+            .map(|v| VoxelVertex {
+                pos: v.pos,
+                normal: v.normal,
+                weights: v.weights,
+                haz: v.haz,
+            })
+            .collect();
+        let buf = vbuf(
+            &self.device,
+            &self.queue,
+            "voxel-terrain",
+            bytemuck::cast_slice(&verts),
+        );
+
+        // The world's tile set in the base/low/high/accent (grass/dirt/rock/sand)
+        // slots, plus the shared fog-of-war texture.
+        let tiles = crate::voxel::active_tiles().expect("active map has a tile set");
+        let tex: Vec<wgpu::TextureView> = tiles
+            .iter()
+            .enumerate()
+            .map(|(k, b)| load_tile(&self.device, &self.queue, b, &format!("voxel-tile-{k}")))
+            .collect();
+        let fow_view = self
+            .fow_tex
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let voxel_bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("voxel-bind"),
+            layout: &self.terrain_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&tex[0]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&tex[1]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&tex[2]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&tex[3]),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&fow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&self.tile_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(&self.fow_sampler),
+                },
+            ],
+        });
+        self.voxel_terrain = Some((buf, verts.len() as u32, voxel_bind));
+
+        // Liquid surface mesh (oceans / methane), if any.
+        let liq = grid.liquid_mesh();
+        self.voxel_water = if liq.is_empty() {
+            None
+        } else {
+            Some((
+                vbuf(
+                    &self.device,
+                    &self.queue,
+                    "voxel-water",
+                    bytemuck::cast_slice(&liq),
+                ),
+                liq.len() as u32,
+            ))
+        };
+
+        // Tint + liquid colour for this world.
+        let lava = if crate::voxel::active_lava() {
+            1.0
+        } else {
+            0.0
+        };
+        let liquid = crate::voxel::active_liquid().unwrap_or(EARTH_WATER);
+        self.write_world(WorldUniform {
+            tint: [1.0, 1.0, 1.0, lava],
+            liquid,
+        });
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn write_world(&self, w: WorldUniform) {
+        self.queue
+            .write_buffer(&self.world_buf, 0, bytemuck::bytes_of(&w));
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1517,11 +1713,13 @@ impl Gfx {
             });
             pass.set_bind_group(0, &self.camera_bind, &[]);
 
-            if let Some((buf, len)) = self.voxel_terrain.as_ref() {
-                // Marching-cubes voxel battlefield: vertex-coloured, unit pipeline.
-                pass.set_pipeline(&self.unit_pipeline);
+            let voxel = self.voxel_terrain.is_some();
+            if let Some((buf, len, bind)) = self.voxel_terrain.as_ref() {
+                // Marching-cubes battlefield: triplanar-textured, tinted per world.
+                pass.set_pipeline(&self.voxel_pipeline);
+                pass.set_bind_group(1, bind, &[]);
+                pass.set_bind_group(2, &self.world_bind, &[]);
                 pass.set_vertex_buffer(0, buf.slice(..));
-                pass.set_vertex_buffer(1, self.wall_inst_buf.slice(..));
                 pass.draw(0..*len, 0..1);
             } else {
                 pass.set_pipeline(&self.terrain_pipeline);
@@ -1532,10 +1730,13 @@ impl Gfx {
             }
 
             pass.set_pipeline(&self.unit_pipeline);
-            // Map-rim walls (always), via an identity instance.
-            pass.set_vertex_buffer(0, self.walls_buf.slice(..));
-            pass.set_vertex_buffer(1, self.wall_inst_buf.slice(..));
-            pass.draw(0..self.walls_len, 0..1);
+            // Map-rim walls hide under-ocean at the edges; only the Earthlike map
+            // has an ocean plane, so skip them on the airless voxel worlds.
+            if !voxel {
+                pass.set_vertex_buffer(0, self.walls_buf.slice(..));
+                pass.set_vertex_buffer(1, self.wall_inst_buf.slice(..));
+                pass.draw(0..self.walls_len, 0..1);
+            }
             if used > 0 {
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                 // (mesh vertex buffer, mesh vertex count, instance count) per group,
@@ -1560,9 +1761,20 @@ impl Gfx {
                 }
             }
 
-            // Ocean only for the heightmap map; airless voxel worlds have none.
-            if self.voxel_terrain.is_none() {
-                pass.set_pipeline(&self.water_pipeline);
+            // Liquid: the Earthlike ocean plane, or a voxel world's per-column
+            // liquid surface (Earth seas / Titan methane). Revamped water shader.
+            pass.set_pipeline(&self.water_pipeline);
+            pass.set_bind_group(2, &self.world_bind, &[]);
+            if let Some((wbuf, wlen)) = self.voxel_water.as_ref() {
+                let bind = self
+                    .voxel_terrain
+                    .as_ref()
+                    .map(|t| &t.2)
+                    .unwrap_or(&self.terrain_bind);
+                pass.set_bind_group(1, bind, &[]);
+                pass.set_vertex_buffer(0, wbuf.slice(..));
+                pass.draw(0..*wlen, 0..1);
+            } else if !voxel {
                 pass.set_bind_group(1, &self.terrain_bind, &[]);
                 pass.set_vertex_buffer(0, self.water_buf.slice(..));
                 pass.draw(0..6, 0..1);

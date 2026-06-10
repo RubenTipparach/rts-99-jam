@@ -26,6 +26,7 @@ is supported by the ops on `VoxelGrid` (raise/lower/flatten/carve) and the small
 CLI at the bottom; everything is presentation-side (no sim determinism here).
 """
 
+import json
 import os
 import struct
 import zlib
@@ -167,13 +168,65 @@ class VoxelGrid:
         g.sea_level = None if sea == -32768 else sea
         return g
 
+    # --- text interchange (JSON), for porting to other tools ---
+    # The .vxl is stored as compact zlib binary because a map is a full 3D voxel
+    # volume (millions of cells); the same data as text is tens of MB. The format
+    # is tiny and documented, though, so it is not locked in: these two methods
+    # round-trip a map losslessly to/from plain JSON (readable metadata + the raw
+    # arrays as flat integer lists in lin(i,j,k) order), which any tool can parse.
+    def save_json(self, path):
+        obj = {
+            "format": "VXL1",
+            "index": "lin(i,j,k) = (j*nz + k)*nx + i ; density >= 128 is solid",
+            "nx": self.nx, "ny": self.ny, "nz": self.nz,
+            "bounds": list(self.bounds),
+            "sea_level": self.sea_level,
+            "flat_permil": self.flat_permil,
+            "density": list(self.density),
+            "material": list(self.material),
+            "buildable": list(self.buildable),
+            "liquid": list(self.liquid),
+        }
+        with open(path, "w") as f:
+            json.dump(obj, f, separators=(",", ":"))
+
+    @staticmethod
+    def from_json(path):
+        with open(path) as f:
+            d = json.load(f)
+        g = VoxelGrid(d["nx"], d["ny"], d["nz"], tuple(d["bounds"]))
+        g.density = bytearray(d["density"])
+        g.material = bytearray(d["material"])
+        g.buildable = bytearray(d["buildable"])
+        g.liquid = bytearray(d.get("liquid") or [0] * (g.nx * g.nz))
+        g.flat_permil = d.get("flat_permil", 0)
+        g.sea_level = d.get("sea_level")
+        return g
+
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) >= 2:
-        g = VoxelGrid.load(sys.argv[1])
-        solid = sum(1 for d in g.density if d >= ISO)
-        print(f"{sys.argv[1]}: {g.nx}x{g.ny}x{g.nz} bounds={g.bounds}")
-        print(f"  solid voxels: {solid}/{len(g.density)}  buildable: {g.flat_permil/10:.1f}%")
+    args = sys.argv[1:]
+    if args and args[0] == "--from-json":
+        src = args[1]
+        out = args[2] if len(args) > 2 else os.path.splitext(src)[0] + ".vxl"
+        VoxelGrid.from_json(src).save(out)
+        print(f"wrote {out}  ({os.path.getsize(out) / 1024:.0f} KB) from {src}")
+    elif args and not args[0].startswith("-"):
+        path = args[0]
+        g = VoxelGrid.load(path)
+        if "--json" in args:
+            ji = args.index("--json")
+            out = args[ji + 1] if len(args) > ji + 1 and not args[ji + 1].startswith("-") \
+                else os.path.splitext(path)[0] + ".json"
+            g.save_json(out)
+            print(f"wrote {out}  ({os.path.getsize(out) / 1024:.0f} KB text)")
+        else:
+            solid = sum(1 for d in g.density if d >= ISO)
+            print(f"{path}: {g.nx}x{g.ny}x{g.nz} bounds={g.bounds}")
+            print(f"  solid voxels: {solid}/{len(g.density)}  buildable: {g.flat_permil / 10:.1f}%")
     else:
-        print("usage: python3 voxel.py <map.vxl>   (inspect a baked map)")
+        print("usage:")
+        print("  python3 voxel.py <map.vxl>                       inspect a baked map")
+        print("  python3 voxel.py <map.vxl> --json [out.json]     export readable JSON")
+        print("  python3 voxel.py --from-json <in.json> [out.vxl] import JSON back to .vxl")

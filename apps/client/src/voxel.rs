@@ -14,21 +14,17 @@ use std::cell::{Cell, RefCell};
 
 pub const ISO: u8 = 128;
 
-/// Material slots (match `densitygen.py`): basin, mid, cliff/high, accent, hazard.
-const MATERIAL_COLORS: [[f32; 3]; 5] = [
-    [0.28, 0.27, 0.30], // low / basin
-    [0.50, 0.49, 0.47], // mid
-    [0.72, 0.73, 0.76], // high / cliff
-    [0.62, 0.45, 0.34], // accent
-    [0.80, 0.30, 0.20], // hazard
-];
-
-/// One mesh vertex for the renderer (triangle soup; flat or smooth shaded).
+/// One terrain mesh vertex for the voxel pipeline. `weights` are soft texture
+/// blend weights across the four tile slots (`x` mid/base, `y` low, `z` high,
+/// `w` accent) and `haz` is the hazard (lava) channel; together they partition
+/// unity. Computed by trilinearly sampling the material field, so the shader can
+/// blend tiles smoothly across material boundaries instead of switching hard.
 #[derive(Clone, Copy)]
 pub struct MeshVertex {
     pub pos: [f32; 3],
     pub normal: [f32; 3],
-    pub color: [f32; 3],
+    pub weights: [f32; 4],
+    pub haz: f32,
 }
 
 pub struct VoxelGrid {
@@ -38,7 +34,10 @@ pub struct VoxelGrid {
     bounds: [f32; 6], // x0,x1,y0,y1,z0,z1
     density: Vec<u8>,
     material: Vec<u8>,
-    buildable: Vec<u8>, // nx*nz column mask
+    // Per-column flat/buildable mask, for future base-placement logic (and tests).
+    #[allow(dead_code)]
+    buildable: Vec<u8>,
+    liquid: Vec<u8>, // nx*nz: liquid surface layer (j+1), 0 = dry
 }
 
 #[inline]
@@ -70,6 +69,12 @@ impl VoxelGrid {
         let n = nx * ny * nz;
         let cols = nx * nz;
         assert!(raw.len() >= 2 * n + cols, "vxl payload too short");
+        // The liquid column layer is optional (older maps omit it).
+        let liquid = if raw.len() >= 2 * n + 2 * cols {
+            raw[2 * n + cols..2 * n + 2 * cols].to_vec()
+        } else {
+            vec![0u8; cols]
+        };
         VoxelGrid {
             nx,
             ny,
@@ -78,6 +83,7 @@ impl VoxelGrid {
             density: raw[0..n].to_vec(),
             material: raw[n..2 * n].to_vec(),
             buildable: raw[2 * n..2 * n + cols].to_vec(),
+            liquid,
         }
     }
 
@@ -156,9 +162,43 @@ impl VoxelGrid {
         }
     }
 
-    /// Marching cubes (tetrahedral) -> a coloured triangle soup for the renderer.
-    /// `tint`/`bright` recolour the world's material palette.
-    pub fn build_mesh(&self, tint: [f32; 3], bright: f32) -> Vec<MeshVertex> {
+    /// Soft texture blend weights at a world point: trilinearly interpolate the
+    /// (one-hot) material of the eight surrounding voxels, so a vertex sitting
+    /// between a skin cell and a subsurface cell gets a mix of both. Returns the
+    /// four tile weights (mid, low, high, accent) and the hazard weight; the five
+    /// sum to 1.
+    fn weights_at(&self, p: [f32; 3]) -> ([f32; 4], f32) {
+        let fi = ((p[0] - self.bounds[0]) / self.dx()).clamp(0.0, self.nx as f32 - 1.001);
+        let fj = ((p[1] - self.bounds[2]) / self.dy()).clamp(0.0, self.ny as f32 - 1.001);
+        let fk = ((p[2] - self.bounds[4]) / self.dz()).clamp(0.0, self.nz as f32 - 1.001);
+        let (i0, j0, k0) = (
+            fi.floor() as usize,
+            fj.floor() as usize,
+            fk.floor() as usize,
+        );
+        let (tx, ty, tz) = (fi - i0 as f32, fj - j0 as f32, fk - k0 as f32);
+        let mut acc = [0.0f32; 5];
+        for dj in 0..2 {
+            for dk in 0..2 {
+                for di in 0..2 {
+                    let cx = if di == 1 { tx } else { 1.0 - tx };
+                    let cy = if dj == 1 { ty } else { 1.0 - ty };
+                    let cz = if dk == 1 { tz } else { 1.0 - tz };
+                    let m = self.material[self.lin(i0 + di, j0 + dj, k0 + dk)].min(4);
+                    // material id -> tile channel: 0 low->1, 1 mid->0, 2 high->2,
+                    // 3 accent->3, 4 hazard->4.
+                    let ch = [1usize, 0, 2, 3, 4][m as usize];
+                    acc[ch] += cx * cy * cz;
+                }
+            }
+        }
+        ([acc[0], acc[1], acc[2], acc[3]], acc[4])
+    }
+
+    /// Marching cubes (tetrahedral) -> a triangle soup for the voxel pipeline.
+    /// Each vertex carries soft material blend weights; the shader does the
+    /// texturing.
+    pub fn build_mesh(&self) -> Vec<MeshVertex> {
         // Cube corners and the six tetrahedra around the 0-6 diagonal.
         const C: [[usize; 3]; 8] = [
             [0, 0, 0],
@@ -194,11 +234,13 @@ impl VoxelGrid {
             ]
         };
 
-        let emit = |p: [f32; 3], col: [f32; 3], out: &mut Vec<MeshVertex>| {
+        let emit = |p: [f32; 3], out: &mut Vec<MeshVertex>| {
+            let (weights, haz) = self.weights_at(p);
             out.push(MeshVertex {
                 pos: p,
                 normal: self.normal(p),
-                color: col,
+                weights,
+                haz,
             });
         };
 
@@ -217,21 +259,6 @@ impl VoxelGrid {
                     }
                     if mn >= iso || mx < iso {
                         continue;
-                    }
-                    let mat = self.material[self.lin(i, j, k)].min(4) as usize;
-                    let buildable = self.buildable[k * self.nx + i] != 0;
-                    let base = MATERIAL_COLORS[mat];
-                    let mut col = [
-                        base[0] * tint[0] * bright,
-                        base[1] * tint[1] * bright,
-                        base[2] * tint[2] * bright,
-                    ];
-                    if buildable {
-                        col = [
-                            col[0] * 0.8 + 0.06,
-                            col[1] * 0.8 + 0.16,
-                            col[2] * 0.8 + 0.07,
-                        ];
                     }
                     for tet in TETS.iter() {
                         let mut solids = [0usize; 4];
@@ -257,9 +284,9 @@ impl VoxelGrid {
                             let a = interp(cp[odd], cv[odd], cp[rest[0]], cv[rest[0]]);
                             let b = interp(cp[odd], cv[odd], cp[rest[1]], cv[rest[1]]);
                             let c = interp(cp[odd], cv[odd], cp[rest[2]], cv[rest[2]]);
-                            emit(a, col, &mut out);
-                            emit(b, col, &mut out);
-                            emit(c, col, &mut out);
+                            emit(a, &mut out);
+                            emit(b, &mut out);
+                            emit(c, &mut out);
                         } else {
                             let (s0, s1) = (solids[0], solids[1]);
                             let (a0, a1) = (airs[0], airs[1]);
@@ -267,14 +294,41 @@ impl VoxelGrid {
                             let pb = interp(cp[s0], cv[s0], cp[a1], cv[a1]);
                             let pc = interp(cp[s1], cv[s1], cp[a1], cv[a1]);
                             let pd = interp(cp[s1], cv[s1], cp[a0], cv[a0]);
-                            emit(pa, col, &mut out);
-                            emit(pb, col, &mut out);
-                            emit(pc, col, &mut out);
-                            emit(pa, col, &mut out);
-                            emit(pc, col, &mut out);
-                            emit(pd, col, &mut out);
+                            emit(pa, &mut out);
+                            emit(pb, &mut out);
+                            emit(pc, &mut out);
+                            emit(pa, &mut out);
+                            emit(pc, &mut out);
+                            emit(pd, &mut out);
                         }
                     }
+                }
+            }
+        }
+        out
+    }
+
+    /// A flat quad per liquid column at its surface height: the water/methane
+    /// mesh, rendered by the water pipeline. Empty if the world has no liquid.
+    pub fn liquid_mesh(&self) -> Vec<[f32; 3]> {
+        let mut out = Vec::new();
+        let dx = self.dx();
+        let dz = self.dz();
+        for k in 0..self.nz {
+            for i in 0..self.nx {
+                let lj = self.liquid[k * self.nx + i];
+                if lj == 0 {
+                    continue;
+                }
+                let p = self.world(i, (lj - 1) as usize, k);
+                let (x0, y, z0) = (p[0], p[1], p[2]);
+                let (x1, z1) = (x0 + dx, z0 + dz);
+                let a = [x0, y, z0];
+                let b = [x1, y, z0];
+                let c = [x1, y, z1];
+                let d = [x0, y, z1];
+                for v in [a, b, c, a, c, d] {
+                    out.push(v);
                 }
             }
         }
@@ -340,6 +394,7 @@ pub const MAP_NAMES: [&str; MAP_COUNT] = [
 ];
 
 /// A representative surface colour per world, for the lobby thumbnail.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // used by the web lobby
 pub const MAP_SWATCH: [[u8; 3]; MAP_COUNT] = [
     [150, 148, 142],
     [78, 76, 76],
@@ -396,20 +451,66 @@ pub fn active() -> Option<&'static VoxelGrid> {
     })
 }
 
-/// Per-world tint for the marching-cubes material palette, derived from the
-/// world's swatch so each loaded battlefield reads in its own colour.
-pub fn active_tint() -> [f32; 3] {
+// --- per-world texture sets + liquid, for the renderer -----------------------
+// The 12 archetype tile sets [base, low, high, accent], embedded.
+macro_rules! tiles {
+    ($a:literal) => {
+        [
+            include_bytes!(concat!("../../../assets/textures/worlds/", $a, "/base.png")),
+            include_bytes!(concat!("../../../assets/textures/worlds/", $a, "/low.png")),
+            include_bytes!(concat!("../../../assets/textures/worlds/", $a, "/high.png")),
+            include_bytes!(concat!(
+                "../../../assets/textures/worlds/",
+                $a,
+                "/accent.png"
+            )),
+        ]
+    };
+}
+const ARCH_TILES: [[&[u8]; 4]; 12] = [
+    tiles!("regolith_grey"),
+    tiles!("regolith_dark"),
+    tiles!("dirty_ice"),
+    tiles!("grooved_ice"),
+    tiles!("bright_ice"),
+    tiles!("europa_ice"),
+    tiles!("mars_rust"),
+    tiles!("io_sulfur"),
+    tiles!("titan_haze"),
+    tiles!("triton_ice"),
+    tiles!("pluto_tholin"),
+    tiles!("earth"),
+];
+
+/// Archetype index per world (into `ARCH_TILES`), in [`MAPS`] order.
+#[rustfmt::skip]
+const MAP_ARCHETYPE: [usize; MAP_COUNT] = [
+    0, 1, 0, 6, 2, 3, 5, 7, 8, 4, 9, 2, 2, 2, 0, 0, 1, 3, 3, 10, 1, 11,
+];
+
+/// The active world's tile set (base, low, high, accent), if one is selected.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // driven by the web lobby
+pub fn active_tiles() -> Option<[&'static [u8]; 4]> {
+    SELECTED
+        .with(|s| s.get())
+        .map(|i| ARCH_TILES[MAP_ARCHETYPE[i]])
+}
+
+/// Liquid body colour (rgb) + waviness (a) for the active world, or `None` for a
+/// dry world. Earth has blue water; Titan has dark, calm methane.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // driven by the web lobby
+pub fn active_liquid() -> Option<[f32; 4]> {
     match SELECTED.with(|s| s.get()) {
-        Some(i) => {
-            let s = MAP_SWATCH[i];
-            [
-                s[0] as f32 / 150.0,
-                s[1] as f32 / 150.0,
-                s[2] as f32 / 150.0,
-            ]
-        }
-        None => [1.0, 1.0, 1.0],
+        Some(8) => Some([0.06, 0.05, 0.07, 0.5]), // Titan: dark methane, calm
+        Some(21) => Some([0.06, 0.22, 0.34, 1.0]), // Earth: blue water
+        _ => None,
     }
+}
+
+/// Whether the active world's hazard material glows (Io's lava).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // driven by the web lobby
+pub fn active_lava() -> bool {
+    SELECTED.with(|s| s.get()) == Some(7)
 }
 
 #[cfg(test)]
@@ -432,7 +533,7 @@ mod tests {
                 "map {i} buildable fraction off"
             );
             // marching cubes produces a non-trivial, well-formed mesh
-            let mesh = g.build_mesh([1.0, 1.0, 1.0], 1.0);
+            let mesh = g.build_mesh();
             assert!(
                 mesh.len() >= 3 && mesh.len().is_multiple_of(3),
                 "map {i} bad mesh"
@@ -441,6 +542,16 @@ mod tests {
                 let n = v.normal;
                 let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
                 assert!((len - 1.0).abs() < 1e-3, "map {i} non-unit normal");
+                let sum = v.weights[0] + v.weights[1] + v.weights[2] + v.weights[3] + v.haz;
+                assert!(
+                    (sum - 1.0).abs() < 1e-3,
+                    "map {i} weights not partition of unity"
+                );
+                assert!(
+                    v.weights.iter().all(|&w| (-1e-4..=1.0001).contains(&w))
+                        && (-1e-4..=1.0001).contains(&v.haz),
+                    "map {i} weight out of range"
+                );
             }
         }
     }
