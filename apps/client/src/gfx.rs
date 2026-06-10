@@ -680,31 +680,31 @@ fn acolyte_mesh() -> Vec<UnitVertex> {
     push_prism(&mut m, 0.0, 0.0, 0.14, 1.02, 1.30, team, 1.0, 6, 0.3, true);
     // Chest shell: a faceted barrel with a gold collar plate; clear gap below.
     push_frustum(
-        &mut m, 0.0, 0.0, 0.30, 0.42, 1.38, 1.78, shell, 0.0, 6, 0.0, false,
+        &mut m, 0.0, 0.0, 0.26, 0.37, 1.38, 1.78, shell, 0.0, 6, 0.0, false,
     );
     push_frustum(
-        &mut m, 0.0, 0.0, 0.42, 0.30, 1.78, 2.10, shell, 0.0, 6, 0.0, false,
+        &mut m, 0.0, 0.0, 0.37, 0.26, 1.78, 2.08, shell, 0.0, 6, 0.0, false,
     );
-    push_prism(&mut m, 0.0, 0.0, 0.32, 2.10, 2.20, gold, 0.0, 6, 0.0, true);
+    push_prism(&mut m, 0.0, 0.0, 0.27, 2.08, 2.17, gold, 0.0, 6, 0.0, true);
     // Head: a separate capsule floating above the collar (visible neck gap),
     // glowing eye band on the +z face.
     push_frustum(
-        &mut m, 0.0, 0.0, 0.20, 0.24, 2.38, 2.62, shell, 0.0, 6, 0.0, false,
+        &mut m, 0.0, 0.0, 0.16, 0.20, 2.34, 2.56, shell, 0.0, 6, 0.0, false,
     );
     push_frustum(
-        &mut m, 0.0, 0.0, 0.24, 0.14, 2.62, 2.85, shell2, 0.0, 6, 0.0, true,
+        &mut m, 0.0, 0.0, 0.20, 0.11, 2.56, 2.76, shell2, 0.0, 6, 0.0, true,
     );
-    push_box(&mut m, [-0.15, 2.46, 0.20], [0.15, 2.57, 0.28], eyes, 0.0);
-    // Floating shoulder orbs and bare forearms: no upper arms at all, the
+    push_box(&mut m, [-0.13, 2.41, 0.16], [0.13, 2.51, 0.24], eyes, 0.0);
+    // Floating shoulder pods and bare forearms: no upper arms at all, the
     // "joints" are just gaps held by magic. Gold cuff caps each forearm.
     for sx in [-1.0_f32, 1.0] {
         push_prism(
             &mut m,
-            sx * 0.62,
+            sx * 0.56,
             0.0,
-            0.13,
-            1.96,
-            2.20,
+            0.10,
+            1.94,
+            2.12,
             gold,
             0.0,
             6,
