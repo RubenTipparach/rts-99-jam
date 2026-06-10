@@ -2,9 +2,11 @@
 //! to move/attack, wheel to zoom, WASD/arrows to pan.
 
 mod camera;
+mod fx;
 mod game;
 mod gfx;
 mod hud;
+mod map;
 mod menu;
 mod terrain;
 mod voxel;
@@ -240,6 +242,10 @@ struct Input {
     back: bool,
     left: bool,
     right: bool,
+    /// Shift held: clicks/boxes add to the selection instead of replacing it.
+    shift: bool,
+    /// Ctrl held: a right-click is an explicit attack-move.
+    ctrl: bool,
     cursor: (f32, f32),
     cursor_in: bool,
     left_press: Option<(f32, f32)>,
@@ -286,6 +292,20 @@ struct App {
     /// mode); right-click / Esc cancels.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     build_mode: Option<protocol::BuildingKind>,
+    /// A command-card button was just clicked: `(index, when)` drives a brief
+    /// pressed flash on the HUD button.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    card_flash: Option<(usize, Instant)>,
+    /// A front-end (menu/lobby) button was just clicked; same flash treatment.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    menu_flash: Option<(menu::Click, Instant)>,
+    /// A short-lived HUD notice ("NOT ENOUGH ORE"), shown centred above the
+    /// command bar and faded out by the HUD.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    toast: Option<(String, Instant)>,
+    /// The match verdict, once decided (true = victory). Freezes the sim and
+    /// swaps the pause overlay for the end screen.
+    outcome: Option<bool>,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     proxy: EventLoopProxy<UserEvent>,
 }
@@ -312,6 +332,10 @@ impl App {
             last_css: (0, 0),
             first_frame_done: false,
             build_mode: None,
+            card_flash: None,
+            menu_flash: None,
+            toast: None,
+            outcome: None,
             proxy,
         }
     }
@@ -328,21 +352,45 @@ impl App {
     fn render_scene(&mut self) {
         if let Some(gfx) = self.gfx.as_mut() {
             let aspect = gfx.aspect();
-            let (inf, ba, bh, ac, en, ore, carbon, heavies, turrets, rings) =
-                self.game.render_data();
+            // Build-placement preview: the pending building ghosted under the
+            // cursor (holographic, green when the site is clear).
+            let (w, h) = (gfx.width as f32, gfx.height as f32);
+            let ghost = self.build_mode.and_then(|kind| {
+                let (cx, cy) = self.input.cursor;
+                self.camera
+                    .ground_pick(cx, cy, w, h)
+                    .map(|(wx, wz)| (kind, wx, wz))
+            });
+            let rd = self.game.render_data(ghost);
+            let particles = self.game.fx_instances();
+            // Transient fx flashes take the light slots first; the steady
+            // world lights (floodlights, node glow) fill what remains,
+            // nearest to the camera focus first.
+            let mut fx_lights = self.game.fx_lights();
+            let (fcx, fcz) = self.camera.focus();
+            fx_lights.extend(self.game.world_lights(fcx, fcz));
+            fx_lights.truncate(gfx::MAX_LIGHTS);
             let fow = self.game.fow_bytes();
             let vp = self.camera.view_proj(aspect);
             gfx.render(
-                &inf,
-                &ba,
-                &bh,
-                &ac,
-                &en,
-                &ore,
-                &carbon,
-                &heavies,
-                &turrets,
-                &rings,
+                &rd.infantry,
+                &rd.barracks_astro,
+                &rd.barracks_hollow,
+                &rd.hq_astro,
+                &rd.hq_hollow,
+                &rd.acolytes,
+                &rd.engineers,
+                &rd.ore_nodes,
+                &rd.carbon_nodes,
+                &rd.heavies,
+                &rd.turrets,
+                &rd.supplies,
+                &rd.barrels,
+                &particles,
+                &rd.ore_crystals,
+                &rd.carbon_pools,
+                &fx_lights,
+                &rd.rings,
                 &fow,
                 vp,
                 self.camera.eye(),
@@ -418,20 +466,42 @@ impl App {
         self.apply_cursor_grab();
     }
 
-    /// If a building is selected and the point is on its Train button, queue a
-    /// unit and report that the click was consumed (web HUD only).
+    /// Arm build-placement mode for `kind`, unless the player cannot afford
+    /// it - then raise a "NOT ENOUGH ..." toast instead and stay unarmed.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn arm_build(&mut self, kind: protocol::BuildingKind) {
+        let (ore, carbon) = Game::build_cost(kind);
+        let need_ore = (self.game.player_ore() as i64) < ore;
+        let need_carbon = (self.game.player_carbon() as i64) < carbon;
+        if need_ore || need_carbon {
+            let what = match (need_ore, need_carbon) {
+                (true, true) => "ORE AND CARBON",
+                (true, false) => "ORE",
+                _ => "CARBON",
+            };
+            self.toast = Some((format!("NOT ENOUGH {what}"), Instant::now()));
+            return;
+        }
+        self.build_mode = Some(kind);
+    }
+
+    /// If the point hits a command-card button, perform its action (queue a
+    /// unit, or arm build-placement mode) and report the click consumed
+    /// (web HUD only).
     #[cfg(target_arch = "wasm32")]
-    fn train_button_hit(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
-        if self.game.selected_barracks().is_none() {
-            return false;
+    fn card_click(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
+        for (k, (action, ..)) in hud::card_actions(&self.game).into_iter().enumerate() {
+            let (x0, y0, x1, y1) = hud::card_button_rect(k, w, h);
+            if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
+                match action {
+                    hud::CardAction::Train(kind) => self.game.train_selected(kind),
+                    hud::CardAction::Build(kind) => self.arm_build(kind),
+                }
+                self.card_flash = Some((k, Instant::now()));
+                return true;
+            }
         }
-        let (x0, y0, x1, y1) = hud::train_button_rect(w, h);
-        if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
-            self.game.train_selected(protocol::UnitKind::Infantry);
-            true
-        } else {
-            false
-        }
+        false
     }
 
     /// If the point is on the minimap, recenter the camera there and report the
@@ -491,6 +561,9 @@ impl App {
         let (w, h) = self.dims();
         let click = menu::hit(self.screen, &self.lobby, cx, cy, w, h);
         log::info!("front_end_click at ({cx:.0},{cy:.0}) dims={w:.0}x{h:.0} -> {click:?}");
+        if click != menu::Click::None {
+            self.menu_flash = Some((click, Instant::now()));
+        }
         match click {
             menu::Click::Skirmish => self.screen = menu::Screen::Lobby,
             menu::Click::SetFaction(f) => self.lobby.faction = f,
@@ -510,11 +583,18 @@ impl App {
             menu::Click::Back => self.screen = menu::Screen::Menu,
             menu::Click::Fullscreen => toggle_fullscreen(),
             menu::Click::Start => {
-                self.game.set_player_faction(self.lobby.faction);
-                // Load the chosen battlefield and rebuild its terrain.
+                // Load the chosen battlefield FIRST: each world carries its
+                // own fitted scenario, so the game must be built after the
+                // map is active. Then open the camera on the player's main.
                 crate::voxel::set_active(Some(self.lobby.map as usize));
                 if let Some(g) = self.gfx.as_mut() {
                     g.set_world();
+                }
+                self.game = Game::new();
+                self.game.set_player_faction(self.lobby.faction);
+                self.game.apply_terrain();
+                if let Some((hx, hz)) = self.game.player_hq() {
+                    self.camera.look_at(hx, hz);
                 }
                 self.screen = menu::Screen::InGame;
                 set_body_menu(false); // show the mobile test controls
@@ -524,15 +604,39 @@ impl App {
         }
     }
 
-    /// Apply a pause-menu click or tap at physical `(cx, cy)`.
+    /// Apply a pause-menu click or tap at physical `(cx, cy)`. On the match
+    /// verdict screen the same button slot returns to the menu instead.
     #[cfg(target_arch = "wasm32")]
     fn pause_click(&mut self, cx: f32, cy: f32) {
         let (w, h) = self.dims();
         let hitr = |r: (f32, f32, f32, f32)| cx >= r.0 && cx <= r.2 && cy >= r.1 && cy <= r.3;
+        if self.outcome.is_some() {
+            if hitr(hud::resume_button_rect(w, h)) {
+                self.end_match_to_menu();
+            } else if hitr(hud::fullscreen_button_rect(w, h)) {
+                toggle_fullscreen();
+            }
+            return;
+        }
         if hitr(hud::resume_button_rect(w, h)) {
             self.set_paused(false);
         } else if hitr(hud::fullscreen_button_rect(w, h)) {
             toggle_fullscreen();
+        }
+    }
+
+    /// Leave a finished match: fresh game, back to the front-end (web) or a
+    /// fresh sandbox (native).
+    fn end_match_to_menu(&mut self) {
+        self.outcome = None;
+        self.build_mode = None;
+        self.game = Game::new();
+        self.game.apply_terrain();
+        self.set_paused(false);
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.screen = menu::Screen::Menu;
+            set_body_menu(true);
         }
     }
 }
@@ -613,12 +717,20 @@ impl ApplicationHandler<UserEvent> for App {
                     gfx.resize(size.width, size.height);
                 }
             }
+            WindowEvent::ModifiersChanged(mods) => {
+                self.input.shift = mods.state().shift_key();
+                self.input.ctrl = mods.state().control_key();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 let down = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
                     // Esc: cancel a pending build first; in the lobby step back to
                     // the menu; otherwise (in a match) toggle pause.
                     if code == KeyCode::Escape && down {
+                        if self.outcome.is_some() {
+                            self.end_match_to_menu();
+                            return;
+                        }
                         if self.build_mode.is_some() {
                             self.build_mode = None;
                             return;
@@ -655,18 +767,33 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
                         KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
                         KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
+                        // T trains the selected building's unit: a Worker at the
+                        // HQ, Infantry at a Barracks.
                         KeyCode::KeyT if down => {
-                            self.game.train_selected(protocol::UnitKind::Infantry)
+                            let kind = if self.game.selected_hq().is_some() {
+                                protocol::UnitKind::Worker
+                            } else {
+                                protocol::UnitKind::Infantry
+                            };
+                            self.game.train_selected(kind)
                         }
                         KeyCode::KeyH if down => {
                             self.game.train_selected(protocol::UnitKind::Heavy)
                         }
-                        // Worker build: B = barracks, V = turret -> placement mode.
+                        // Worker build: B = barracks, V = turret, N = a new HQ
+                        // (founds an expansion) -> placement mode (refused
+                        // with a toast when unaffordable).
                         KeyCode::KeyB if down && self.game.has_worker_selected() => {
-                            self.build_mode = Some(protocol::BuildingKind::Barracks)
+                            self.arm_build(protocol::BuildingKind::Barracks)
                         }
                         KeyCode::KeyV if down && self.game.has_worker_selected() => {
-                            self.build_mode = Some(protocol::BuildingKind::Turret)
+                            self.arm_build(protocol::BuildingKind::Turret)
+                        }
+                        KeyCode::KeyN if down && self.game.has_worker_selected() => {
+                            self.arm_build(protocol::BuildingKind::Hq)
+                        }
+                        KeyCode::KeyG if down && self.game.has_worker_selected() => {
+                            self.arm_build(protocol::BuildingKind::Supply)
                         }
                         KeyCode::Digit1 if down => self.game.toggle_fog_unexplored(),
                         KeyCode::Digit2 if down => self.game.toggle_fog_explored(),
@@ -701,6 +828,16 @@ impl ApplicationHandler<UserEvent> for App {
                 // ground point; a right-click cancels. Consumes the click.
                 if let Some(kind) = self.build_mode {
                     if button == MouseButton::Left && state == ElementState::Pressed {
+                        // Resources can drain while aiming; re-check at the
+                        // drop so the hologram can't outspend the stockpile.
+                        let (ore, carbon) = Game::build_cost(kind);
+                        if (self.game.player_ore() as i64) < ore
+                            || (self.game.player_carbon() as i64) < carbon
+                        {
+                            self.build_mode = None;
+                            self.arm_build(kind); // refuses + raises the toast
+                            return;
+                        }
                         if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
                             self.game.build_selected(kind, wx, wz);
                         }
@@ -714,8 +851,8 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
                             #[cfg(target_arch = "wasm32")]
-                            let consumed = self.train_button_hit(cx, cy, w, h)
-                                || self.minimap_press(cx, cy, w, h);
+                            let consumed =
+                                self.card_click(cx, cy, w, h) || self.minimap_press(cx, cy, w, h);
                             #[cfg(not(target_arch = "wasm32"))]
                             let consumed = false;
                             if !consumed {
@@ -727,11 +864,12 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.input.minimap_drag = false;
                             }
                             if let Some((px, py)) = self.input.left_press.take() {
+                                let add = self.input.shift;
                                 if (px - cx).hypot(py - cy) < 8.0 {
-                                    self.game.select_single(&self.camera, w, h, cx, cy);
+                                    self.game.select_single(&self.camera, w, h, cx, cy, add);
                                 } else {
                                     let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
-                                    self.game.select_box_screen(&self.camera, w, h, rect);
+                                    self.game.select_box_screen(&self.camera, w, h, rect, add);
                                 }
                             }
                         }
@@ -741,7 +879,11 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     MouseButton::Right if state == ElementState::Pressed => {
                         if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                            self.game.order(wx, wz);
+                            // A selected production building takes the click
+                            // as its new rally point; otherwise a unit order.
+                            if !self.game.set_rally_selected(wx, wz) {
+                                self.game.order(wx, wz, self.input.ctrl);
+                            }
                         }
                     }
                     _ => {}
@@ -812,7 +954,7 @@ impl ApplicationHandler<UserEvent> for App {
                         let pressed = self.input.left_press.take();
                         let (w, h) = self.dims();
                         #[cfg(target_arch = "wasm32")]
-                        if self.train_button_hit(cx, cy, w, h) || self.minimap_jump(cx, cy, w, h) {
+                        if self.card_click(cx, cy, w, h) || self.minimap_jump(cx, cy, w, h) {
                             return;
                         }
                         if let Some((px, py)) = pressed {
@@ -822,13 +964,15 @@ impl ApplicationHandler<UserEvent> for App {
                             let rc = false;
                             if rc {
                                 if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                                    self.game.order(wx, wz);
+                                    if !self.game.set_rally_selected(wx, wz) {
+                                        self.game.order(wx, wz, false);
+                                    }
                                 }
                             } else if (px - cx).hypot(py - cy) < 8.0 {
-                                self.game.select_single(&self.camera, w, h, cx, cy);
+                                self.game.select_single(&self.camera, w, h, cx, cy, false);
                             } else {
                                 let rect = (px.min(cx), py.min(cy), px.max(cx), py.max(cy));
-                                self.game.select_box_screen(&self.camera, w, h, rect);
+                                self.game.select_box_screen(&self.camera, w, h, rect, false);
                             }
                         }
                     }
@@ -867,7 +1011,18 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.screen != menu::Screen::InGame {
                     self.game.skip_tick();
                     let (w, h) = self.dims();
-                    menu::draw(self.screen, &self.lobby, w, h);
+                    if let Some(win) = &self.window {
+                        win.set_cursor_visible(true);
+                    }
+                    menu::draw(
+                        self.screen,
+                        &self.lobby,
+                        w,
+                        h,
+                        self.input.cursor,
+                        self.menu_flash
+                            .and_then(|(c, t)| (t.elapsed().as_secs_f32() < 0.15).then_some(c)),
+                    );
                     if self.gfx.is_some() && !self.first_frame_done {
                         self.first_frame_done = true;
                         hide_loading();
@@ -901,6 +1056,9 @@ impl ApplicationHandler<UserEvent> for App {
                     let (w, h) = self.dims();
                     // Paused: the OS cursor is back (lock released), so the HUD
                     // does not draw its own.
+                    if let Some(win) = &self.window {
+                        win.set_cursor_visible(true);
+                    }
                     hud::draw(
                         &self.camera,
                         &self.game,
@@ -909,8 +1067,11 @@ impl ApplicationHandler<UserEvent> for App {
                         None,
                         true,
                         self.input.cursor,
-                        false,
                         None,
+                        None,
+                        None,
+                        None,
+                        self.outcome,
                     );
                     return;
                 }
@@ -923,16 +1084,16 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.input.cursor_in && !self.pointer_is_touch && !self.input.middle_down {
                     let (sw, sh) = self.dims();
                     let (cx, cy) = self.input.cursor;
-                    // The minimap now lives at the screen edge, so a cursor over
-                    // it (or actively scrubbing it) must not also edge-pan.
+                    // Never edge-pan from over the in-game UI (command bar,
+                    // its buttons, the minimap) or while scrubbing the minimap.
                     #[cfg(target_arch = "wasm32")]
-                    let blocked = self.input.minimap_drag || {
-                        let (x0, y0, x1, y1) = hud::minimap_rect(sw, sh);
-                        cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1
-                    };
+                    let blocked =
+                        self.input.minimap_drag || hud::over_ui(&self.game, cx, cy, sw, sh);
                     #[cfg(not(target_arch = "wasm32"))]
                     let blocked = false;
-                    const EDGE: f32 = 28.0;
+                    // A hair-trigger zone: panning only from the outermost
+                    // pixels, so the cursor can rest anywhere on screen.
+                    const EDGE: f32 = 2.0;
                     if !blocked && sw > 1.0 && sh > 1.0 {
                         if cx <= EDGE {
                             right -= 1.0;
@@ -960,8 +1121,24 @@ impl ApplicationHandler<UserEvent> for App {
                     self.camera.pan(fwd, right, dt);
                 }
 
+                // The verdict: razing every rival base wins, losing yours
+                // loses. Freeze on the pause path and show the end screen.
+                if self.outcome.is_none() {
+                    if let Some(win) = self.game.outcome() {
+                        log::info!("match over: {}", if win { "victory" } else { "defeat" });
+                        self.outcome = Some(win);
+                        self.set_paused(true);
+                    }
+                }
                 self.game.update();
                 self.game.recompute_fow();
+                // Buildings level the ground under them; rebuild the terrain
+                // mesh whenever the pad set changed.
+                if self.game.take_terrain_dirty() {
+                    if let Some(gfx) = self.gfx.as_mut() {
+                        gfx.rebuild_terrain();
+                    }
+                }
 
                 let drag_rect = self.input.left_press.and_then(|(px, py)| {
                     let (cx, cy) = self.input.cursor;
@@ -976,10 +1153,57 @@ impl ApplicationHandler<UserEvent> for App {
                 let (w, h) = self.dims();
                 // When the pointer is locked the browser hides the OS cursor, so
                 // the HUD draws our own at the tracked position.
-                let build_label = self.build_mode.map(|k| match k {
-                    protocol::BuildingKind::Barracks => "BARRACKS",
-                    protocol::BuildingKind::Turret => "TURRET",
-                });
+                // Context cursor: the OS cursor hides during play and the
+                // HUD draws an order-aware glyph instead.
+                if let Some(win) = &self.window {
+                    win.set_cursor_visible(false);
+                }
+                let cursor_kind = {
+                    let (cx, cy) = self.input.cursor;
+                    #[cfg(target_arch = "wasm32")]
+                    let on_ui = hud::over_ui(&self.game, cx, cy, w, h);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let on_ui = false;
+                    const EDGE: f32 = 2.0;
+                    let at_edge = self.input.cursor_in
+                        && !self.pointer_is_touch
+                        && (cx <= EDGE || cy <= EDGE || cx >= w - EDGE || cy >= h - EDGE);
+                    if self.build_mode.is_some() {
+                        hud::CursorKind::Build
+                    } else if self.input.middle_down || (at_edge && !on_ui) {
+                        hud::CursorKind::Pan
+                    } else if self.input.shift {
+                        hud::CursorKind::AddSelect
+                    } else if on_ui {
+                        hud::CursorKind::Select
+                    } else {
+                        let (units, workers, producer) = self.game.selection_profile();
+                        match self.camera.ground_pick(cx, cy, w, h) {
+                            Some((wx, wz)) if units && self.game.hover_enemy(wx, wz) => {
+                                hud::CursorKind::Attack
+                            }
+                            Some((wx, wz)) if workers && self.game.hover_node(wx, wz) => {
+                                hud::CursorKind::Harvest
+                            }
+                            Some((wx, wz)) if producer && self.game.hover_node(wx, wz) => {
+                                hud::CursorKind::Harvest
+                            }
+                            Some(_) if producer && !units => hud::CursorKind::Rally,
+                            Some(_) if units => hud::CursorKind::Move,
+                            _ => hud::CursorKind::Select,
+                        }
+                    }
+                };
+                // Expire the toast after its fade.
+                if let Some((_, t0)) = &self.toast {
+                    if t0.elapsed().as_secs_f32() > 2.5 {
+                        self.toast = None;
+                    }
+                }
+                let toast = self
+                    .toast
+                    .as_ref()
+                    .map(|(s, t0)| (s.as_str(), t0.elapsed().as_secs_f32()));
                 hud::draw(
                     &self.camera,
                     &self.game,
@@ -988,8 +1212,12 @@ impl ApplicationHandler<UserEvent> for App {
                     drag_rect,
                     false,
                     self.input.cursor,
-                    self.cursor_locked,
-                    build_label,
+                    Some(cursor_kind),
+                    self.build_mode,
+                    self.card_flash
+                        .and_then(|(k, t)| (t.elapsed().as_secs_f32() < 0.15).then_some(k)),
+                    toast,
+                    None,
                 );
 
                 // Remove the loading overlay once the first frame is on screen.

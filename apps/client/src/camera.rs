@@ -32,11 +32,23 @@ impl Camera {
             PITCH.sin(),
             YAW.sin() * PITCH.cos(),
         );
-        (t + dir * self.distance, t)
+        let mut eye = t + dir * self.distance;
+        // Never let the eye sink into (or under) the terrain: when a zoom or
+        // pan would bury it, snap it to a safe height above the surface.
+        let floor = crate::terrain::height(eye.x, eye.z) + 6.0;
+        if eye.y < floor {
+            eye.y = floor;
+        }
+        (eye, t)
     }
 
     pub fn eye(&self) -> [f32; 3] {
         self.eye_target().0.to_array()
+    }
+
+    /// The ground point the camera looks at (world x, z).
+    pub fn focus(&self) -> (f32, f32) {
+        (self.target.x, self.target.y)
     }
 
     fn mat(&self, aspect: f32) -> Mat4 {
@@ -50,6 +62,10 @@ impl Camera {
         self.mat(aspect).to_cols_array_2d()
     }
 
+    /// Terrain point under a screen pixel. The cursor ray is marched against
+    /// the real height field (then bisected to refine), so the pick lands
+    /// exactly where the cursor visually touches the ground - a flat-plane
+    /// intersection would land far beyond the cursor on elevated terrain.
     pub fn ground_pick(&self, sx: f32, sy: f32, w: f32, h: f32) -> Option<(f32, f32)> {
         if w <= 0.0 || h <= 0.0 {
             return None;
@@ -59,16 +75,33 @@ impl Camera {
         let ny = 1.0 - sy / h * 2.0;
         let near = inv.project_point3(Vec3::new(nx, ny, 0.0));
         let far = inv.project_point3(Vec3::new(nx, ny, 1.0));
-        let dir = far - near;
-        if dir.y.abs() < 1e-6 {
+        let dir = (far - near).normalize_or_zero();
+        if dir == Vec3::ZERO {
             return None;
         }
-        let t = -near.y / dir.y;
-        if t < 0.0 {
-            return None;
+        let mut prev = 0.0_f32;
+        let mut t = 0.0_f32;
+        while t < 2200.0 {
+            let p = near + dir * t;
+            if p.y <= crate::terrain::height(p.x, p.z) {
+                // Crossed the surface between prev and t: bisect to the hit.
+                let (mut lo, mut hi) = (prev, t);
+                for _ in 0..16 {
+                    let mid = (lo + hi) * 0.5;
+                    let q = near + dir * mid;
+                    if q.y <= crate::terrain::height(q.x, q.z) {
+                        hi = mid;
+                    } else {
+                        lo = mid;
+                    }
+                }
+                let hit = near + dir * hi;
+                return Some((hit.x, hit.z));
+            }
+            prev = t;
+            t += 2.0;
         }
-        let hit = near + dir * t;
-        Some((hit.x, hit.z))
+        None
     }
 
     /// Ground point under a screen pixel, or - when the ray meets the horizon

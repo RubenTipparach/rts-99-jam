@@ -42,7 +42,7 @@ impl Default for Lobby {
 }
 
 /// A click the front-end recognized, returned by `hit` for the app to act on.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub enum Click {
     None,
@@ -261,18 +261,34 @@ mod web {
         Some((ctx, w, h, d))
     }
 
-    fn draw_btn(ctx: &Ctx, b: &Btn, s: f64) {
+    /// Draw one button. `hover` lifts it (brighter fill, thicker border) and
+    /// `pressed` flashes it bright for a beat after a click, so every front-end
+    /// control visibly reacts to the cursor.
+    fn draw_btn(ctx: &Ctx, b: &Btn, s: f64, hover: bool, pressed: bool) {
+        let hover = hover && b.enabled;
         let (fill, border, text) = if !b.enabled {
             ("rgba(28,34,48,0.85)", "rgba(70,84,110,0.6)", "#5e6a82")
+        } else if pressed {
+            ("rgba(180,220,255,0.95)", "rgba(255,255,255,1.0)", "#0a1220")
         } else if b.selected {
-            ("rgba(40,86,150,0.95)", "rgba(150,200,255,0.95)", "#eaf2ff")
+            if hover {
+                ("rgba(56,110,182,0.97)", "rgba(190,225,255,1.0)", "#f4f9ff")
+            } else {
+                ("rgba(40,86,150,0.95)", "rgba(150,200,255,0.95)", "#eaf2ff")
+            }
+        } else if hover {
+            ("rgba(36,52,86,0.97)", "rgba(190,225,255,1.0)", "#f4f9ff")
         } else {
             ("rgba(18,26,44,0.92)", "rgba(120,160,210,0.9)", "#dce6f6")
         };
         ctx.set_fill_style_str(fill);
         ctx.fill_rect(b.x, b.y, b.w, b.h);
         ctx.set_stroke_style_str(border);
-        ctx.set_line_width(if b.selected { 2.5 } else { 1.5 });
+        ctx.set_line_width(if hover || pressed || b.selected {
+            2.5
+        } else {
+            1.5
+        });
         ctx.stroke_rect(b.x, b.y, b.w, b.h);
         ctx.set_fill_style_str(text);
         ctx.set_font(&format!(
@@ -353,105 +369,108 @@ mod web {
         v
     }
 
-    /// A diamond (isometric) thumbnail of a world: its surface colour plus the
-    /// landform that defines it (craters / seas / volcanoes) and the player (blue)
-    /// vs enemy (red) starts. Oriented as a diamond to match the in-game camera.
-    fn draw_diamond(ctx: &Ctx, cx: f64, cy: f64, a: f64, b: f64, idx: usize) {
-        use std::f64::consts::TAU;
-        let sw = crate::voxel::MAP_SWATCH[idx];
-        let name = crate::voxel::MAP_NAMES[idx];
-        let shade = |m: f64| {
-            format!(
-                "rgb({},{},{})",
-                (sw[0] as f64 * m) as u8,
-                (sw[1] as f64 * m) as u8,
-                (sw[2] as f64 * m) as u8
-            )
-        };
-        // Map the unit square to an iso diamond centred at (cx, cy): the four
-        // square corners become top / right / bottom / left of the diamond.
-        let iso = |u: f64, t: f64| (cx + (u - t) * a, cy + (u + t - 1.0) * b);
-        let corners = [iso(0.0, 0.0), iso(1.0, 0.0), iso(1.0, 1.0), iso(0.0, 1.0)];
-        let path = |c: &[(f64, f64); 4]| {
-            ctx.begin_path();
-            ctx.move_to(c[0].0, c[0].1);
-            for p in &c[1..] {
-                ctx.line_to(p.0, p.1);
-            }
-            ctx.close_path();
-        };
-        path(&corners);
-        ctx.set_fill_style_str(&shade(1.0));
-        ctx.fill();
+    thread_local! {
+        /// Per-map offscreen canvas holding the decoded preview PNG. Drawn
+        /// with `drawImage`, which respects the canvas transform and browser
+        /// sampling (a raw `putImageData` ignored both and striped on some
+        /// zoom / devicePixelRatio combinations).
+        static PREVIEW_CANVAS: std::cell::RefCell<std::collections::HashMap<usize, web_sys::HtmlCanvasElement>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
 
-        // Wrapping: the splitmix constant overflows u64 for any idx >= 2, which
-        // panics in builds with overflow checks (it nuked the lobby in prod).
-        let mut s: u64 = (idx as u64)
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            .wrapping_add(1);
-        let mut rnd = || {
-            s = s
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            ((s >> 33) & 0xFFFF) as f64 / 65535.0
+    /// An offscreen canvas with map `idx`'s pre-rendered 3D preview (decoded
+    /// once and cached). Never attached to the DOM; it is purely a drawImage
+    /// source.
+    fn preview_canvas(idx: usize) -> Option<web_sys::HtmlCanvasElement> {
+        PREVIEW_CANVAS.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if let Some(c) = cache.get(&idx) {
+                return Some(c.clone());
+            }
+            let img = image::load_from_memory(crate::voxel::MAP_PREVIEWS[idx]).ok()?;
+            let rgba = img.to_rgba8();
+            let (iw, ih) = (rgba.width(), rgba.height());
+            let doc = web_sys::window()?.document()?;
+            let canvas = doc
+                .create_element("canvas")
+                .ok()?
+                .dyn_into::<web_sys::HtmlCanvasElement>()
+                .ok()?;
+            canvas.set_width(iw);
+            canvas.set_height(ih);
+            let cctx = canvas.get_context("2d").ok()??.dyn_into::<Ctx>().ok()?;
+            let data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+                wasm_bindgen::Clamped(&rgba.into_raw()),
+                iw,
+                ih,
+            )
+            .ok()?;
+            cctx.put_image_data(&data, 0.0, 0.0).ok()?;
+            cache.insert(idx, canvas.clone());
+            Some(canvas)
+        })
+    }
+
+    /// The pre-rendered 3D battlefield preview (the actual voxel terrain
+    /// rasterized at the game camera angle), drawn centred at `(cx, cy)` and
+    /// fitted inside the `2a x 2b` box (CSS pixels). Player (blue) and enemy
+    /// (red) start markers overlay the terrain at the real spawn points.
+    fn draw_map_preview(ctx: &Ctx, cx: f64, cy: f64, a: f64, b: f64, idx: usize) {
+        use std::f64::consts::TAU;
+        let Some(src) = preview_canvas(idx) else {
+            // Decode failed: fall back to a flat swatch diamond so a map's
+            // preview can never simply go missing from the menu.
+            let sw = crate::voxel::MAP_SWATCH[idx];
+            ctx.set_fill_style_str(&format!("rgb({},{},{})", sw[0], sw[1], sw[2]));
+            ctx.begin_path();
+            ctx.move_to(cx, cy - b);
+            ctx.line_to(cx + a, cy);
+            ctx.line_to(cx, cy + b);
+            ctx.line_to(cx - a, cy);
+            ctx.close_path();
+            ctx.fill();
+            return;
         };
-        let dot = |u: f64, t: f64, r: f64, col: &str| {
+        let (iw, ih) = (src.width() as f64, src.height() as f64);
+        let scale = (2.0 * a / iw).min(2.0 * b / ih);
+        let (tw, th) = (iw * scale, ih * scale);
+        let _ = ctx.draw_image_with_html_canvas_element_and_dw_and_dh(
+            &src,
+            cx - tw / 2.0,
+            cy - th / 2.0,
+            tw,
+            th,
+        );
+        // Start markers at this world's actual fitted spawns (every
+        // battlefield re-fits the template onto its own viable ground, so
+        // the positions differ per world).
+        let (half_w, half_h) = (tw / 2.0, th / 2.0);
+        let iso = |u: f64, t: f64| (cx + (u - t) * half_w, cy + (u + t - 1.0) * half_h * 0.92);
+        let dot = |u: f64, t: f64, col: &str| {
             let (px, py) = iso(u, t);
             ctx.set_fill_style_str(col);
             ctx.begin_path();
-            let _ = ctx.ellipse(px, py, r, r * 0.6, 0.0, 0.0, TAU);
+            let _ = ctx.ellipse(px, py, half_w * 0.035, half_w * 0.021, 0.0, 0.0, TAU);
             ctx.fill();
         };
-        let rr = a * 0.07;
-        if name == "EARTH" {
-            for _ in 0..6 {
-                dot(
-                    0.18 + rnd() * 0.64,
-                    0.18 + rnd() * 0.64,
-                    rr * 1.7,
-                    "#2f6dab",
-                );
-            }
-            dot(0.6, 0.42, rr, "#e8eef4");
-        } else if name == "TITAN" {
-            for _ in 0..4 {
-                dot(
-                    0.18 + rnd() * 0.64,
-                    0.18 + rnd() * 0.64,
-                    rr * 1.8,
-                    "#23252f",
-                );
-            }
-        } else if name == "IO" {
-            for _ in 0..4 {
-                let (u, t) = (0.22 + rnd() * 0.56, 0.22 + rnd() * 0.56);
-                dot(u, t, rr * 1.6, &shade(1.15));
-                dot(u, t, rr * 0.7, "#ec7a2c");
-            }
-        } else {
-            let n = if matches!(name, "ENCELADUS" | "TRITON" | "PLUTO" | "MARS") {
-                5
-            } else {
-                11
-            };
-            for _ in 0..n {
-                let (u, t) = (0.14 + rnd() * 0.72, 0.14 + rnd() * 0.72);
-                dot(u, t, rr * 1.1, &shade(1.25));
-                dot(u, t, rr * 0.7, &shade(0.7));
-            }
+        let span = 2.0 * crate::terrain::HALF as f64;
+        for (owner, x, z) in crate::map::world_spawns(idx) {
+            let u = (x as f64 + crate::terrain::HALF as f64) / span;
+            let t = (z as f64 + crate::terrain::HALF as f64) / span;
+            dot(u, t, if owner == 0 { "#4aa3ff" } else { "#ff5a4a" });
         }
-        dot(0.3, 0.3, rr * 0.9, "#4aa3ff");
-        dot(0.7, 0.7, rr * 0.9, "#ff5a4a");
-
-        path(&corners);
-        ctx.set_stroke_style_str("rgba(120,160,210,0.95)");
-        ctx.set_line_width(1.5);
-        ctx.stroke();
     }
 
     /// The scrollable map-select modal: a list (with scrollbar) on the left and a
     /// live diamond preview of the highlighted world on the right.
-    fn draw_modal(ctx: &Ctx, lobby: &Lobby, w: f64, h: f64) {
+    fn draw_modal(
+        ctx: &Ctx,
+        lobby: &Lobby,
+        w: f64,
+        h: f64,
+        over: impl Fn(&Btn) -> bool,
+        flashed: impl Fn(&Btn) -> bool,
+    ) {
         let s = ui_scale(w, h);
         let row_h = 40.0 * s;
         ctx.set_fill_style_str("rgba(2,4,10,0.6)");
@@ -473,7 +492,7 @@ mod web {
         let _ = ctx.fill_text("SELECT BATTLEFIELD", mx + 30.0 * s, my + 52.0 * s);
 
         for b in modal_layout(lobby, w, h) {
-            draw_btn(ctx, &b, s);
+            draw_btn(ctx, &b, s, over(&b), flashed(&b));
             if let Click::PickMap(i) = b.click {
                 let sw = crate::voxel::MAP_SWATCH[i as usize];
                 ctx.set_fill_style_str(&format!("rgb({},{},{})", sw[0], sw[1], sw[2]));
@@ -507,22 +526,45 @@ mod web {
         ));
         let _ = ctx.fill_text(crate::voxel::MAP_NAMES[mi], pcx, my + 92.0 * s);
         let pa = (mx + mw - 30.0 * s - px) * 0.46;
-        draw_diamond(ctx, pcx, my + mh * 0.52, pa, pa * 0.6, mi);
+        draw_map_preview(ctx, pcx, my + mh * 0.52, pa, pa * 0.75, mi);
         ctx.set_text_align("left");
     }
 
-    pub fn draw(screen: Screen, lobby: &Lobby, w_phys: f32, h_phys: f32) {
-        let Some((ctx, w, h, _)) = ctx(w_phys as f64, h_phys as f64) else {
+    pub fn draw(
+        screen: Screen,
+        lobby: &Lobby,
+        w_phys: f32,
+        h_phys: f32,
+        cursor_phys: (f32, f32),
+        flash: Option<Click>,
+    ) {
+        let Some((ctx, w, h, d)) = ctx(w_phys as f64, h_phys as f64) else {
             return;
         };
+        let cursor = ((cursor_phys.0 / d) as f64, (cursor_phys.1 / d) as f64);
+        let over = |b: &Btn| {
+            cursor.0 >= b.x && cursor.0 <= b.x + b.w && cursor.1 >= b.y && cursor.1 <= b.y + b.h
+        };
+        let flashed = |b: &Btn| flash.is_some_and(|c| c != Click::None && c == b.click);
         ctx.clear_rect(0.0, 0.0, w, h);
         // Opaque backdrop: the match hasn't started (no map chosen yet), so the
-        // front-end fully covers the scene rather than dimming it. Two dark bands
-        // give a touch of depth without needing the gradient API.
-        ctx.set_fill_style_str("#070b16");
+        // front-end fully covers the scene. A deep-space vertical gradient,
+        // plus a faint violet aurora glow behind the title.
+        let g = ctx.create_linear_gradient(0.0, 0.0, 0.0, h);
+        let _ = g.add_color_stop(0.0, "#1a2348");
+        let _ = g.add_color_stop(0.45, "#0d142e");
+        let _ = g.add_color_stop(1.0, "#04060d");
+        ctx.set_fill_style_canvas_gradient(&g);
         ctx.fill_rect(0.0, 0.0, w, h);
-        ctx.set_fill_style_str("#0b1224");
-        ctx.fill_rect(0.0, 0.0, w, h * 0.5);
+        if let Ok(g) =
+            ctx.create_radial_gradient(w * 0.5, h * 0.26, 10.0, w * 0.5, h * 0.26, h * 0.7)
+        {
+            let _ = g.add_color_stop(0.0, "rgba(122,84,210,0.28)");
+            let _ = g.add_color_stop(0.5, "rgba(64,52,140,0.10)");
+            let _ = g.add_color_stop(1.0, "rgba(0,0,0,0.0)");
+            ctx.set_fill_style_canvas_gradient(&g);
+            ctx.fill_rect(0.0, 0.0, w, h);
+        }
 
         ctx.set_text_baseline("alphabetic");
         let s = ui_scale(w, h);
@@ -539,13 +581,6 @@ mod web {
                 ctx.set_fill_style_str("#e7eefa");
                 ctx.set_font(&font(true, 64.0));
                 let _ = ctx.fill_text("ASTROMANCERS", w / 2.0, h * 0.30);
-                ctx.set_fill_style_str("#7f9ec8");
-                ctx.set_font(&font(false, 18.0));
-                let _ = ctx.fill_text(
-                    "a deterministic lockstep RTS  -  two worlds, one wall",
-                    w / 2.0,
-                    h * 0.30 + 34.0 * s,
-                );
             }
             Screen::Lobby => {
                 ctx.set_text_align("left");
@@ -588,17 +623,22 @@ mod web {
                     rx,
                     326.0 * s,
                 );
-                draw_diamond(&ctx, rx + 190.0 * s, 432.0 * s, 180.0 * s, 95.0 * s, mi);
+                draw_map_preview(&ctx, rx + 190.0 * s, 432.0 * s, 180.0 * s, 100.0 * s, mi);
             }
             Screen::InGame => {}
         }
 
+        // While the modal is open it owns the cursor: the layer underneath
+        // neither hovers nor flashes.
+        let modal_open = screen == Screen::Lobby && lobby.map_open;
         for b in layout(screen, lobby, w, h) {
-            draw_btn(&ctx, &b, s);
+            let hover = !modal_open && over(&b);
+            let pressed = !modal_open && flashed(&b);
+            draw_btn(&ctx, &b, s, hover, pressed);
         }
         // The map-select modal draws on top of the lobby.
-        if screen == Screen::Lobby && lobby.map_open {
-            draw_modal(&ctx, lobby, w, h);
+        if modal_open {
+            draw_modal(&ctx, lobby, w, h, |b| over(b), |b| flashed(b));
         }
         // Restore defaults the in-game HUD relies on.
         ctx.set_text_align("left");

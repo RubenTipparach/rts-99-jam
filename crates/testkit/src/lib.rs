@@ -37,6 +37,19 @@ pub fn demo_replay() -> Replay {
     let mut r = Replay::new(0x00C0_FFEE_D00D_5EED);
 
     let mut setup = vec![
+        // Each side gets an HQ: it grants the supply block production needs.
+        Command::SpawnBuilding {
+            owner: 0,
+            kind: BuildingKind::Hq,
+            x: fx(0),
+            y: fx(-40),
+        },
+        Command::SpawnBuilding {
+            owner: 1,
+            kind: BuildingKind::Hq,
+            x: fx(0),
+            y: fx(40),
+        },
         Command::SpawnBuilding {
             owner: 0,
             kind: BuildingKind::Barracks,
@@ -72,43 +85,45 @@ pub fn demo_replay() -> Replay {
     }
     r.record(setup);
 
-    // Send the player's starting infantry north to attack.
+    // Send the player's starting infantry north to attack. The setup packs the
+    // arena as: 0/1 the two HQs, 2/3/4 the barracks, then infantry
+    // interleaved (player 0 at 5, 7, 9, 11).
     r.record(vec![
-        Command::AttackMove {
-            unit: 3,
-            x: fx(0),
-            y: fx(22),
-        },
-        Command::AttackMove {
-            unit: 4,
-            x: fx(0),
-            y: fx(22),
-        },
         Command::AttackMove {
             unit: 5,
             x: fx(0),
             y: fx(22),
         },
         Command::AttackMove {
-            unit: 6,
+            unit: 7,
+            x: fx(0),
+            y: fx(22),
+        },
+        Command::AttackMove {
+            unit: 9,
+            x: fx(0),
+            y: fx(22),
+        },
+        Command::AttackMove {
+            unit: 11,
             x: fx(0),
             y: fx(22),
         },
     ]);
 
-    // Queue a few units at the player's barracks (building index 0) so the
+    // Queue a few units at the player's barracks (building index 2) so the
     // manual production path is exercised by the determinism test.
     r.record(vec![
         Command::Train {
-            building: 0,
+            building: 2,
             kind: UnitKind::Infantry,
         },
         Command::Train {
-            building: 0,
+            building: 2,
             kind: UnitKind::Infantry,
         },
         Command::Train {
-            building: 0,
+            building: 2,
             kind: UnitKind::Infantry,
         },
     ]);

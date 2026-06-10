@@ -14,8 +14,54 @@ asset tools (see CLAUDE.md, "Two worlds, one wall").
 """
 
 import math
+import os
 import struct
 import zlib
+
+
+# --------------------------------------------------------------------------- #
+# skirmish scenario sites
+# --------------------------------------------------------------------------- #
+TEMPLATE_MAP = os.path.join(os.path.dirname(__file__), "..", "maps",
+                            "crossfire_basin.map")
+
+
+def scenario_template(path=None):
+    """Parse a skirmish `.map` into `(name, entities)`.
+
+    Each entity is `(kind, owner, x, z)` with `owner` None for neutral
+    resources. The template (crossfire_basin.map) is the layout worldgen
+    re-fits onto each world: mains move to viable ground and the shared
+    clusters shift to nearby usable spots, so the terrain itself is never
+    re-carved to suit the scenario.
+    """
+    if path is None:
+        path = TEMPLATE_MAP
+    name = "Skirmish"
+    entities = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if parts[0] == "name":
+                name = line.split(None, 1)[1]
+            elif parts[0] in ("ore", "carbon"):
+                entities.append((parts[0], None, float(parts[1]), float(parts[2])))
+            elif len(parts) == 4:
+                entities.append(
+                    (parts[0], int(parts[1]), float(parts[2]), float(parts[3])))
+    return name, entities
+
+
+def scenario_sites(path=None):
+    """The `(spawns, resources)` world positions of a scenario `.map`:
+    every `hq`, and every `ore`/`carbon` node."""
+    _, entities = scenario_template(path)
+    spawns = [(x, z) for (k, _, x, z) in entities if k == "hq"]
+    resources = [(x, z) for (k, _, x, z) in entities if k in ("ore", "carbon")]
+    return spawns, resources
 
 
 # --------------------------------------------------------------------------- #

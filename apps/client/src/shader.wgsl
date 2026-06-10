@@ -5,9 +5,31 @@ struct Camera {
     view_proj: mat4x4<f32>,
     eye: vec4<f32>,
     light_dir: vec4<f32>,
-    params: vec4<f32>, // x = time, y = map half-size, z = sea level
+    params: vec4<f32>, // x = time, y = map half-size, z = sea level, w = light count
+    light_pos: array<vec4<f32>, 64>, // xyz = position, w = radius
+    light_col: array<vec4<f32>, 64>, // rgb
 };
 @group(0) @binding(0) var<uniform> cam: Camera;
+
+// Dynamic point lights (muzzle flashes, floodlights, node glow): quadratic
+// falloff to the radius, diffuse against the surface normal. Evaluated in
+// the VERTEX stages only - this game is exclusively vertex-lit, so the
+// light pools land on terrain vertices and interpolate across triangles.
+fn point_lights(world: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    var sum = vec3<f32>(0.0, 0.0, 0.0);
+    let count = u32(cam.params.w);
+    for (var i = 0u; i < count; i = i + 1u) {
+        let lp = cam.light_pos[i];
+        let to = lp.xyz - world;
+        let d = length(to);
+        if (d < lp.w) {
+            let att = 1.0 - d / lp.w;
+            let ndl = max(dot(n, to / max(d, 0.001)), 0.0);
+            sum = sum + cam.light_col[i].rgb * (att * att * ndl);
+        }
+    }
+    return sum;
+}
 
 // group 1: terrain tiles + fog-of-war (also bound to the water pipeline).
 @group(1) @binding(0) var t_grass: texture_2d<f32>;
@@ -64,12 +86,14 @@ struct TerrainOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) plight: vec3<f32>,
 };
 @vertex
 fn vs_terrain(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>) -> TerrainOut {
     var o: TerrainOut;
     o.world = pos;
     o.normal = normal;
+    o.plight = point_lights(pos, normalize(normal));
     o.clip = cam.view_proj * vec4<f32>(pos, 1.0);
     return o;
 }
@@ -90,7 +114,8 @@ fn fs_terrain(in: TerrainOut) -> @location(0) vec4<f32> {
     col = mix(col, rock, smoothstep(0.32, 0.55, slope));
 
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    col = col * (0.45 + 0.7 * ndl) * fow(in.world);
+    let lit = 0.45 + 0.7 * ndl;
+    col = col * (vec3<f32>(lit, lit, lit) + in.plight) * fow(in.world);
     return vec4<f32>(col, 1.0);
 }
 
@@ -107,6 +132,7 @@ struct VoxelOut {
     @location(1) normal: vec3<f32>,
     @location(2) w: vec4<f32>,
     @location(3) haz: f32,
+    @location(4) plight: vec3<f32>,
 };
 @vertex
 fn vs_voxel(
@@ -120,6 +146,7 @@ fn vs_voxel(
     o.normal = normal;
     o.w = w;
     o.haz = haz;
+    o.plight = point_lights(pos, normalize(normal));
     o.clip = cam.view_proj * vec4<f32>(pos, 1.0);
     return o;
 }
@@ -146,7 +173,8 @@ fn fs_voxel(in: VoxelOut) -> @location(0) vec4<f32> {
 
     let emis = vec3<f32>(1.0, 0.45, 0.12) * world.tint.a * haz;
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    let lit = (col * (0.4 + 0.7 * ndl) + emis) * fow(in.world);
+    let base = 0.4 + 0.7 * ndl;
+    let lit = (col * (vec3<f32>(base, base, base) + in.plight) + emis) * fow(in.world);
     return vec4<f32>(lit, 1.0);
 }
 
@@ -158,10 +186,15 @@ struct WaterOut {
 @vertex
 fn vs_water(@location(0) pos: vec3<f32>) -> WaterOut {
     var o: WaterOut;
-    // Pass the vertex through: the Earthlike ocean quad is built at sea level and
-    // each voxel-world liquid surface carries its own per-column height.
-    o.world = pos;
-    o.clip = cam.view_proj * vec4<f32>(pos, 1.0);
+    // Small travelling swells bend the tessellated sheet so the body of
+    // water feels alive (the per-pixel ripples ride on top of these).
+    var p = pos;
+    let t = cam.params.x;
+    p.y += sin(p.x * 0.045 + t * 1.0) * 0.18
+        + sin(p.z * 0.052 - t * 0.8) * 0.18
+        + sin(dot(p.xz, vec2<f32>(0.11, 0.09)) + t * 1.7) * 0.08;
+    o.world = p;
+    o.clip = cam.view_proj * vec4<f32>(p, 1.0);
     return o;
 }
 // Animated surface normal, evaluated per fragment: large slow swells plus fine
@@ -178,6 +211,9 @@ fn water_normal(p: vec2<f32>, t: f32, amp: f32) -> vec3<f32> {
     d += vec2<f32>(0.0, 1.0) * 0.08 * cos(p.y * 0.390 + t * 2.40);
     d += normalize(vec2<f32>(1.0, 1.0)) * 0.06 * cos(dot(p, vec2<f32>(0.330, 0.300)) + t * 3.10);
     d += normalize(vec2<f32>(-1.0, 0.4)) * 0.05 * cos(dot(p, vec2<f32>(0.21, -0.18)) - t * 3.7);
+    // Fine chop: high-frequency glitter so the surface sparkles per pixel.
+    d += normalize(vec2<f32>(0.8, -1.0)) * 0.045 * cos(dot(p, vec2<f32>(0.9, 0.75)) + t * 4.6);
+    d += normalize(vec2<f32>(-0.3, 1.0)) * 0.04 * cos(dot(p, vec2<f32>(0.7, -0.95)) - t * 5.2);
     return normalize(vec3<f32>(d.x * amp, 1.0, d.y * amp));
 }
 
@@ -198,7 +234,9 @@ fn water_sky(dir: vec3<f32>) -> vec3<f32> {
 fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
     let t = cam.params.x;
     let amp = clamp(world.liquid.a, 0.25, 1.5);
-    let n = water_normal(in.world.xz, t, amp);
+    // The 2.6x UV scale shrinks every ripple wavelength, packing far more
+    // surface detail into each screen-space stretch of water.
+    let n = water_normal(in.world.xz * 2.6, t, amp);
     let view = normalize(cam.eye.xyz - in.world); // surface -> eye
     let refl = reflect(-view, n); // reflected view ray, into the sky
     let sky = water_sky(refl);
@@ -224,10 +262,19 @@ fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
 }
 
 // ---------------- units / buildings ----------------
+// The instance tint's alpha selects a render mode:
+//   < 0     crystal (glassy resource node: fresnel rim, glint, screen-door body)
+//   < 1.25  normal (lit, team-tinted via the mesh's team weight)
+//   1.25-2  selected building (brightened with a green lift)
+//   2-3     hologram (the build-placement ghost: unlit, rolling scanlines)
+//   >= 3    emissive (fx particles: pure tint color, no lighting)
 struct UnitOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
     @location(1) albedo: vec3<f32>,
+    @location(2) mode: f32,
+    @location(3) world: vec3<f32>,
+    @location(4) plight: vec3<f32>,
 };
 @vertex
 fn vs_unit(
@@ -237,20 +284,120 @@ fn vs_unit(
     @location(2) offset: vec3<f32>,
     @location(3) scale: vec3<f32>,
     @location(4) tcol: vec4<f32>,
+    @location(6) rot: vec2<f32>,
+    @location(7) anim: vec2<f32>,
 ) -> UnitOut {
     var o: UnitOut;
-    o.normal = normal;
+    // Procedural walk: geometry near the ground (the legs) swings fore-aft
+    // along the mesh's facing axis (z), the left and right sides in
+    // counter-phase, with a small lift on the stepping foot. anim = (phase,
+    // amplitude); buildings and idle units pass amplitude 0.
+    var ap = pos;
+    if (anim.y > 0.0) {
+        let side = select(3.14159, 0.0, pos.x >= 0.0);
+        let foot = clamp(1.0 - pos.y / 1.3, 0.0, 1.0);
+        let swing = sin(anim.x + side);
+        ap.z = ap.z + swing * anim.y * foot;
+        ap.y = ap.y + max(swing, 0.0) * anim.y * 0.45 * foot;
+    }
+    // Yaw the mesh (and its normal) by the instance facing: rot = (cos, sin).
+    let sp = ap * scale;
+    let rp = vec3<f32>(sp.x * rot.x + sp.z * rot.y, sp.y, -sp.x * rot.y + sp.z * rot.x);
+    let rn = vec3<f32>(
+        normal.x * rot.x + normal.z * rot.y,
+        normal.y,
+        -normal.x * rot.y + normal.z * rot.x,
+    );
+    o.normal = rn;
+    let flat_tint = select(0.0, 1.0, tcol.a >= 2.0);
+    let sel = select(0.0, 1.0, tcol.a >= 1.25 && tcol.a < 2.0);
     // mcol.a is the team-tint weight: blend the material toward the faction
     // color so banners/tabards/plumes read as team color, metal/skin stay neutral.
-    o.albedo = mix(mcol.rgb, tcol.rgb, mcol.a);
-    o.clip = cam.view_proj * vec4<f32>(pos * scale + offset, 1.0);
+    var albedo = mix(mix(mcol.rgb, tcol.rgb, mcol.a), tcol.rgb, flat_tint);
+    albedo = mix(albedo, albedo * 1.25 + vec3<f32>(0.05, 0.18, 0.07), sel);
+    o.albedo = albedo;
+    o.mode = tcol.a;
+    let world = rp + offset;
+    o.world = world;
+    o.plight = point_lights(world, normalize(rn));
+    o.clip = cam.view_proj * vec4<f32>(world, 1.0);
     return o;
 }
 @fragment
 fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
+    if in.mode >= 3.0 {
+        // Emissive fx particle: pure color, no lighting. mode = 3 + life
+        // fraction; a dying particle fades by screen-door transparency
+        // (2x2 Bayer dither) at full brightness, never by darkening.
+        let t = clamp(in.mode - 3.0, 0.0, 1.0);
+        let px = vec2<u32>(in.clip.xy);
+        let bayer = f32((px.x & 1u) + 2u * (px.y & 1u));
+        if t * 4.0 < bayer + 0.5 {
+            discard;
+        }
+        return vec4<f32>(in.albedo, 1.0);
+    }
+    if in.mode >= 2.0 {
+        // Holographic build preview: unshaded scanlines plus screen-door
+        // (dither) transparency. The cursor ghost (mode 2.0) keeps every
+        // other pixel; a placed hologram (mode >= 2.25) is denser, so
+        // placement reads as a solid commitment versus a tentative preview.
+        let px = vec2<u32>(in.clip.xy);
+        if in.mode >= 2.25 {
+            if (px.x % 2u == 1u) && (px.y % 2u == 1u) {
+                discard;
+            }
+        } else if (px.x + px.y) % 2u == 0u {
+            discard;
+        }
+        let scan = 0.7 + 0.3 * sin(in.world.y * 5.0 - cam.params.x * 6.0);
+        return vec4<f32>(in.albedo * (1.1 * scan), 1.0);
+    }
     let n = normalize(in.normal);
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
-    return vec4<f32>(in.albedo * (0.45 + 0.7 * ndl), 1.0);
+    let lit = 0.45 + 0.7 * ndl;
+    let col = in.albedo * (vec3<f32>(lit, lit, lit) + in.plight);
+    return vec4<f32>(col, 1.0);
+}
+
+// ---------------- crystals / gas pools (blended) ----------------
+// A tiny analytic environment map standing in for a cubemap: deep space
+// below the horizon, a cool sky band above, a bright zenith and the sun.
+fn env_color(r: vec3<f32>) -> vec3<f32> {
+    let t = clamp(r.y * 0.5 + 0.5, 0.0, 1.0);
+    var c = mix(vec3<f32>(0.04, 0.05, 0.10), vec3<f32>(0.38, 0.66, 0.95), pow(t, 1.6));
+    c = mix(c, vec3<f32>(0.92, 0.97, 1.0), pow(max(r.y, 0.0), 6.0) * 0.5);
+    let sun = pow(max(dot(r, normalize(cam.light_dir.xyz)), 0.0), 48.0);
+    return c + vec3<f32>(1.0, 0.95, 0.8) * sun;
+}
+
+// Warcraft 3 style crystal: true alpha blending (no dither), an env-mapped
+// reflection that sharpens at glancing angles (fresnel), a sun glint, and a
+// slow pulsing inner glow (each cluster offset by its world position so a
+// field of nodes doesn't throb in unison).
+@fragment
+fn fs_crystal(in: UnitOut) -> @location(0) vec4<f32> {
+    let n = normalize(in.normal);
+    let v = normalize(cam.eye.xyz - in.world);
+    // Mesh winding is not consistent, so cull back faces here by the
+    // authored outward normal: with depth writes on, only the nearest
+    // front-facing facet blends (no interior/rear facet mush).
+    if dot(n, v) <= 0.0 {
+        discard;
+    }
+    let l = normalize(cam.light_dir.xyz);
+    let r = reflect(-v, n);
+    let fres = 0.06 + 0.94 * pow(1.0 - max(dot(n, v), 0.0), 3.0);
+    let ndl = max(dot(n, l), 0.0);
+    let pulse = 0.5 + 0.5 * sin(cam.params.x * 2.4 + dot(in.world.xz, vec2<f32>(0.13, 0.17)));
+    var col = in.albedo * (0.45 + 0.55 * ndl);
+    col += in.albedo * (0.15 + 0.45 * pulse);
+    col += in.plight * in.albedo;
+    col = mix(col, env_color(r), 0.30 + 0.55 * fres);
+    let spec = pow(max(dot(r, l), 0.0), 60.0);
+    col += vec3<f32>(1.0, 1.0, 1.0) * spec;
+    let alpha = clamp(0.42 + 0.55 * fres + 0.08 * pulse, 0.0, 0.95);
+    return vec4<f32>(col, alpha);
 }
 
 // ---------------- selection rings (ground decals) ----------------

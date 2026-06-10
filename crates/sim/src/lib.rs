@@ -15,7 +15,7 @@ mod rng;
 
 pub use rng::DetRng;
 
-use math::{Fx, Vec3};
+use math::{Fx, Vec2, Vec3};
 use protocol::{BuildingKind, Command, PlayerId, ResourceKind, UnitKind};
 
 /// A stable handle to an entity (generation guards against slot reuse).
@@ -29,14 +29,19 @@ pub struct EntityId {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Kind {
     Infantry,
-    /// Builder/harvester: moves and avoids stacking like infantry, but never
-    /// fights (no auto-aggro, no attack orders).
+    /// Builder/harvester: moves and avoids stacking like infantry. Carries a
+    /// feeble tool attack used only on explicit orders (no auto-aggro).
     Worker,
     /// Heavy assault unit: slow, high HP, hits hard.
     Heavy,
+    /// Headquarters (Astromancer Spire, Hollowmen Command HQ): the tech root.
+    /// Trains workers and is the workers' deposit point.
+    Hq,
     Barracks,
     /// Defensive emplacement: immobile, auto-fires on nearby enemies.
     Turret,
+    /// Supply depot: raises the owner's unit cap. Inert otherwise.
+    Supply,
     /// Ore crystals: harvested into the ore stockpile.
     OreNode,
     /// Carbon gas geyser: harvested into the carbon stockpile.
@@ -55,7 +60,19 @@ fn is_fighter(k: Kind) -> bool {
 
 /// A building (occupies a footprint, owned, can be a drop-off / target).
 fn is_building(k: Kind) -> bool {
-    matches!(k, Kind::Barracks | Kind::Turret)
+    matches!(k, Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply)
+}
+
+/// Buildings that run a production queue (HQ makes workers, Barracks fighters).
+fn is_producer(k: Kind) -> bool {
+    matches!(k, Kind::Hq | Kind::Barracks)
+}
+
+/// Workers deposit their load at these. Only the HQ takes deliveries:
+/// hauling home is part of the harvest loop's economy, so a forward
+/// Barracks must never shortcut it.
+fn is_dropoff(k: Kind) -> bool {
+    matches!(k, Kind::Hq)
 }
 
 /// Harvestable resource nodes (neutral, static, not valid combat targets).
@@ -101,7 +118,10 @@ enum Order {
 struct Stats {
     max_hp: Fx,
     speed: Fx,
-    range2: Fx,
+    /// Attack reach measured to the target's *edge* (its obstacle radius is
+    /// added per target), so big buildings can be hit from outside their
+    /// footprint.
+    range: Fx,
     damage: Fx,
     attack_cd: Fx,
     aggro2: Fx,
@@ -112,33 +132,43 @@ fn stats(kind: Kind) -> Stats {
         Kind::Infantry => Stats {
             max_hp: Fx::from_int(50),
             speed: Fx::from_ratio(30, 100),
-            range2: Fx::from_int(25), // range 5
+            range: Fx::from_int(7),
             damage: Fx::from_int(5),
             attack_cd: Fx::from_int(12),
             aggro2: Fx::from_int(256), // aggro 16
         },
-        // Workers move like infantry but carry no weapon.
+        // Workers move like infantry; a feeble close-range tool attack, used
+        // only when explicitly ordered (no auto-aggro - see `is_fighter`).
         Kind::Worker => Stats {
             max_hp: Fx::from_int(40),
             speed: Fx::from_ratio(30, 100),
-            range2: Fx::ZERO,
-            damage: Fx::ZERO,
-            attack_cd: Fx::ZERO,
+            range: Fx::from_int(2),
+            damage: Fx::from_int(3),
+            attack_cd: Fx::from_int(16),
             aggro2: Fx::ZERO,
         },
         // Heavy: slow bruiser with lots of HP and a heavy hit.
         Kind::Heavy => Stats {
             max_hp: Fx::from_int(180),
             speed: Fx::from_ratio(18, 100),
-            range2: Fx::from_int(36), // range 6
+            range: Fx::from_int(9),
             damage: Fx::from_int(14),
             attack_cd: Fx::from_int(20),
-            aggro2: Fx::from_int(289), // aggro 17
+            aggro2: Fx::from_int(324), // aggro 18
+        },
+        // HQ: the base anchor; the toughest structure on the field.
+        Kind::Hq => Stats {
+            max_hp: Fx::from_int(900),
+            speed: Fx::ZERO,
+            range: Fx::ZERO,
+            damage: Fx::ZERO,
+            attack_cd: Fx::ZERO,
+            aggro2: Fx::ZERO,
         },
         Kind::Barracks => Stats {
             max_hp: Fx::from_int(500),
             speed: Fx::ZERO,
-            range2: Fx::ZERO,
+            range: Fx::ZERO,
             damage: Fx::ZERO,
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
@@ -147,16 +177,25 @@ fn stats(kind: Kind) -> Stats {
         Kind::Turret => Stats {
             max_hp: Fx::from_int(260),
             speed: Fx::ZERO,
-            range2: Fx::from_int(144), // range 12
+            range: Fx::from_int(12),
             damage: Fx::from_int(9),
             attack_cd: Fx::from_int(14),
             aggro2: Fx::from_int(144),
+        },
+        // Supply depot: cheap, unarmed, just a wall of habitat plating.
+        Kind::Supply => Stats {
+            max_hp: Fx::from_int(300),
+            speed: Fx::ZERO,
+            range: Fx::ZERO,
+            damage: Fx::ZERO,
+            attack_cd: Fx::ZERO,
+            aggro2: Fx::ZERO,
         },
         // Resource nodes are inert: tons of "hp" so stray AoE can't pop them.
         Kind::OreNode | Kind::CarbonNode => Stats {
             max_hp: Fx::from_int(100000),
             speed: Fx::ZERO,
-            range2: Fx::ZERO,
+            range: Fx::ZERO,
             damage: Fx::ZERO,
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
@@ -172,31 +211,40 @@ const MINE_RANGE2: Fx = Fx::from_int(36); // mine within range 6 of a node
 const DEPOSIT_RANGE2: Fx = Fx::from_int(100); // deposit within range 10 of a building
 
 const PROD_TICKS: i32 = 55;
-const TEAM_UNIT_CAP: usize = 30;
 const MAX_QUEUE: u32 = 6;
 
-// Economy: ore + carbon. Players start with an ore stockpile, gain a trickle of
-// ore per completed building, and pay per trained unit / built structure. Nobody
-// auto-produces - every unit is queued by command. Advanced units and the turret
-// also cost carbon, so harvesting the gas geyser matters.
+// Supply: every unit on the field occupies one supply. The HQ provides a base
+// block and each Supply depot adds more, up to a hard ceiling. Production
+// holds (without dropping the queue) while the owner is at their cap.
+pub const SUPPLY_PER_HQ: u32 = 10;
+pub const SUPPLY_PER_DEPOT: u32 = 8;
+pub const MAX_SUPPLY: u32 = 60;
+
+// Economy: ore + carbon, both mined by workers - there is no passive income.
+// Players start with an ore stockpile and pay per trained unit / built
+// structure. Nobody auto-produces - every unit is queued by command. Advanced
+// units and the turret also cost carbon, so harvesting the gas geyser matters.
 const STARTING_ORE: i32 = 200;
 pub const TRAIN_COST: i32 = 50;
-const INCOME_PER_BUILDING: Fx = Fx::from_ratio(1, 2); // per building, per tick
+pub const WORKER_COST: i32 = 40;
 
 /// `(ore, carbon)` cost to train a unit of `kind`.
 fn unit_cost(kind: UnitKind) -> (Fx, Fx) {
     match kind {
         UnitKind::Infantry => (Fx::from_int(TRAIN_COST), Fx::ZERO),
         UnitKind::Heavy => (Fx::from_int(120), Fx::from_int(60)),
-        UnitKind::Worker => (Fx::from_int(40), Fx::ZERO),
+        UnitKind::Worker => (Fx::from_int(WORKER_COST), Fx::ZERO),
     }
 }
 
 /// `(ore, carbon)` cost to construct a building of `kind`.
 fn building_cost(kind: BuildingKind) -> (Fx, Fx) {
     match kind {
+        // A new HQ founds an expansion; priced like a StarCraft town hall.
+        BuildingKind::Hq => (Fx::from_int(400), Fx::ZERO),
         BuildingKind::Barracks => (Fx::from_int(150), Fx::ZERO),
         BuildingKind::Turret => (Fx::from_int(90), Fx::from_int(50)),
+        BuildingKind::Supply => (Fx::from_int(100), Fx::ZERO),
     }
 }
 
@@ -209,15 +257,19 @@ const BUILD_CLEAR2: Fx = Fx::from_int(196); // sites must be >= 14 from other bu
 
 // Bot commander tuning.
 const BOT_THINK_TICKS: u64 = 15; // re-plan cadence (every ~0.75s at 20 Hz)
-const BOT_MAX_BUILDINGS: usize = 3;
+const BOT_MAX_BUILDINGS: usize = 3; // production/defense structures (HQ and depots excluded)
+const BOT_TARGET_WORKERS: usize = 6; // staff the mining crew up to this
 
 // Obstacle avoidance: mobile units are pushed out of these static footprints so
 // they path around structures instead of through them. Radii are world units.
 const UNIT_RADIUS: Fx = Fx::from_int(1);
 fn obstacle_radius(k: Kind) -> Option<Fx> {
     match k {
+        // Large footprint tier (see docs/building-design-language.md).
+        Kind::Hq => Some(Fx::from_int(7)),
         Kind::Barracks => Some(Fx::from_int(6)),
         Kind::Turret => Some(Fx::from_ratio(5, 2)), // 2.5
+        Kind::Supply => Some(Fx::from_int(3)),      // small 5x5 tier
         Kind::OreNode | Kind::CarbonNode => Some(Fx::from_ratio(7, 2)), // 3.5
         _ => None,
     }
@@ -228,9 +280,12 @@ fn obstacle_radius(k: Kind) -> Option<Fx> {
 // crowd drifts apart and a group-move settles into distinct cells rather than
 // stacking on one point. `SEP_FACTOR` (each pair resolves half the overlap) and
 // the `SEP_MAX` step clamp keep it a smooth drift instead of a teleport.
-const SEP_DIST: Fx = Fx::from_ratio(5, 2); // desired min spacing between centers
+// The tolerance is tight and the per-tick push caps *below* move speed, so a
+// unit shouldering through a crowd keeps most of its momentum instead of
+// stalling against neighbours.
+const SEP_DIST: Fx = Fx::from_ratio(2, 1); // desired min spacing between centers
 const SEP_FACTOR: Fx = Fx::from_ratio(1, 2);
-const SEP_MAX: Fx = Fx::from_ratio(30, 100); // max push per tick (= infantry speed)
+const SEP_MAX: Fx = Fx::from_ratio(18, 100); // max push per tick (< infantry speed)
 
 /// One entity as seen by the renderer/HUD (read-only; client converts to floats).
 #[derive(Clone, Copy)]
@@ -245,6 +300,9 @@ pub struct Snap {
     pub moving: bool,
     /// Workers only, display-only: actively mining a node this tick.
     pub mining: bool,
+    /// Workers only, display-only: what the worker is hauling
+    /// (0 = nothing, 1 = ore, 2 = carbon), so the client can show the load.
+    pub carry: u8,
     /// Resource nodes only, display-only: fraction of the node remaining (1..0).
     pub resource_frac: Fx,
     /// Buildings only: units queued for production and the current unit's
@@ -254,6 +312,11 @@ pub struct Snap {
     /// Buildings only: construction progress, 1.0 once functional. Below 1.0 the
     /// structure is still being raised (display-only fraction).
     pub construct_frac: Fx,
+    /// Production buildings only: where freshly trained units gather
+    /// (display-only; set by `Command::SetRally`).
+    pub rally: Vec3,
+    /// Direction the entity faces (raw, un-normalized; renderer derives yaw).
+    pub facing: Vec2,
 }
 
 #[derive(Default)]
@@ -329,11 +392,30 @@ pub struct World {
     mining: Vec<bool>,
     /// Buildings only: ticks of construction remaining (0 = functional).
     construct: Vec<Fx>,
-    /// Barracks only: which unit kind it is currently producing (0 = Infantry,
-    /// 1 = Heavy).
+    /// Producers only: which unit kind the building is currently producing
+    /// (0 = Infantry, 1 = Heavy, 2 = Worker).
     prod_kind: Vec<u8>,
     /// Per-player flag: this player is driven by the in-sim bot commander.
     bot: Vec<bool>,
+    /// Facing per entity: the raw (un-normalized) direction it last moved,
+    /// mined, or attacked toward. Part of the deterministic state (hashed);
+    /// the renderer normalizes it into a yaw.
+    facing: Vec<Vec2>,
+    /// Shots fired this tick, as `(attacker, target)` slot indices. Display
+    /// events for the client fx layer; cleared every step, never hashed.
+    shots: Vec<(u32, u32)>,
+    /// Terrain passability grid (square, `pass_n` per side over `+-pass_half`):
+    /// mobile units never enter a blocked cell (water, cliffs). Static match
+    /// config fed identically on every peer before play; empty = all open.
+    passable: Vec<bool>,
+    pass_n: i64,
+    pass_half: Fx,
+    /// Fingerprint of the fed grid, folded into the state hash (0 = no grid).
+    pass_hash: u64,
+    /// Per-player: ever owned a building. Drives elimination (a player who
+    /// built a base and lost all of it is out); derived deterministically
+    /// from spawns, queried by the client, never read by the sim itself.
+    had_building: Vec<bool>,
 }
 
 #[inline]
@@ -367,6 +449,13 @@ impl World {
             construct: Vec::new(),
             prod_kind: Vec::new(),
             bot: Vec::new(),
+            facing: Vec::new(),
+            shots: Vec::new(),
+            passable: Vec::new(),
+            pass_n: 0,
+            pass_half: Fx::ZERO,
+            pass_hash: 0,
+            had_building: Vec::new(),
         }
     }
 
@@ -378,6 +467,142 @@ impl World {
             self.bot.push(false);
         }
         self.bot[i] = on;
+    }
+
+    /// Feed the terrain passability grid (must be identical on every peer):
+    /// `cells` is row-major `n x n` over the square `+-half` world extent,
+    /// true = walkable. Its fingerprint joins the state hash so a mismatch
+    /// desyncs loudly instead of silently.
+    pub fn set_passability(&mut self, n: usize, half: Fx, cells: Vec<bool>) {
+        assert_eq!(cells.len(), n * n, "passability grid must be n x n");
+        let mut h = Fnv1a::new();
+        h.write_u64(n as u64);
+        h.write_i64(half.to_raw());
+        for (i, &open) in cells.iter().enumerate() {
+            if open {
+                h.write_u32(i as u32);
+            }
+        }
+        self.pass_hash = h.finish();
+        self.pass_n = n as i64;
+        self.pass_half = half;
+        self.passable = cells;
+    }
+
+    /// Whether ground units may stand at `(x, y)` (true with no grid fed).
+    fn cell_passable(&self, x: Fx, y: Fx) -> bool {
+        if self.passable.is_empty() {
+            return true;
+        }
+        let span = self.pass_half + self.pass_half;
+        let n = Fx::from_int(self.pass_n as i32);
+        let ix = ((x + self.pass_half) / span * n).floor_int();
+        let iy = ((y + self.pass_half) / span * n).floor_int();
+        if ix < 0 || iy < 0 || ix >= self.pass_n || iy >= self.pass_n {
+            return false;
+        }
+        self.passable[(iy * self.pass_n + ix) as usize]
+    }
+
+    /// True when stepping from `from` to `(x, y)` would walk into a static
+    /// footprint (building or resource node). A unit already overlapping a
+    /// footprint may keep moving (so the separation push can evict it);
+    /// only entering is blocked. Fixed iteration order, pure predicate.
+    fn obstacle_blocked(&self, from: Vec3, x: Fx, y: Fx) -> bool {
+        for j in 0..self.arena.capacity() {
+            if !self.arena.alive[j] {
+                continue;
+            }
+            if let Some(r) = obstacle_radius(self.kind[j]) {
+                let rr = r + UNIT_RADIUS;
+                let dx = x - self.pos[j].x;
+                let dy = y - self.pos[j].y;
+                if dx * dx + dy * dy < rr * rr {
+                    let fx_ = from.x - self.pos[j].x;
+                    let fy_ = from.y - self.pos[j].y;
+                    if fx_ * fx_ + fy_ * fy_ >= rr * rr {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Whether a mobile unit standing at `from` may step onto `(x, y)`.
+    fn spot_free(&self, from: Vec3, x: Fx, y: Fx) -> bool {
+        self.cell_passable(x, y) && !self.obstacle_blocked(from, x, y)
+    }
+
+    /// The centre of the nearest footprint that blocks stepping onto
+    /// `(x, y)` from `from`, if any (fixed ascending order, nearest wins).
+    fn blocking_obstacle(&self, from: Vec3, x: Fx, y: Fx) -> Option<Vec3> {
+        let mut best: Option<(Fx, Vec3)> = None;
+        for j in 0..self.arena.capacity() {
+            if !self.arena.alive[j] {
+                continue;
+            }
+            if let Some(r) = obstacle_radius(self.kind[j]) {
+                let rr = r + UNIT_RADIUS;
+                let dx = x - self.pos[j].x;
+                let dy = y - self.pos[j].y;
+                let d2 = dx * dx + dy * dy;
+                if d2 < rr * rr {
+                    let fx_ = from.x - self.pos[j].x;
+                    let fy_ = from.y - self.pos[j].y;
+                    if fx_ * fx_ + fy_ * fy_ >= rr * rr
+                        && best.map(|(bd, _)| d2 < bd).unwrap_or(true)
+                    {
+                        best = Some((d2, self.pos[j]));
+                    }
+                }
+            }
+        }
+        best.map(|(_, c)| c)
+    }
+
+    /// Move entity `i` to `(nx, ny)` if the terrain and footprints allow.
+    /// A blocked step slides along whichever single axis stays open; if both
+    /// axes are blocked by a building, deflect tangentially around its
+    /// footprint (whichever way agrees with the intended direction), so a
+    /// unit aimed dead-centre at a structure walks around it instead of
+    /// jamming against the wall.
+    fn try_move(&mut self, i: usize, nx: Fx, ny: Fx) {
+        let cur = self.pos[i];
+        if self.spot_free(cur, nx, ny) {
+            self.pos[i].x = nx;
+            self.pos[i].y = ny;
+            return;
+        }
+        if self.spot_free(cur, nx, cur.y) {
+            self.pos[i].x = nx;
+            return;
+        }
+        if self.spot_free(cur, cur.x, ny) {
+            self.pos[i].y = ny;
+            return;
+        }
+        if let Some(c) = self.blocking_obstacle(cur, nx, ny) {
+            let rx = cur.x - c.x;
+            let ry = cur.y - c.y;
+            let rl = (rx * rx + ry * ry).sqrt();
+            if rl <= Fx::ZERO {
+                return;
+            }
+            let (mvx, mvy) = (nx - cur.x, ny - cur.y);
+            let step = (mvx * mvx + mvy * mvy).sqrt();
+            // Tangent (-ry, rx), flipped to agree with the intended move.
+            let (mut tx, mut ty) = (-ry / rl, rx / rl);
+            if tx * mvx + ty * mvy < Fx::ZERO {
+                tx = -tx;
+                ty = -ty;
+            }
+            let (cx_, cy_) = (cur.x + tx * step, cur.y + ty * step);
+            if self.spot_free(cur, cx_, cy_) {
+                self.pos[i].x = cx_;
+                self.pos[i].y = cy_;
+            }
+        }
     }
 
     /// A player's current ore (defaults to the starting stockpile).
@@ -438,6 +663,8 @@ impl World {
             self.mining.push(false);
             self.construct.push(Fx::ZERO);
             self.prod_kind.push(0);
+            // Face "north" (toward -y) until the first move/attack.
+            self.facing.push(Vec2::new(Fx::ZERO, Fx::from_int(-1)));
         }
     }
 
@@ -462,22 +689,79 @@ impl World {
         // to ramp construction up over CONSTRUCT_TICKS.
         self.construct[i] = Fx::ZERO;
         self.prod_kind[i] = 0;
+        self.facing[i] = Vec2::new(Fx::ZERO, Fx::from_int(-1));
         if owner != NEUTRAL {
             let _ = self.ore_mut(owner); // materialize the owner's stockpile
+            if is_building(kind) {
+                let p = owner as usize;
+                if self.had_building.len() <= p {
+                    self.had_building.resize(p + 1, false);
+                }
+                self.had_building[p] = true;
+            }
         }
         // Default rally a little "south" of a building.
         self.rally[i] = Vec3::new(x, y - Fx::from_int(7), Fx::ZERO);
         id
     }
 
-    fn team_unit_count(&self, owner: PlayerId) -> usize {
+    /// A player is eliminated once they have built a base and lost every
+    /// building (the classic RTS defeat rule; stray units don't keep you in).
+    pub fn eliminated(&self, player: PlayerId) -> bool {
+        if !self
+            .had_building
+            .get(player as usize)
+            .copied()
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        !(0..self.arena.capacity())
+            .any(|i| self.arena.alive[i] && is_building(self.kind[i]) && self.owner[i] == player)
+    }
+
+    /// True once every rival of `player` that ever had a base is eliminated
+    /// (and at least one such rival existed): the victory condition.
+    pub fn last_standing(&self, player: PlayerId) -> bool {
+        let mut had_rival = false;
+        for p in 0..self.had_building.len() {
+            if p == player as usize || !self.had_building[p] {
+                continue;
+            }
+            had_rival = true;
+            if !self.eliminated(p as PlayerId) {
+                return false;
+            }
+        }
+        had_rival
+    }
+
+    /// Supply in use: every living mobile unit (fighters and workers) is one.
+    pub fn supply_used(&self, owner: PlayerId) -> u32 {
         let mut n = 0;
         for i in 0..self.arena.capacity() {
-            if self.arena.alive[i] && is_fighter(self.kind[i]) && self.owner[i] == owner {
+            if self.arena.alive[i] && is_mobile(self.kind[i]) && self.owner[i] == owner {
                 n += 1;
             }
         }
         n
+    }
+
+    /// Supply ceiling: a block per completed HQ plus a block per completed
+    /// Supply depot, clamped to [`MAX_SUPPLY`].
+    pub fn supply_cap(&self, owner: PlayerId) -> u32 {
+        let mut cap = 0;
+        for i in 0..self.arena.capacity() {
+            if !self.arena.alive[i] || self.owner[i] != owner || self.construct[i] > Fx::ZERO {
+                continue;
+            }
+            cap += match self.kind[i] {
+                Kind::Hq => SUPPLY_PER_HQ,
+                Kind::Supply => SUPPLY_PER_DEPOT,
+                _ => 0,
+            };
+        }
+        cap.min(MAX_SUPPLY)
     }
 
     /// Nearest living entity of a different owner: returns `(index, dist2)`.
@@ -502,7 +786,7 @@ impl World {
     fn nearest_dropoff(&self, owner: PlayerId, from: Vec3) -> Option<Vec3> {
         let mut best: Option<(Vec3, Fx)> = None;
         for j in 0..self.arena.capacity() {
-            if !self.arena.alive[j] || self.kind[j] != Kind::Barracks || self.owner[j] != owner {
+            if !self.arena.alive[j] || !is_dropoff(self.kind[j]) || self.owner[j] != owner {
                 continue;
             }
             let d2 = dist2(from, self.pos[j].x, self.pos[j].y);
@@ -512,6 +796,70 @@ impl World {
             }
         }
         best.map(|(p, _)| p)
+    }
+
+    /// Spread harvesters across a node cluster: the same-kind node near
+    /// `want` with the fewest assigned harvesters wins (ties: closer to
+    /// `want`, then lower index). Keeps a worker pile from grinding a single
+    /// node while its neighbours sit untouched.
+    fn balanced_node(&self, want: u32) -> u32 {
+        let w = want as usize;
+        if !self.arena.alive_at(want) || !is_resource(self.kind[w]) {
+            return want;
+        }
+        let cap = self.arena.capacity();
+        // Harvesters currently assigned per node.
+        let mut load = vec![0u32; cap];
+        for i in 0..cap {
+            if !self.arena.alive[i] {
+                continue;
+            }
+            if let Order::Harvest { node } = self.order[i] {
+                if (node as usize) < cap {
+                    load[node as usize] += 1;
+                }
+            }
+        }
+        let kind = self.kind[w];
+        let wp = self.pos[w];
+        let reach2 = Fx::from_int(900); // same cluster: within 30 of the pick
+        let mut best = want;
+        let mut best_load = u32::MAX;
+        let mut best_d2 = Fx::MAX;
+        for (j, &node_load) in load.iter().enumerate() {
+            if !self.arena.alive[j] || self.kind[j] != kind {
+                continue;
+            }
+            let d2 = dist2(wp, self.pos[j].x, self.pos[j].y);
+            if d2 > reach2 {
+                continue;
+            }
+            if node_load < best_load || (node_load == best_load && d2 < best_d2) {
+                best = j as u32;
+                best_load = node_load;
+                best_d2 = d2;
+            }
+        }
+        best
+    }
+
+    /// Nearest living resource node within range 10 of `(x, y)`, if any
+    /// (used to read a rally point set on a node).
+    fn node_at(&self, x: Fx, y: Fx) -> Option<u32> {
+        let mut best: Option<(u32, Fx)> = None;
+        for j in 0..self.arena.capacity() {
+            if !self.arena.alive[j] || !is_resource(self.kind[j]) {
+                continue;
+            }
+            let d2 = dist2(self.pos[j], x, y);
+            if d2 <= Fx::from_int(100) {
+                match best {
+                    Some((_, bd)) if bd <= d2 => {}
+                    _ => best = Some((j as u32, d2)),
+                }
+            }
+        }
+        best.map(|(j, _)| j)
     }
 
     /// Nearest living resource node (any kind), for auto-retargeting a worker
@@ -532,13 +880,13 @@ impl World {
     }
 
     /// Advance the simulation by one tick. The only place game truth changes.
-    /// Nearest enemy building to `from` (skipping neutral resource nodes).
+    /// Nearest enemy base building to `from` (skipping neutral resource nodes).
     fn nearest_enemy_building(&self, owner: PlayerId, from: Option<Vec3>) -> Option<Vec3> {
         let from = from?;
         let mut best: Option<(Vec3, Fx)> = None;
         for j in 0..self.arena.capacity() {
             if self.arena.alive[j]
-                && self.kind[j] == Kind::Barracks
+                && is_producer(self.kind[j])
                 && self.owner[j] != owner
                 && self.owner[j] != NEUTRAL
             {
@@ -569,8 +917,11 @@ impl World {
             let owner = p as PlayerId;
             let mut idle_workers: Vec<u32> = Vec::new();
             let mut any_worker: Option<u32> = None;
+            let mut worker_count = 0usize;
+            let mut hqs: Vec<u32> = Vec::new();
             let mut barracks: Vec<u32> = Vec::new();
-            let mut base: Option<Vec3> = None;
+            let mut hq_base: Option<Vec3> = None;
+            let mut barracks_base: Option<Vec3> = None;
             let mut building_count = 0usize;
             let mut infantry_count = 0usize;
             let mut idle_infantry: Vec<u32> = Vec::new();
@@ -581,6 +932,7 @@ impl World {
                 }
                 match self.kind[i] {
                     Kind::Worker => {
+                        worker_count += 1;
                         if any_worker.is_none() {
                             any_worker = Some(i as u32);
                         }
@@ -590,11 +942,17 @@ impl World {
                             _ => {}
                         }
                     }
+                    Kind::Hq => {
+                        hqs.push(i as u32);
+                        if hq_base.is_none() {
+                            hq_base = Some(self.pos[i]);
+                        }
+                    }
                     Kind::Barracks => {
                         barracks.push(i as u32);
                         building_count += 1;
-                        if base.is_none() {
-                            base = Some(self.pos[i]);
+                        if barracks_base.is_none() {
+                            barracks_base = Some(self.pos[i]);
                         }
                     }
                     Kind::Turret => building_count += 1,
@@ -607,31 +965,45 @@ impl World {
                     _ => {}
                 }
             }
+            // The HQ anchors the base; fall back to a Barracks if it fell.
+            let base = hq_base.or(barracks_base);
             let ore = self.ore(owner);
             let carbon = self.carbon(owner);
-            // Expand economy first (a 2nd Barracks), then sprinkle Turrets.
-            let next_build = if building_count.is_multiple_of(2) {
-                BuildingKind::Turret
-            } else {
+            // Supply first when the cap is close; otherwise production up to
+            // two Barracks, then sprinkle Turrets.
+            let supply_tight = self.supply_used(owner) + 3 >= self.supply_cap(owner);
+            let next_build = if supply_tight {
+                BuildingKind::Supply
+            } else if barracks.len() < 2 {
                 BuildingKind::Barracks
+            } else {
+                BuildingKind::Turret
             };
             let (build_ore, build_carbon) = building_cost(next_build);
 
-            // 1) Construct: when flush and under the cap, send a worker to build.
+            // 1) Construct: when flush and under the cap (depots are exempt
+            // from the cap: the bot always builds out of a supply block).
             let mut builder: Option<u32> = None;
-            if building_count < BOT_MAX_BUILDINGS
+            if (supply_tight || building_count < BOT_MAX_BUILDINGS)
                 && !worker_building
                 && ore >= build_ore + Fx::from_int(60)
                 && carbon >= build_carbon
             {
                 builder = idle_workers.first().copied().or(any_worker);
                 if let (Some(w), Some(bp)) = (builder, base) {
-                    let off = ((building_count % 3) as i32 - 1) * 24;
+                    // Depots fill their own row behind the production line, a
+                    // slot per depot built, so sites never collide.
+                    let (off, dy) = if next_build == BuildingKind::Supply {
+                        let slot = (self.supply_cap(owner) / SUPPLY_PER_DEPOT) as i32 % 5;
+                        ((slot - 2) * 14, 44)
+                    } else {
+                        (((building_count % 3) as i32 - 1) * 24, 26)
+                    };
                     out.push(Command::Build {
                         unit: w,
                         kind: next_build,
                         x: bp.x + Fx::from_int(off),
-                        y: bp.y + Fx::from_int(26),
+                        y: bp.y + Fx::from_int(dy),
                     });
                 }
             }
@@ -646,7 +1018,22 @@ impl World {
                 }
             }
 
-            // 3) Train: spend surplus ore (keeping a build reserve) on one unit;
+            // 3) Staff the economy: train workers at the HQ until the mining
+            // crew is full (they pay for themselves quickly).
+            if worker_count < BOT_TARGET_WORKERS {
+                let (wo, wc) = unit_cost(UnitKind::Worker);
+                for &h in &hqs {
+                    if self.queue[h as usize] < MAX_QUEUE && ore >= wo && carbon >= wc {
+                        out.push(Command::Train {
+                            building: h,
+                            kind: UnitKind::Worker,
+                        });
+                        break;
+                    }
+                }
+            }
+
+            // 4) Train: spend surplus ore (keeping a build reserve) on one unit;
             // upgrade to a Heavy when the bot has banked enough carbon.
             let reserve = if building_count < BOT_MAX_BUILDINGS {
                 build_ore
@@ -669,7 +1056,7 @@ impl World {
                 }
             }
 
-            // 4) Attack: once a force has massed, push idle infantry at the foe.
+            // 5) Attack: once a force has massed, push idle infantry at the foe.
             if infantry_count >= 12 && self.tick.is_multiple_of(BOT_THINK_TICKS * 12) {
                 if let Some(t) = self.nearest_enemy_building(owner, base) {
                     for &u in &idle_infantry {
@@ -686,16 +1073,47 @@ impl World {
     }
 
     pub fn step(&mut self, commands: &[Command]) {
+        self.shots.clear();
         self.apply_commands(commands);
         // Bot players issue their commands through the same path, deterministically.
         let ai = self.ai_commands();
         self.apply_commands(&ai);
         self.construction();
         self.acquire_targets();
-        self.economy();
         self.production();
         self.units_update();
         self.tick += 1;
+    }
+
+    /// Shots fired during the last step, as `(attacker, target)` slot indices.
+    /// Presentation events (muzzle flashes, tracers); not part of the hash.
+    pub fn shots(&self) -> &[(u32, u32)] {
+        &self.shots
+    }
+
+    /// Squared reach of an attack with `range` against target `t`: range is
+    /// measured to the target's *edge*, so a building's footprint (or a mobile
+    /// unit's body radius) extends it. This is what lets units hit buildings
+    /// whose center they can never reach, and short-range tools land on units
+    /// held apart by separation.
+    fn reach2(&self, range: Fx, t: usize) -> Fx {
+        let pad = obstacle_radius(self.kind[t]).unwrap_or(if is_mobile(self.kind[t]) {
+            UNIT_RADIUS
+        } else {
+            Fx::ZERO
+        });
+        let r = range + pad;
+        r * r
+    }
+
+    /// Turn entity `i` toward the point `(tx, ty)`. Stored raw (un-normalized);
+    /// zero-length turns are ignored so facing always stays meaningful.
+    fn face(&mut self, i: usize, tx: Fx, ty: Fx) {
+        let dx = tx - self.pos[i].x;
+        let dy = ty - self.pos[i].y;
+        if dx != Fx::ZERO || dy != Fx::ZERO {
+            self.facing[i] = Vec2::new(dx, dy);
+        }
     }
 
     /// Tick down construction on buildings being raised.
@@ -703,16 +1121,6 @@ impl World {
         for i in 0..self.arena.capacity() {
             if self.arena.alive[i] && self.construct[i] > Fx::ZERO {
                 self.construct[i] = (self.construct[i] - Fx::ONE).max(Fx::ZERO);
-            }
-        }
-    }
-
-    /// Trickle ore income to each player for every completed building they own.
-    fn economy(&mut self) {
-        for i in 0..self.arena.capacity() {
-            if self.arena.alive[i] && is_building(self.kind[i]) && self.construct[i] <= Fx::ZERO {
-                let owner = self.owner[i];
-                *self.ore_mut(owner) += INCOME_PER_BUILDING;
             }
         }
     }
@@ -730,8 +1138,10 @@ impl World {
                 }
                 Command::SpawnBuilding { owner, kind, x, y } => {
                     let k = match kind {
+                        BuildingKind::Hq => Kind::Hq,
                         BuildingKind::Barracks => Kind::Barracks,
                         BuildingKind::Turret => Kind::Turret,
+                        BuildingKind::Supply => Kind::Supply,
                     };
                     self.spawn(k, owner, x, y);
                 }
@@ -749,6 +1159,10 @@ impl World {
                         && self.arena.alive_at(node)
                         && is_resource(self.kind[n])
                     {
+                        // Sending a crowd at one node spreads it across the
+                        // cluster (commands apply in order, so each worker
+                        // sees the loads the previous ones just took).
+                        let node = self.balanced_node(node);
                         self.order[u] = Order::Harvest { node };
                     }
                 }
@@ -768,14 +1182,16 @@ impl World {
                 }
                 Command::Train { building, kind } => {
                     let b = building as usize;
-                    // Barracks make fighters (workers come from the HQ tier; only
-                    // Infantry/Heavy are trainable here).
-                    let trainable = matches!(kind, UnitKind::Infantry | UnitKind::Heavy);
+                    // The HQ trains workers; the Barracks trains fighters.
+                    let trainable = self.arena.alive_at(building)
+                        && matches!(
+                            (self.kind[b], kind),
+                            (Kind::Barracks, UnitKind::Infantry | UnitKind::Heavy)
+                                | (Kind::Hq, UnitKind::Worker)
+                        );
                     let (ore, carbon) = unit_cost(kind);
-                    if self.arena.alive_at(building)
-                        && self.kind[b] == Kind::Barracks
+                    if trainable
                         && self.construct[b] <= Fx::ZERO
-                        && trainable
                         && self.queue[b] < MAX_QUEUE
                         && self.ore(self.owner[b]) >= ore
                         && self.carbon(self.owner[b]) >= carbon
@@ -784,7 +1200,11 @@ impl World {
                         *self.ore_mut(owner) -= ore;
                         *self.carbon_mut(owner) -= carbon;
                         self.queue[b] += 1;
-                        self.prod_kind[b] = if kind == UnitKind::Heavy { 1 } else { 0 };
+                        self.prod_kind[b] = match kind {
+                            UnitKind::Infantry => 0,
+                            UnitKind::Heavy => 1,
+                            UnitKind::Worker => 2,
+                        };
                         if self.prod[b] <= Fx::ZERO {
                             self.prod[b] = Fx::from_int(PROD_TICKS);
                         }
@@ -826,10 +1246,7 @@ impl World {
 
     fn production(&mut self) {
         for i in 0..self.arena.capacity() {
-            if !self.arena.alive[i]
-                || self.kind[i] != Kind::Barracks
-                || self.construct[i] > Fx::ZERO
-            {
+            if !self.arena.alive[i] || !is_producer(self.kind[i]) || self.construct[i] > Fx::ZERO {
                 continue;
             }
             // Every building is manual: it builds only what has been queued.
@@ -840,8 +1257,10 @@ impl World {
             if self.prod[i] > Fx::ZERO {
                 continue;
             }
-            // Built - but hold (without consuming the queue) if at the unit cap.
-            if self.team_unit_count(self.owner[i]) >= TEAM_UNIT_CAP {
+            // Built - but hold (without consuming the queue) while at the
+            // supply cap; a new depot releases it.
+            let owner = self.owner[i];
+            if self.supply_used(owner) >= self.supply_cap(owner) {
                 continue;
             }
             self.queue[i] -= 1;
@@ -854,38 +1273,95 @@ impl World {
         }
     }
 
-    /// Spawn one infantry just in front of building `i`, headed to its rally.
+    /// Spawn one queued unit on building `i`'s perimeter, on the side facing
+    /// its rally point, fanned across an arc by a deterministic jitter - so a
+    /// production stream steps out around the doorway instead of piling onto
+    /// one squeezed spot inside the footprint.
     fn produce_at(&mut self, i: usize) {
         let owner = self.owner[i];
         let p = self.pos[i];
         let rally = self.rally[i];
-        let kind = if self.prod_kind[i] == 1 {
-            Kind::Heavy
-        } else {
-            Kind::Infantry
+        let kind = match self.prod_kind[i] {
+            1 => Kind::Heavy,
+            2 => Kind::Worker,
+            _ => Kind::Infantry,
         };
-        // tiny deterministic spread so they don't stack perfectly
-        let jitter = Fx::from_ratio((self.rng.range_u32(7) as i64) - 3, 2);
-        let id = self.spawn(kind, owner, p.x + jitter, p.y - Fx::from_int(3));
-        self.order[id.index as usize] = Order::Move {
+        // Outward direction toward the rally (fallback: due south).
+        let dx = rally.x - p.x;
+        let dy = rally.y - p.y;
+        let len = (dx * dx + dy * dy).sqrt();
+        let (ux, uy) = if len > Fx::ZERO {
+            (dx / len, dy / len)
+        } else {
+            (Fx::ZERO, Fx::ONE)
+        };
+        // Fan across the facing arc: rotate by one of five fixed angles
+        // (-40/-20/0/20/40 degrees, fixed-point cos/sin), picked by the
+        // deterministic RNG.
+        const FAN: [(i64, i64); 5] = [
+            (7660, -6428),
+            (9397, -3420),
+            (10000, 0),
+            (9397, 3420),
+            (7660, 6428),
+        ];
+        let (c, sn) = FAN[self.rng.range_u32(5) as usize];
+        let (c, sn) = (Fx::from_ratio(c, 10000), Fx::from_ratio(sn, 10000));
+        let rx = ux * c - uy * sn;
+        let ry = ux * sn + uy * c;
+        // Just past the building's obstacle footprint.
+        let r = obstacle_radius(self.kind[i]).unwrap_or(Fx::from_int(3)) + Fx::from_int(2);
+        let id = self.spawn(kind, owner, p.x + rx * r, p.y + ry * r);
+        // A worker whose rally sits on a resource node goes straight to work
+        // (spread across the cluster); everyone else walks to the rally.
+        let u = id.index as usize;
+        if kind == Kind::Worker {
+            if let Some(n) = self.node_at(rally.x, rally.y) {
+                self.order[u] = Order::Harvest {
+                    node: self.balanced_node(n),
+                };
+                return;
+            }
+        }
+        self.order[u] = Order::Move {
             x: rally.x,
             y: rally.y,
         };
     }
 
+    /// True when at least two other mobile units press within separation range
+    /// of `i`: a unit nearly at its goal then gives up instead of grinding
+    /// into a crowd already occupying the spot.
+    fn crowded_near(&self, i: usize) -> bool {
+        let me = self.pos[i];
+        let mut n = 0;
+        for j in 0..self.arena.capacity() {
+            if j == i || !self.arena.alive[j] || !is_mobile(self.kind[j]) {
+                continue;
+            }
+            if dist2(me, self.pos[j].x, self.pos[j].y) <= Fx::from_int(9) {
+                n += 1;
+                if n >= 2 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Step entity `i` toward `(tx, ty)` at `speed`, snapping on arrival.
+    /// Terrain-aware: blocked steps slide along the open axis.
     fn step_toward(&mut self, i: usize, tx: Fx, ty: Fx, speed: Fx) {
+        self.face(i, tx, ty);
         let me = self.pos[i];
         let dx = tx - me.x;
         let dy = ty - me.y;
         let d = (dx * dx + dy * dy).sqrt();
         if d > speed && d > Fx::ZERO {
             let s = speed / d;
-            self.pos[i].x = me.x + dx * s;
-            self.pos[i].y = me.y + dy * s;
+            self.try_move(i, me.x + dx * s, me.y + dy * s);
         } else {
-            self.pos[i].x = tx;
-            self.pos[i].y = ty;
+            self.try_move(i, tx, ty);
         }
     }
 
@@ -936,6 +1412,7 @@ impl World {
                     // Walk to the node, then mine it.
                     let np = self.pos[n];
                     if dist2(me, np.x, np.y) <= MINE_RANGE2 {
+                        self.face(i, np.x, np.y);
                         let space = CARRY_CAP - self.carried[i];
                         let take = MINE_RATE.min(self.amount[n]).min(space);
                         self.amount[n] -= take;
@@ -977,8 +1454,10 @@ impl World {
                         *self.ore_mut(owner) -= ore;
                         *self.carbon_mut(owner) -= carbon;
                         let k = match kind {
+                            BuildingKind::Hq => Kind::Hq,
                             BuildingKind::Barracks => Kind::Barracks,
                             BuildingKind::Turret => Kind::Turret,
+                            BuildingKind::Supply => Kind::Supply,
                         };
                         let id = self.spawn(k, owner, x, y);
                         self.construct[id.index as usize] = Fx::from_int(CONSTRUCT_TICKS);
@@ -1000,7 +1479,12 @@ impl World {
                 Order::Harvest { .. } => {} // handled above
                 Order::Build { .. } => {}   // handled above
                 Order::Move { x, y } => {
-                    if dist2(me, x, y) <= Fx::from_ratio(4, 10) {
+                    let d2t = dist2(me, x, y);
+                    // Arrived - or near enough while the spot is already
+                    // crowded (don't grind into an occupied destination).
+                    if d2t <= Fx::from_ratio(4, 10)
+                        || (d2t <= Fx::from_int(49) && self.crowded_near(i))
+                    {
                         self.order[i] = Order::Idle;
                     } else {
                         move_to = Some((x, y));
@@ -1010,7 +1494,7 @@ impl World {
                     let t = target as usize;
                     if self.arena.alive[t] && self.owner[t] != self.owner[i] {
                         let tp = self.pos[t];
-                        if dist2(me, tp.x, tp.y) <= inf.range2 {
+                        if dist2(me, tp.x, tp.y) <= self.reach2(inf.range, t) {
                             attack = Some(t);
                         } else {
                             move_to = Some((tp.x, tp.y));
@@ -1022,25 +1506,33 @@ impl World {
                 Order::AttackMove { x, y } => {
                     let near = self.nearest_enemy(i).filter(|&(_, d2)| d2 <= inf.aggro2);
                     if let Some((t, d2)) = near {
-                        if d2 <= inf.range2 {
+                        if d2 <= self.reach2(inf.range, t as usize) {
                             attack = Some(t as usize);
                         } else {
                             let tp = self.pos[t as usize];
                             move_to = Some((tp.x, tp.y));
                         }
-                    } else if dist2(me, x, y) <= Fx::from_ratio(4, 10) {
-                        self.order[i] = Order::Idle;
                     } else {
-                        move_to = Some((x, y));
+                        let d2t = dist2(me, x, y);
+                        if d2t <= Fx::from_ratio(4, 10)
+                            || (d2t <= Fx::from_int(49) && self.crowded_near(i))
+                        {
+                            self.order[i] = Order::Idle;
+                        } else {
+                            move_to = Some((x, y));
+                        }
                     }
                 }
             }
 
             // Attack if ready; otherwise advance toward the move-target.
             if let Some(t) = attack {
+                // Square up to the target even between shots.
+                self.face(i, self.pos[t].x, self.pos[t].y);
                 if self.cooldown[i] <= Fx::ZERO {
                     damage[t] += inf.damage;
                     self.cooldown[i] = inf.attack_cd;
+                    self.shots.push((i as u32, t as u32));
                 }
             } else if let Some((tx, ty)) = move_to {
                 let dx = tx - me.x;
@@ -1048,11 +1540,10 @@ impl World {
                 let d = (dx * dx + dy * dy).sqrt();
                 if d > inf.speed && d > Fx::ZERO {
                     let s = inf.speed / d;
-                    self.pos[i].x = me.x + dx * s;
-                    self.pos[i].y = me.y + dy * s;
+                    self.try_move(i, me.x + dx * s, me.y + dy * s);
+                    self.face(i, tx, ty);
                 } else {
-                    self.pos[i].x = tx;
-                    self.pos[i].y = ty;
+                    self.try_move(i, tx, ty);
                 }
             }
 
@@ -1069,9 +1560,12 @@ impl World {
             let st = stats(Kind::Turret);
             if self.cooldown[i] <= Fx::ZERO {
                 if let Some((t, d2)) = self.nearest_enemy(i) {
-                    if d2 <= st.range2 {
-                        damage[t as usize] += st.damage;
+                    if d2 <= self.reach2(st.range, t as usize) {
+                        let t = t as usize;
+                        self.face(i, self.pos[t].x, self.pos[t].y);
+                        damage[t] += st.damage;
                         self.cooldown[i] = st.attack_cd;
+                        self.shots.push((i as u32, t as u32));
                     }
                 }
             }
@@ -1097,6 +1591,9 @@ impl World {
     /// True if `(x, y)` is far enough from every existing building and resource
     /// node to place one.
     fn site_clear(&self, x: Fx, y: Fx) -> bool {
+        if !self.cell_passable(x, y) {
+            return false;
+        }
         for j in 0..self.arena.capacity() {
             if !self.arena.alive[j] {
                 continue;
@@ -1138,13 +1635,14 @@ impl World {
                 }
                 if d2 <= Fx::from_ratio(1, 64) {
                     // Concentric: shove along +x by the full radius (deterministic).
-                    self.pos[i].x = op.x + r;
+                    let ny = self.pos[i].y;
+                    self.try_move(i, op.x + r, ny);
                     continue;
                 }
                 let d = d2.sqrt();
                 let push = (r - d) / d;
-                self.pos[i].x += dx * push;
-                self.pos[i].y += dy * push;
+                let (nx, ny) = (self.pos[i].x + dx * push, self.pos[i].y + dy * push);
+                self.try_move(i, nx, ny);
             }
         }
     }
@@ -1210,8 +1708,8 @@ impl World {
                 sx = sx * k;
                 sy = sy * k;
             }
-            self.pos[i].x += sx;
-            self.pos[i].y += sy;
+            let (nx, ny) = (self.pos[i].x + sx, self.pos[i].y + sy);
+            self.try_move(i, nx, ny);
         }
     }
 
@@ -1253,10 +1751,21 @@ impl World {
                 max_hp: stats(self.kind[i]).max_hp,
                 moving: !matches!(self.order[i], Order::Idle),
                 mining: self.mining[i],
+                carry: if self.carried[i] > Fx::ZERO {
+                    if self.carry_kind[i] == 1 {
+                        2
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                },
                 resource_frac,
                 queued: self.queue[i],
                 build_frac,
                 construct_frac,
+                rally: self.rally[i],
+                facing: self.facing[i],
             });
         }
         out
@@ -1281,6 +1790,8 @@ impl World {
                 Kind::CarbonNode => 4,
                 Kind::Heavy => 5,
                 Kind::Turret => 6,
+                Kind::Hq => 7,
+                Kind::Supply => 8,
             });
             h.write_u32(self.owner[i] as u32);
             h.write_i64(self.pos[i].x.to_raw());
@@ -1294,6 +1805,8 @@ impl World {
             h.write_u64(self.carry_kind[i] as u64);
             h.write_i64(self.construct[i].to_raw());
             h.write_u64(self.prod_kind[i] as u64);
+            h.write_i64(self.facing[i].x.to_raw());
+            h.write_i64(self.facing[i].y.to_raw());
             let (tag, a, b) = match self.order[i] {
                 Order::Idle => (0u64, 0i64, 0i64),
                 Order::Move { x, y } => (1, x.to_raw(), y.to_raw()),
@@ -1314,6 +1827,9 @@ impl World {
         }
         for &b in &self.bot {
             h.write_u64(b as u64);
+        }
+        if self.pass_hash != 0 {
+            h.write_u64(self.pass_hash);
         }
         h.finish()
     }
@@ -1398,12 +1914,15 @@ mod tests {
 
     #[test]
     fn bot_mines_and_constructs() {
+        // The classic opening: an HQ and a worker by an ore line, nothing
+        // else. With no passive income, everything the bot builds must be
+        // funded by mining.
         let mut w = World::new(11);
         w.set_bot(1, true);
         w.step(&[
             Command::SpawnBuilding {
                 owner: 1,
-                kind: BuildingKind::Barracks,
+                kind: BuildingKind::Hq,
                 x: fx(0),
                 y: fx(0),
             },
@@ -1419,20 +1938,216 @@ mod tests {
                 y: fx(0),
             },
         ]);
-        let start_buildings = barracks_count(&w, 1);
-        for _ in 0..3000 {
+        for _ in 0..9000 {
             w.step(&[]);
         }
-        // The ore node was mined down (worker harvested it)...
+        // The ore node was mined down (workers harvested it)...
         let node = w.snapshot().into_iter().find(|s| s.kind == Kind::OreNode);
         assert!(
             node.map(|n| n.resource_frac < Fx::ONE).unwrap_or(true),
             "bot should have mined the ore node"
         );
-        // ...and the surplus was spent constructing at least one more building.
+        // ...the mining crew was staffed from the HQ...
+        assert!(w.supply_used(1) > 1, "bot should have trained more workers");
+        // ...and the surplus built a production structure from nothing.
         assert!(
-            barracks_count(&w, 1) > start_buildings,
-            "bot should have constructed another building"
+            barracks_count(&w, 1) >= 1,
+            "bot should have constructed a barracks"
+        );
+    }
+
+    #[test]
+    fn fighters_break_buildings() {
+        // Attack range is measured to the target's edge, so a unit can kill a
+        // building whose center it can never reach (the footprint pushes it
+        // out). This was the "units can't damage buildings" bug.
+        let mut w = World::new(21);
+        w.step(&[
+            Command::SpawnBuilding {
+                owner: 1,
+                kind: BuildingKind::Barracks,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(20),
+                y: fx(0),
+            },
+        ]);
+        w.step(&[Command::Attack { unit: 1, target: 0 }]);
+        // 500 hp at 5 damage per 12 ticks = 1200 ticks; leave headroom.
+        for _ in 0..2000 {
+            w.step(&[]);
+        }
+        assert!(
+            !w.snapshot().iter().any(|s| s.kind == Kind::Barracks),
+            "infantry should have destroyed the barracks"
+        );
+    }
+
+    #[test]
+    fn workers_attack_only_on_command() {
+        let mut w = World::new(23);
+        w.step(&[
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Worker,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnUnit {
+                owner: 1,
+                kind: UnitKind::Worker,
+                x: fx(8),
+                y: fx(0),
+            },
+        ]);
+        // No auto-aggro: idle workers near each other never fight.
+        for _ in 0..200 {
+            w.step(&[]);
+        }
+        assert_eq!(w.alive_count(), 2);
+        // Ordered to attack, the tool arm does real damage.
+        w.step(&[Command::Attack { unit: 0, target: 1 }]);
+        for _ in 0..600 {
+            w.step(&[]);
+        }
+        assert_eq!(w.alive_count(), 1, "the ordered worker should win");
+    }
+
+    #[test]
+    fn rally_on_a_node_auto_mines_and_spreads() {
+        let mut w = World::new(41);
+        w.step(&[
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Hq,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnResource {
+                kind: ResourceKind::Ore,
+                x: fx(30),
+                y: fx(0),
+            },
+            Command::SpawnResource {
+                kind: ResourceKind::Ore,
+                x: fx(30),
+                y: fx(12),
+            },
+        ]);
+        // Rally the HQ onto the first node, then train two workers.
+        w.step(&[
+            Command::SetRally {
+                building: 0,
+                x: fx(30),
+                y: fx(0),
+            },
+            Command::Train {
+                building: 0,
+                kind: UnitKind::Worker,
+            },
+            Command::Train {
+                building: 0,
+                kind: UnitKind::Worker,
+            },
+        ]);
+        let start = w.ore(0);
+        for _ in 0..2500 {
+            w.step(&[]);
+        }
+        // Both rallied workers mined without any explicit order...
+        assert!(w.ore(0) > start, "rally-mining should bank ore");
+        // ...and the pair spread across the cluster instead of stacking.
+        let snap = w.snapshot();
+        let mined: Vec<bool> = snap
+            .iter()
+            .filter(|s| s.kind == Kind::OreNode)
+            .map(|s| s.resource_frac < Fx::ONE)
+            .collect();
+        assert_eq!(mined.len(), 2);
+        assert!(
+            mined.iter().all(|&m| m),
+            "harvesters should spread over both nodes"
+        );
+    }
+
+    #[test]
+    fn losing_every_building_eliminates() {
+        let mut w = World::new(33);
+        w.step(&[
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Hq,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnBuilding {
+                owner: 1,
+                kind: BuildingKind::Supply,
+                x: fx(60),
+                y: fx(0),
+            },
+            // Enough infantry to raze the depot.
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(30),
+                y: fx(0),
+            },
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(30),
+                y: fx(8),
+            },
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(30),
+                y: fx(-8),
+            },
+        ]);
+        assert!(!w.eliminated(1));
+        assert!(!w.last_standing(0));
+        w.step(&[
+            Command::Attack { unit: 2, target: 1 },
+            Command::Attack { unit: 3, target: 1 },
+            Command::Attack { unit: 4, target: 1 },
+        ]);
+        for _ in 0..1500 {
+            w.step(&[]);
+        }
+        assert!(w.eliminated(1), "razed player should be eliminated");
+        assert!(w.last_standing(0), "survivor should have won");
+        assert!(!w.eliminated(0));
+    }
+
+    #[test]
+    fn impassable_terrain_blocks_movement() {
+        let mut w = World::new(31);
+        // Two columns over the +-512 world: west open, east blocked.
+        w.set_passability(2, Fx::from_int(512), vec![true, false, true, false]);
+        w.step(&[Command::SpawnUnit {
+            owner: 0,
+            kind: UnitKind::Infantry,
+            x: fx(-100),
+            y: fx(0),
+        }]);
+        w.step(&[Command::Move {
+            unit: 0,
+            x: fx(100),
+            y: fx(0),
+        }]);
+        for _ in 0..800 {
+            w.step(&[]);
+        }
+        let s = w.snapshot();
+        assert!(
+            s[0].pos.x < Fx::ZERO,
+            "unit must never cross into the blocked half"
         );
     }
 
@@ -1469,32 +2184,132 @@ mod tests {
     #[test]
     fn player_barracks_trains_only_on_command() {
         let mut w = World::new(7);
-        w.step(&[Command::SpawnBuilding {
-            owner: 0,
-            kind: BuildingKind::Barracks,
-            x: fx(0),
-            y: fx(0),
-        }]);
+        // An HQ for the supply block, plus the barracks under test.
+        w.step(&[
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Hq,
+                x: fx(40),
+                y: fx(0),
+            },
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Barracks,
+                x: fx(0),
+                y: fx(0),
+            },
+        ]);
         // The player's barracks must not auto-produce.
         for _ in 0..120 {
             w.step(&[]);
         }
-        assert_eq!(w.alive_count(), 1);
+        assert_eq!(w.alive_count(), 2);
         // Queue training; units build over time.
         w.step(&[
             Command::Train {
-                building: 0,
+                building: 1,
                 kind: UnitKind::Infantry,
             },
             Command::Train {
-                building: 0,
+                building: 1,
                 kind: UnitKind::Infantry,
             },
         ]);
         for _ in 0..200 {
             w.step(&[]);
         }
-        assert!(w.alive_count() > 1);
+        assert!(w.alive_count() > 2);
+    }
+
+    #[test]
+    fn hq_trains_workers_and_only_workers() {
+        let mut w = World::new(5);
+        w.step(&[Command::SpawnBuilding {
+            owner: 0,
+            kind: BuildingKind::Hq,
+            x: fx(0),
+            y: fx(0),
+        }]);
+        // Fighters are not trainable at the HQ; the command is dropped.
+        w.step(&[Command::Train {
+            building: 0,
+            kind: UnitKind::Infantry,
+        }]);
+        for _ in 0..200 {
+            w.step(&[]);
+        }
+        assert_eq!(w.alive_count(), 1);
+        // Workers are, and they deposit at the HQ once mining.
+        w.step(&[Command::Train {
+            building: 0,
+            kind: UnitKind::Worker,
+        }]);
+        for _ in 0..200 {
+            w.step(&[]);
+        }
+        let snap = w.snapshot();
+        assert!(
+            snap.iter().any(|s| s.kind == Kind::Worker),
+            "HQ should have produced a worker"
+        );
+    }
+
+    #[test]
+    fn supply_caps_production_until_a_depot_rises() {
+        let mut w = World::new(13);
+        let mut setup = vec![
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Hq,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Barracks,
+                x: fx(30),
+                y: fx(0),
+            },
+        ];
+        // Fill the HQ's whole supply block (10) with spawned infantry.
+        for k in 0..10 {
+            setup.push(Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Infantry,
+                x: fx(-30 - 3 * k),
+                y: fx(0),
+            });
+        }
+        w.step(&setup);
+        assert_eq!(w.supply_used(0), 10);
+        assert_eq!(w.supply_cap(0), SUPPLY_PER_HQ);
+        // Queue two more: production must hold at the cap.
+        w.step(&[
+            Command::Train {
+                building: 1,
+                kind: UnitKind::Infantry,
+            },
+            Command::Train {
+                building: 1,
+                kind: UnitKind::Infantry,
+            },
+        ]);
+        for _ in 0..200 {
+            w.step(&[]);
+        }
+        assert_eq!(w.supply_used(0), 10, "production must hold at the cap");
+        // A depot raises the cap and releases the held queue.
+        w.step(&[Command::SpawnBuilding {
+            owner: 0,
+            kind: BuildingKind::Supply,
+            x: fx(0),
+            y: fx(30),
+        }]);
+        assert_eq!(w.supply_cap(0), SUPPLY_PER_HQ + SUPPLY_PER_DEPOT);
+        for _ in 0..200 {
+            w.step(&[]);
+        }
+        assert_eq!(w.supply_used(0), 12, "queued units flow once supply frees");
     }
 
     #[test]

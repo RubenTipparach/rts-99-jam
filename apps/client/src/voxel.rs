@@ -120,12 +120,25 @@ impl VoxelGrid {
         (i, k)
     }
 
-    /// World-space height of the topmost solid surface under `(x, z)`.
+    /// World-space height of the topmost solid surface under `(x, z)`,
+    /// bilinearly blended across the four surrounding columns so units glide
+    /// along the surface instead of snapping per voxel column.
     pub fn surface_height(&self, x: f32, z: f32) -> f32 {
-        let (i, k) = self.col_index(x, z);
+        let fi = ((x - self.bounds[0]) / self.dx()).clamp(0.0, self.nx as f32 - 1.0);
+        let fk = ((z - self.bounds[4]) / self.dz()).clamp(0.0, self.nz as f32 - 1.0);
+        let (i0, k0) = (fi.floor() as usize, fk.floor() as usize);
+        let (i1, k1) = ((i0 + 1).min(self.nx - 1), (k0 + 1).min(self.nz - 1));
+        let (tx, tz) = (fi - i0 as f32, fk - k0 as f32);
+        let a = self.column_height(i0, k0) * (1.0 - tx) + self.column_height(i1, k0) * tx;
+        let b = self.column_height(i0, k1) * (1.0 - tx) + self.column_height(i1, k1) * tx;
+        a * (1.0 - tz) + b * tz
+    }
+
+    /// Surface height of one column: the top solid voxel, eased against the
+    /// air voxel above it.
+    fn column_height(&self, i: usize, k: usize) -> f32 {
         for j in (0..self.ny).rev() {
             if self.density[self.lin(i, j, k)] >= ISO {
-                // interpolate against the air voxel above for a smooth surface
                 let here = self.density[self.lin(i, j, k)] as f32;
                 if j + 1 < self.ny {
                     let above = self.density[self.lin(i, j + 1, k)] as f32;
@@ -308,20 +321,63 @@ impl VoxelGrid {
         out
     }
 
-    /// A flat quad per liquid column at its surface height: the water/methane
-    /// mesh, rendered by the water pipeline. Empty if the world has no liquid.
+    /// World-space liquid surface height over `(x, z)`, if that column is wet.
+    pub fn liquid_surface(&self, x: f32, z: f32) -> Option<f32> {
+        let (i, k) = self.col_index(x, z);
+        let lj = self.liquid[k * self.nx + i];
+        (lj > 0).then(|| self.world(i, (lj - 1) as usize, k)[1])
+    }
+
+    /// The water/methane surface mesh, rendered by the water pipeline.
+    /// Empty if the world has no liquid.
+    ///
+    /// The open sea draws as one tessellated sheet across the whole map at
+    /// the dominant liquid level: the depth test sinks it under the land, so
+    /// the shoreline is the exact terrain intersection instead of the old
+    /// stair-stepped column quads hovering over the banks, and the dense
+    /// grid gives the vertex waves something to bend. Lakes and rivers above
+    /// the sea keep per-column quads, tucked down to hug their basins.
     pub fn liquid_mesh(&self) -> Vec<[f32; 3]> {
         let mut out = Vec::new();
         let dx = self.dx();
         let dz = self.dz();
+        // The sea level is the modal liquid layer (the format stores liquid
+        // per column; a real sea floods hundreds of columns at one level).
+        let mut hist = [0u32; 256];
+        for &l in self.liquid.iter() {
+            hist[l as usize] += 1;
+        }
+        let sea_j = (1..256).max_by_key(|&j| hist[j]).filter(|&j| hist[j] > 200);
+        if let Some(j) = sea_j {
+            let sea = self.world(0, j - 1, 0)[1] - 0.2;
+            const N: usize = 128;
+            let sx = (self.bounds[1] - self.bounds[0]) / N as f32;
+            let sz = (self.bounds[5] - self.bounds[4]) / N as f32;
+            for k in 0..N {
+                for i in 0..N {
+                    let (x0, z0) = (
+                        self.bounds[0] + i as f32 * sx,
+                        self.bounds[4] + k as f32 * sz,
+                    );
+                    let (x1, z1) = (x0 + sx, z0 + sz);
+                    let a = [x0, sea, z0];
+                    let b = [x1, sea, z0];
+                    let c = [x1, sea, z1];
+                    let d = [x0, sea, z1];
+                    for v in [a, b, c, a, c, d] {
+                        out.push(v);
+                    }
+                }
+            }
+        }
         for k in 0..self.nz {
             for i in 0..self.nx {
                 let lj = self.liquid[k * self.nx + i];
-                if lj == 0 {
+                if lj == 0 || Some(lj as usize) == sea_j {
                     continue;
                 }
                 let p = self.world(i, (lj - 1) as usize, k);
-                let (x0, y, z0) = (p[0], p[1], p[2]);
+                let (x0, y, z0) = (p[0], p[1] - 0.3, p[2]);
                 let (x1, z1) = (x0 + dx, z0 + dz);
                 let a = [x0, y, z0];
                 let b = [x1, y, z0];
@@ -393,6 +449,64 @@ pub const MAP_NAMES: [&str; MAP_COUNT] = [
     "EARTH",
 ];
 
+/// Asset-file key per world (lowercase, in [`MAPS`] order): names the baked
+/// `.vxl` and the pre-rendered lobby preview PNG. Only the preview-renderer
+/// dev test consumes it, so every non-test target sees it as unused.
+#[allow(dead_code)]
+pub const MAP_KEYS: [&str; MAP_COUNT] = [
+    "moon",
+    "ceres",
+    "vesta",
+    "mars",
+    "callisto",
+    "ganymede",
+    "europa",
+    "io",
+    "titan",
+    "enceladus",
+    "triton",
+    "rhea",
+    "iapetus",
+    "dione",
+    "titania",
+    "oberon",
+    "umbriel",
+    "ariel",
+    "miranda",
+    "pluto",
+    "chiron",
+    "earth",
+];
+
+/// Pre-rendered 3D lobby previews (the actual voxel terrain rasterized at the
+/// game camera angle; regenerate with
+/// `cargo test -p client render_map_previews -- --ignored`).
+#[cfg(target_arch = "wasm32")]
+pub const MAP_PREVIEWS: [&[u8]; MAP_COUNT] = [
+    include_bytes!("../../../assets/previews/maps/moon.png"),
+    include_bytes!("../../../assets/previews/maps/ceres.png"),
+    include_bytes!("../../../assets/previews/maps/vesta.png"),
+    include_bytes!("../../../assets/previews/maps/mars.png"),
+    include_bytes!("../../../assets/previews/maps/callisto.png"),
+    include_bytes!("../../../assets/previews/maps/ganymede.png"),
+    include_bytes!("../../../assets/previews/maps/europa.png"),
+    include_bytes!("../../../assets/previews/maps/io.png"),
+    include_bytes!("../../../assets/previews/maps/titan.png"),
+    include_bytes!("../../../assets/previews/maps/enceladus.png"),
+    include_bytes!("../../../assets/previews/maps/triton.png"),
+    include_bytes!("../../../assets/previews/maps/rhea.png"),
+    include_bytes!("../../../assets/previews/maps/iapetus.png"),
+    include_bytes!("../../../assets/previews/maps/dione.png"),
+    include_bytes!("../../../assets/previews/maps/titania.png"),
+    include_bytes!("../../../assets/previews/maps/oberon.png"),
+    include_bytes!("../../../assets/previews/maps/umbriel.png"),
+    include_bytes!("../../../assets/previews/maps/ariel.png"),
+    include_bytes!("../../../assets/previews/maps/miranda.png"),
+    include_bytes!("../../../assets/previews/maps/pluto.png"),
+    include_bytes!("../../../assets/previews/maps/chiron.png"),
+    include_bytes!("../../../assets/previews/maps/earth.png"),
+];
+
 /// A representative surface colour per world, for the lobby thumbnail.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // used by the web lobby
 pub const MAP_SWATCH: [[u8; 3]; MAP_COUNT] = [
@@ -434,6 +548,11 @@ thread_local! {
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // driven by the web lobby
 pub fn set_active(idx: Option<usize>) {
     SELECTED.with(|s| s.set(idx.filter(|&i| i < MAP_COUNT)));
+}
+
+/// Index of the active voxel map in [`MAPS`] order, if one is selected.
+pub fn active_index() -> Option<usize> {
+    SELECTED.with(|s| s.get())
 }
 
 /// The active voxel map, if one is selected (parsed + cached on first use).
@@ -559,5 +678,156 @@ mod tests {
     #[test]
     fn active_defaults_to_none() {
         assert!(active().is_none());
+    }
+
+    /// Rasterize one world's voxel terrain (plus its liquid) with the game's
+    /// iso camera (yaw 45, pitch 0.95) and shader-style lambert lighting.
+    /// CPU-only; per-vertex color comes from the world swatch blended by the
+    /// material weights, so the preview matches the in-game palette.
+    fn preview(g: &VoxelGrid, idx: usize, w: u32) -> image::RgbaImage {
+        let (yaw, pitch) = (std::f32::consts::FRAC_PI_4, 0.95_f32);
+        let eye = [
+            yaw.cos() * pitch.cos(),
+            pitch.sin(),
+            yaw.sin() * pitch.cos(),
+        ];
+        let right = [-yaw.sin(), 0.0, yaw.cos()];
+        let up = [
+            right[1] * eye[2] - right[2] * eye[1],
+            right[2] * eye[0] - right[0] * eye[2],
+            right[0] * eye[1] - right[1] * eye[0],
+        ];
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let project = |p: [f32; 3]| (dot(p, right), dot(p, up), dot(p, eye));
+
+        let mesh = g.build_mesh();
+        let liquid = g.liquid_mesh();
+
+        // Fit the projection of everything into the image.
+        let (mut u0, mut u1, mut v0, mut v1) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+        for p in mesh.iter().map(|m| m.pos).chain(liquid.iter().copied()) {
+            let (u, v, _) = project(p);
+            u0 = u0.min(u);
+            u1 = u1.max(u);
+            v0 = v0.min(v);
+            v1 = v1.max(v);
+        }
+        let h = ((v1 - v0) / (u1 - u0) * w as f32).ceil() as u32 + 8;
+        let scale = ((w as f32 - 8.0) / (u1 - u0)).min((h as f32 - 8.0) / (v1 - v0));
+        let to_px = |u: f32, v: f32| {
+            (
+                (u - u0) * scale + (w as f32 - (u1 - u0) * scale) * 0.5,
+                (v1 - v) * scale + (h as f32 - (v1 - v0) * scale) * 0.5,
+            )
+        };
+
+        // Per-world palette: the swatch split into the four tile slots, plus
+        // lava for the hazard channel.
+        let sw = MAP_SWATCH[idx];
+        let swf = [
+            sw[0] as f32 / 255.0,
+            sw[1] as f32 / 255.0,
+            sw[2] as f32 / 255.0,
+        ];
+        let tone = |m: f32, g: f32| {
+            [
+                (swf[0] * m + g).min(1.0),
+                (swf[1] * m + g).min(1.0),
+                (swf[2] * m + g).min(1.0),
+            ]
+        };
+        let base = tone(1.0, 0.0);
+        let low = tone(0.72, 0.0);
+        let high = tone(1.18, 0.06);
+        let accent = tone(0.85, 0.08);
+        let lava = [0.95, 0.42, 0.12];
+        // Liquid color (matches `active_liquid`): Titan methane, Earth ocean.
+        let liq_col = match idx {
+            8 => [0.06, 0.05, 0.07],
+            21 => [0.06, 0.22, 0.34],
+            _ => [0.0, 0.0, 0.0],
+        };
+        let ll = (0.5_f32 * 0.5 + 1.0 + 0.35 * 0.35).sqrt();
+        let light = [0.5 / ll, 1.0 / ll, 0.35 / ll];
+
+        // The lobby backdrop color, baked in so the blit composes seamlessly.
+        let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([11, 18, 36, 255]));
+        let mut depth = vec![f32::MIN; (w * h) as usize];
+        let mut tri = |p: [[f32; 3]; 3], rgb: [f32; 3]| {
+            let q: Vec<(f32, f32, f32)> = p
+                .iter()
+                .map(|&v| {
+                    let (u, vv, d) = project(v);
+                    let (x, y) = to_px(u, vv);
+                    (x, y, d)
+                })
+                .collect();
+            let area =
+                (q[1].0 - q[0].0) * (q[2].1 - q[0].1) - (q[2].0 - q[0].0) * (q[1].1 - q[0].1);
+            if area.abs() < 1e-6 {
+                return;
+            }
+            let px8 = [
+                (rgb[0].clamp(0.0, 1.0) * 255.0) as u8,
+                (rgb[1].clamp(0.0, 1.0) * 255.0) as u8,
+                (rgb[2].clamp(0.0, 1.0) * 255.0) as u8,
+            ];
+            let xmin = q.iter().map(|t| t.0).fold(f32::MAX, f32::min).max(0.0) as u32;
+            let xmax = (q.iter().map(|t| t.0).fold(f32::MIN, f32::max)).min(w as f32 - 1.0) as u32;
+            let ymin = q.iter().map(|t| t.1).fold(f32::MAX, f32::min).max(0.0) as u32;
+            let ymax = (q.iter().map(|t| t.1).fold(f32::MIN, f32::max)).min(h as f32 - 1.0) as u32;
+            for py in ymin..=ymax {
+                for px in xmin..=xmax {
+                    let (fx, fy) = (px as f32 + 0.5, py as f32 + 0.5);
+                    let w0 = ((q[1].0 - fx) * (q[2].1 - fy) - (q[2].0 - fx) * (q[1].1 - fy)) / area;
+                    let w1 = ((q[2].0 - fx) * (q[0].1 - fy) - (q[0].0 - fx) * (q[2].1 - fy)) / area;
+                    let w2 = 1.0 - w0 - w1;
+                    if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                        continue;
+                    }
+                    let d = w0 * q[0].2 + w1 * q[1].2 + w2 * q[2].2;
+                    let i = (py * w + px) as usize;
+                    if d > depth[i] {
+                        depth[i] = d;
+                        img.put_pixel(px, py, image::Rgba([px8[0], px8[1], px8[2], 255]));
+                    }
+                }
+            }
+        };
+
+        for t in mesh.chunks_exact(3) {
+            let v = &t[0];
+            let mut col = [0.0f32; 3];
+            for c in 0..3 {
+                col[c] = v.weights[0] * base[c]
+                    + v.weights[1] * low[c]
+                    + v.weights[2] * high[c]
+                    + v.weights[3] * accent[c]
+                    + v.haz * lava[c];
+            }
+            let lit = 0.45 + 0.7 * dot(v.normal, light).max(0.0);
+            tri(
+                [t[0].pos, t[1].pos, t[2].pos],
+                [col[0] * lit, col[1] * lit, col[2] * lit],
+            );
+        }
+        for t in liquid.chunks_exact(3) {
+            tri([t[0], t[1], t[2]], liq_col);
+        }
+        img
+    }
+
+    /// Renders every battlefield's 3D lobby preview to `target/previews/maps/`.
+    /// A dev tool, not a check: run on demand and copy the keepers to
+    /// `assets/previews/maps/` (which `MAP_PREVIEWS` embeds).
+    #[test]
+    #[ignore = "writes preview PNGs to target/previews/maps; run on demand"]
+    fn render_map_previews() {
+        std::fs::create_dir_all("target/previews/maps").unwrap();
+        for (i, key) in MAP_KEYS.iter().enumerate() {
+            let g = VoxelGrid::parse(MAPS[i]);
+            let img = preview(&g, i, 384);
+            img.save(format!("target/previews/maps/{key}.png")).unwrap();
+        }
     }
 }

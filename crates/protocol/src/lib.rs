@@ -26,10 +26,17 @@ pub enum UnitKind {
 /// Kinds of structure.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum BuildingKind {
+    /// Headquarters (Astromancer Spire, Hollowmen Command HQ): the tech root.
+    /// Trains workers and is the workers' deposit point. Every player starts
+    /// with one; building another founds an expansion.
+    Hq,
     Barracks,
     /// Defensive emplacement: immobile, auto-fires on nearby enemies. Costs ore
     /// and carbon.
     Turret,
+    /// Supply depot: raises the owner's unit cap (the HQ provides a base
+    /// amount; each depot adds more). Builds nothing and has no weapon.
+    Supply,
 }
 
 /// Harvestable resource nodes.
