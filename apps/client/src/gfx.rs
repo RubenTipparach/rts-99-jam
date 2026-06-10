@@ -1040,7 +1040,7 @@ fn ring_decals(rings: &[RingRaw]) -> Vec<RingVertex> {
         let color = r.color;
         let pt = |radius: f32, c: f32, s: f32| {
             let (x, z) = (cx + c * radius, cz + s * radius);
-            [x, terrain::height(x, z) + 0.25, z]
+            [x, terrain::height(x, z) + 0.4, z]
         };
         let mut prev: Option<([f32; 3], [f32; 3])> = None;
         for k in 0..=RING_SEGMENTS {
@@ -1483,6 +1483,20 @@ impl Gfx {
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
+        // Ground decals (selection rings, order pings): a strong negative depth
+        // bias pulls them toward the camera so they never z-fight or clip into
+        // slope geometry between their tessellation samples.
+        let depth_decal = wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState {
+                constant: -8,
+                slope_scale: -8.0,
+                clamp: 0.0,
+            },
+        };
         let opaque_t = wgpu::ColorTargetState {
             format,
             blend: None,
@@ -1598,7 +1612,7 @@ impl Gfx {
             "fs_ring",
             std::slice::from_ref(&ring_v),
             &blend_t,
-            &depth_blend,
+            &depth_decal,
         );
 
         let mkbuf = |label: &str, data: &[u8], usage: wgpu::BufferUsages| {

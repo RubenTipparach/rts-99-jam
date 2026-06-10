@@ -414,19 +414,81 @@ pub fn draw(
     let (wf, hf) = (w as f64, h as f64);
     ctx.clear_rect(0.0, 0.0, wf, hf);
 
-    // Health bars: selected entities only.
-    for u in game.selected_infos() {
+    // Health bars: selected entities, plus every visible damaged building
+    // (so a base under fire reads at a glance). Building bars scale with the
+    // footprint so a depot's bar is visibly a building's, not a unit's.
+    let health_bar = |u: &crate::game::UnitInfo| {
         let Some((sx, sy)) = camera.project(glam::Vec3::new(u.wx, u.wy, u.wz), w, h) else {
-            continue;
+            return;
         };
-        let bw = if u.barracks { 50.0 } else { 22.0 };
-        let bh = 4.0;
+        let bw = if u.barracks {
+            (u.radius as f64 * 6.5).clamp(30.0, 64.0)
+        } else {
+            22.0
+        };
+        let bh = if u.barracks { 5.0 } else { 4.0 };
         let x = sx as f64 - bw / 2.0;
         let y = sy as f64;
         ctx.set_fill_style_str("rgba(0,0,0,0.65)");
         ctx.fill_rect(x - 1.0, y - 1.0, bw + 2.0, bh + 2.0);
         ctx.set_fill_style_str(if u.owner == 0 { "#39d35a" } else { "#e0473a" });
         ctx.fill_rect(x, y, bw * u.hp_frac.clamp(0.0, 1.0) as f64, bh);
+    };
+    for u in game.selected_infos() {
+        health_bar(&u);
+    }
+    for u in game.damaged_buildings() {
+        health_bar(&u);
+    }
+
+    // Selected buildings: screen-space corner brackets sized to the projected
+    // footprint. Pure HUD drawing, so unlike a ground decal they can never
+    // clip into slopes.
+    for u in game.selected_infos() {
+        if !u.barracks {
+            continue;
+        }
+        let ground = u.wy - 7.0;
+        let r = u.radius;
+        // Project the footprint's four ground corners and take the screen
+        // bounding box (the camera is fixed-yaw, so this stays snug).
+        let mut x0 = f32::MAX;
+        let mut x1 = f32::MIN;
+        let mut y0 = f32::MAX;
+        let mut y1 = f32::MIN;
+        let mut ok = true;
+        for (cx, cz) in [(-r, -r), (r, -r), (-r, r), (r, r)] {
+            let (gx, gz) = (u.wx + cx, u.wz + cz);
+            let gy = crate::terrain::height(gx, gz).max(ground);
+            match camera.project(glam::Vec3::new(gx, gy, gz), w, h) {
+                Some((px, py)) => {
+                    x0 = x0.min(px);
+                    x1 = x1.max(px);
+                    y0 = y0.min(py);
+                    y1 = y1.max(py);
+                }
+                None => ok = false,
+            }
+        }
+        if !ok {
+            continue;
+        }
+        let (x0, y0, x1, y1) = (x0 as f64, y0 as f64, x1 as f64, y1 as f64);
+        let arm = ((x1 - x0) * 0.18).clamp(8.0, 22.0);
+        ctx.set_stroke_style_str("#7dff9a");
+        ctx.set_line_width(2.5);
+        for (cx, cy, dx, dy) in [
+            (x0, y0, 1.0, 1.0),
+            (x1, y0, -1.0, 1.0),
+            (x0, y1, 1.0, -1.0),
+            (x1, y1, -1.0, -1.0),
+        ] {
+            ctx.begin_path();
+            ctx.move_to(cx + dx * arm, cy);
+            ctx.line_to(cx, cy);
+            ctx.line_to(cx, cy + dy * arm);
+            ctx.stroke();
+        }
     }
 
     // Drag-selection box + live highlight of units inside it. The drag rect

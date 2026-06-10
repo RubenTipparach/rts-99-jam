@@ -167,6 +167,35 @@ impl Fx {
         );
     }
 
+    /// A damaged building burning, called every sim tick while it's hurt.
+    /// `severity` is 0..1 (1 = nearly destroyed): light damage smolders,
+    /// heavy damage adds licking flames and a flickering glow. `spread`
+    /// scatters the flames across the building's footprint.
+    pub fn fire(&mut self, pos: [f32; 3], severity: f32, spread: f32) {
+        let (jx, jz) = (self.jitter(), self.jitter());
+        let p = [pos[0] + jx * spread, pos[1] + 1.0, pos[2] + jz * spread];
+        // Smoke column: slow, rising, long-lived.
+        self.burst(
+            p,
+            [0.22, 0.21, 0.23],
+            1,
+            1.4,
+            1.6,
+            0.45 + 0.4 * severity,
+            0.0,
+        );
+        if severity > 0.4 {
+            // Licking flames.
+            self.burst(p, [1.0, 0.55, 0.12], 2, 2.4, 0.35, 0.34, 0.0);
+            self.burst(p, [1.0, 0.85, 0.35], 1, 2.0, 0.25, 0.22, 0.0);
+        }
+        if severity > 0.55 {
+            // Flickering firelight (re-fed every tick, so it dances).
+            let flick = 0.8 + 0.2 * self.jitter().abs();
+            self.light(p, 11.0 * flick, [1.0, 0.5, 0.14], 0.14);
+        }
+    }
+
     /// A worker chipping at a node: crystal sparks + a soft teal glint.
     pub fn mining(&mut self, pos: [f32; 3], carbon: bool) {
         let p = [pos[0], pos[1] + 1.0, pos[2]];

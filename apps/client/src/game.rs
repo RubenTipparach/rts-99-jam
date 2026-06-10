@@ -136,6 +136,8 @@ pub struct UnitInfo {
     pub wy: f32,
     pub wz: f32,
     pub hp_frac: f32,
+    /// Buildings: world footprint radius (drives the HUD corner brackets).
+    pub radius: f32,
 }
 
 pub struct Game {
@@ -284,6 +286,32 @@ impl Game {
                 self.fx.hit(pos, organic);
             }
         }
+        // Damaged buildings burn: smoke from light damage, flames and a
+        // flickering glow once they're badly hurt.
+        let fires: Vec<([f32; 3], f32, f32)> = self
+            .curr
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.kind,
+                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                )
+            })
+            .filter(|s| s.owner == 0 || self.cell_visible(f(s.pos.x), f(s.pos.y)))
+            .filter_map(|s| {
+                let frac = (f(s.hp) / f(s.max_hp)).clamp(0.0, 1.0);
+                let r = match s.kind {
+                    Kind::Hq => 6.0,
+                    Kind::Barracks => 5.0,
+                    _ => 2.5,
+                };
+                (frac < 0.65).then(|| (at(s), 1.0 - frac, r))
+            })
+            .collect();
+        for (pos, severity, spread) in fires {
+            self.fx.fire(pos, severity, spread);
+        }
+
         // Mining workers spark against their node.
         let mines: Vec<([f32; 3], bool)> = self
             .curr
@@ -658,12 +686,10 @@ impl Game {
                         Faction::Hollowmen => barracks_hollow.push(inst),
                     },
                 }
+                let _ = radius; // brackets are sized from UnitInfo::radius
                 if selected {
-                    rings.push(RingRaw {
-                        center: [wx, ground, wz],
-                        radius,
-                        color: [0.4, 1.0, 0.5, 0.95],
-                    });
+                    // Selection reads via the shader brighten + the HUD's
+                    // corner brackets (a ground ring this large clips slopes).
                     // A selected production building shows its rally point as
                     // an amber marker (right-click moves it).
                     if s.owner == 0 && matches!(s.kind, Kind::Hq | Kind::Barracks) {
@@ -877,6 +903,13 @@ impl Game {
             s.kind,
             Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
         );
+        let radius = match s.kind {
+            Kind::Hq => 9.0,
+            Kind::Barracks => 8.0,
+            Kind::Turret => 4.0,
+            Kind::Supply => 4.5,
+            _ => 0.0,
+        };
         UnitInfo {
             owner: s.owner,
             barracks,
@@ -884,7 +917,28 @@ impl Game {
             wy: terrain::height(wx, wz) + if barracks { 7.0 } else { 3.4 },
             wz,
             hp_frac: (f(s.hp) / f(s.max_hp)).clamp(0.0, 1.0),
+            radius,
         }
+    }
+
+    /// Every visible building that has taken damage (for always-on health
+    /// bars; pairs with the burning fx so damage reads at a glance).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn damaged_buildings(&self) -> Vec<UnitInfo> {
+        self.curr
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.kind,
+                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                ) && s.hp < s.max_hp
+            })
+            .filter(|s| {
+                let (wx, wz) = self.lerped(s);
+                self.revealed(s, wx, wz)
+            })
+            .map(|s| self.info(s))
+            .collect()
     }
 
     /// All currently-revealed entities (for the minimap).
@@ -988,7 +1042,12 @@ impl Game {
         if best.is_none() {
             let bldg_r = (h * 0.06).max(36.0);
             for s in &self.curr {
-                if s.owner != 0 || !matches!(s.kind, Kind::Hq | Kind::Barracks) {
+                if s.owner != 0
+                    || !matches!(
+                        s.kind,
+                        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    )
+                {
                     continue;
                 }
                 let (wx, wz) = self.lerped(s);
