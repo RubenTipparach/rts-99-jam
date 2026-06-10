@@ -99,9 +99,18 @@ pub fn demo_replay() -> Replay {
     // Queue a few units at the player's barracks (building index 0) so the
     // manual production path is exercised by the determinism test.
     r.record(vec![
-        Command::Train { building: 0 },
-        Command::Train { building: 0 },
-        Command::Train { building: 0 },
+        Command::Train {
+            building: 0,
+            kind: UnitKind::Infantry,
+        },
+        Command::Train {
+            building: 0,
+            kind: UnitKind::Infantry,
+        },
+        Command::Train {
+            building: 0,
+            kind: UnitKind::Infantry,
+        },
     ]);
 
     for _ in 0..300 {

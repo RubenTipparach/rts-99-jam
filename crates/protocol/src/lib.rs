@@ -18,12 +18,18 @@ pub enum UnitKind {
     /// Builder/harvester (Astromancer Acolyte, Hollowmen Engineer): mobile but
     /// non-combatant. Gathers materials and raises structures.
     Worker,
+    /// Heavy assault unit (Astromancer Golem, Hollowmen War-Mech): slow, tanky,
+    /// hits hard. Costs ore and carbon.
+    Heavy,
 }
 
 /// Kinds of structure.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum BuildingKind {
     Barracks,
+    /// Defensive emplacement: immobile, auto-fires on nearby enemies. Costs ore
+    /// and carbon.
+    Turret,
 }
 
 /// Harvestable resource nodes.
@@ -71,8 +77,8 @@ pub enum Command {
     AttackMove { unit: u32, x: Fx, y: Fx },
     /// Attack a specific entity (chase it).
     Attack { unit: u32, target: u32 },
-    /// Queue one unit for production at a building.
-    Train { building: u32 },
+    /// Queue one unit of `kind` for production at a building.
+    Train { building: u32, kind: UnitKind },
     /// Hold position.
     Stop { unit: u32 },
     /// Set where a building's new units gather.

@@ -676,6 +676,82 @@ fn carbon_node_mesh() -> Vec<UnitVertex> {
     m
 }
 
+/// Defensive turret: an octagonal armoured base, a team-tinted housing, and a
+/// raised twin-barrel cannon. Authored at world scale, ~5 wide, facing -z.
+fn turret_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let steel = [0.40, 0.43, 0.48];
+    let dark = [0.22, 0.24, 0.28];
+    let gun = [0.16, 0.18, 0.21];
+    let team = [0.5, 0.5, 0.5];
+    // Footing + plated base.
+    push_frustum(
+        &mut m, 0.0, 0.0, 2.6, 2.1, 0.0, 0.6, dark, 0.0, 8, 0.0, true,
+    );
+    push_prism(&mut m, 0.0, 0.0, 2.0, 0.6, 1.9, steel, 0.0, 8, 0.0, true);
+    // Team-tinted rotating housing.
+    push_prism(&mut m, 0.0, 0.0, 1.5, 1.9, 3.0, team, 1.0, 6, 0.0, true);
+    // Twin barrels pointing -z.
+    for sx in [-0.55_f32, 0.25] {
+        push_box(&mut m, [sx, 2.2, -3.4], [sx + 0.3, 2.6, 0.4], gun, 0.0);
+    }
+    push_box(&mut m, [-0.9, 2.0, 0.2], [0.9, 2.9, 1.0], gun, 0.0); // breech
+    m
+}
+
+/// Heavy assault unit (placeholder War-Mech / Golem): a stocky two-legged walker,
+/// team-tinted core, with shoulder guns. ~3.4 tall, facing -z.
+fn heavy_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let armor = [0.46, 0.49, 0.54];
+    let armor2 = [0.34, 0.37, 0.42];
+    let dark = [0.18, 0.20, 0.24];
+    let gun = [0.15, 0.17, 0.20];
+    let team = [0.5, 0.5, 0.5];
+    // Legs + feet.
+    for sx in [-0.62_f32, 0.26] {
+        push_box(
+            &mut m,
+            [sx, 0.0, -0.34],
+            [sx + 0.36, 1.1, 0.34],
+            armor2,
+            0.0,
+        );
+        push_box(
+            &mut m,
+            [sx - 0.05, 0.0, -0.5],
+            [sx + 0.41, 0.2, 0.5],
+            dark,
+            0.0,
+        );
+    }
+    // Hip + broad torso.
+    push_box(&mut m, [-0.7, 1.1, -0.5], [0.7, 1.5, 0.5], armor2, 0.0);
+    push_box(&mut m, [-0.85, 1.5, -0.6], [0.85, 2.7, 0.6], armor, 0.0);
+    // Team-tinted core + head.
+    push_box(&mut m, [-0.3, 1.8, 0.55], [0.3, 2.3, 0.72], team, 1.0);
+    push_box(&mut m, [-0.4, 2.7, -0.4], [0.4, 3.2, 0.4], armor2, 0.0);
+    push_box(
+        &mut m,
+        [-0.28, 2.85, 0.38],
+        [0.28, 3.05, 0.5],
+        [0.9, 0.5, 0.3],
+        0.0,
+    ); // visor
+       // Shoulder guns.
+    for sx in [-1.15_f32, 0.85] {
+        push_box(&mut m, [sx, 2.0, -0.3], [sx + 0.3, 2.7, 0.3], dark, 0.0);
+        push_box(
+            &mut m,
+            [sx + 0.02, 2.2, -1.1],
+            [sx + 0.28, 2.5, -0.2],
+            gun,
+            0.0,
+        );
+    }
+    m
+}
+
 /// Opaque dark walls around the map rim, from above the water down past the
 /// seabed, so you don't see under the (translucent) water at the edges. Drawn
 /// with the unit pipeline via an identity instance.
@@ -853,6 +929,10 @@ pub struct Gfx {
     ore_node_len: u32,
     carbon_node_buf: wgpu::Buffer,
     carbon_node_len: u32,
+    turret_buf: wgpu::Buffer,
+    turret_len: u32,
+    heavy_buf: wgpu::Buffer,
+    heavy_len: u32,
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
@@ -1360,6 +1440,18 @@ impl Gfx {
             bytemuck::cast_slice(&carbon_node),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let turret = turret_mesh();
+        let turret_buf = mkbuf(
+            "turret",
+            bytemuck::cast_slice(&turret),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let heavy = heavy_mesh();
+        let heavy_buf = mkbuf(
+            "heavy",
+            bytemuck::cast_slice(&heavy),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let walls = water_walls();
         let walls_buf = mkbuf(
             "walls",
@@ -1421,6 +1513,10 @@ impl Gfx {
             ore_node_len: ore_node.len() as u32,
             carbon_node_buf,
             carbon_node_len: carbon_node.len() as u32,
+            turret_buf,
+            turret_len: turret.len() as u32,
+            heavy_buf,
+            heavy_len: heavy.len() as u32,
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
@@ -1585,6 +1681,8 @@ impl Gfx {
         engineers: &[InstanceRaw],
         ore_nodes: &[InstanceRaw],
         carbon_nodes: &[InstanceRaw],
+        heavies: &[InstanceRaw],
+        turrets: &[InstanceRaw],
         rings: &[RingRaw],
         fow: &[u8],
         view_proj: [[f32; 4]; 4],
@@ -1593,7 +1691,7 @@ impl Gfx {
     ) {
         // All meshes share one instance buffer, packed in order: infantry,
         // Astromancer buildings, Hollowmen buildings, Acolytes, Engineers, ore
-        // nodes, carbon nodes. Each mesh is drawn over its own contiguous range.
+        // nodes, carbon nodes, heavies, turrets. Each mesh draws its own range.
         let groups = [
             infantry.len(),
             barracks_astro.len(),
@@ -1602,15 +1700,17 @@ impl Gfx {
             engineers.len(),
             ore_nodes.len(),
             carbon_nodes.len(),
+            heavies.len(),
+            turrets.len(),
         ];
         // Clamp each group's count so the running total never exceeds the buffer.
-        let mut counts = [0usize; 7];
+        let mut counts = [0usize; 9];
         let mut used = 0usize;
         for (c, &g) in counts.iter_mut().zip(groups.iter()) {
             *c = g.min(MAX_INSTANCES - used);
             used += *c;
         }
-        let [ni, na, nh, nac, nen, nor, ncar] = counts;
+        let [ni, na, nh, nac, nen, nor, ncar, nhv, ntr] = counts;
         let ring_verts = ring_decals(rings);
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
         self.queue.write_buffer(
@@ -1653,6 +1753,8 @@ impl Gfx {
             &engineers[..nen],
             &ore_nodes[..nor],
             &carbon_nodes[..ncar],
+            &heavies[..nhv],
+            &turrets[..ntr],
         ];
         let mut off = 0u64;
         for s in slices {
@@ -1749,6 +1851,8 @@ impl Gfx {
                     (&self.engineer_buf, self.engineer_len, nen),
                     (&self.ore_node_buf, self.ore_node_len, nor),
                     (&self.carbon_node_buf, self.carbon_node_len, ncar),
+                    (&self.heavy_buf, self.heavy_len, nhv),
+                    (&self.turret_buf, self.turret_len, ntr),
                 ];
                 let mut base = 0u32;
                 for (buf, vlen, count) in meshes {
@@ -1825,5 +1929,7 @@ mod tests {
         check_mesh(&engineer_mesh(), "engineer");
         check_mesh(&ore_node_mesh(), "ore-node");
         check_mesh(&carbon_node_mesh(), "carbon-node");
+        check_mesh(&turret_mesh(), "turret");
+        check_mesh(&heavy_mesh(), "heavy");
     }
 }

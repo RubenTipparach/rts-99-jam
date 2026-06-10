@@ -32,7 +32,11 @@ pub enum Kind {
     /// Builder/harvester: moves and avoids stacking like infantry, but never
     /// fights (no auto-aggro, no attack orders).
     Worker,
+    /// Heavy assault unit: slow, high HP, hits hard.
+    Heavy,
     Barracks,
+    /// Defensive emplacement: immobile, auto-fires on nearby enemies.
+    Turret,
     /// Ore crystals: harvested into the ore stockpile.
     OreNode,
     /// Carbon gas geyser: harvested into the carbon stockpile.
@@ -41,7 +45,17 @@ pub enum Kind {
 
 /// Mobile units: they path, take move orders, and obey the no-stacking rule.
 fn is_mobile(k: Kind) -> bool {
-    matches!(k, Kind::Infantry | Kind::Worker)
+    matches!(k, Kind::Infantry | Kind::Worker | Kind::Heavy)
+}
+
+/// Combat units that auto-acquire and engage enemies (excludes workers).
+fn is_fighter(k: Kind) -> bool {
+    matches!(k, Kind::Infantry | Kind::Heavy)
+}
+
+/// A building (occupies a footprint, owned, can be a drop-off / target).
+fn is_building(k: Kind) -> bool {
+    matches!(k, Kind::Barracks | Kind::Turret)
 }
 
 /// Harvestable resource nodes (neutral, static, not valid combat targets).
@@ -112,6 +126,15 @@ fn stats(kind: Kind) -> Stats {
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
         },
+        // Heavy: slow bruiser with lots of HP and a heavy hit.
+        Kind::Heavy => Stats {
+            max_hp: Fx::from_int(180),
+            speed: Fx::from_ratio(18, 100),
+            range2: Fx::from_int(36), // range 6
+            damage: Fx::from_int(14),
+            attack_cd: Fx::from_int(20),
+            aggro2: Fx::from_int(289), // aggro 17
+        },
         Kind::Barracks => Stats {
             max_hp: Fx::from_int(500),
             speed: Fx::ZERO,
@@ -119,6 +142,15 @@ fn stats(kind: Kind) -> Stats {
             damage: Fx::ZERO,
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
+        },
+        // Turret: immobile auto-defense with good range.
+        Kind::Turret => Stats {
+            max_hp: Fx::from_int(260),
+            speed: Fx::ZERO,
+            range2: Fx::from_int(144), // range 12
+            damage: Fx::from_int(9),
+            attack_cd: Fx::from_int(14),
+            aggro2: Fx::from_int(144),
         },
         // Resource nodes are inert: tons of "hp" so stray AoE can't pop them.
         Kind::OreNode | Kind::CarbonNode => Stats {
@@ -143,16 +175,35 @@ const PROD_TICKS: i32 = 55;
 const TEAM_UNIT_CAP: usize = 30;
 const MAX_QUEUE: u32 = 6;
 
-// Economy: a single resource ("ore"). Players start with a stockpile, gain a
-// trickle of income per owned building, and pay per trained unit. Nobody
-// auto-produces - every unit is queued by command.
+// Economy: ore + carbon. Players start with an ore stockpile, gain a trickle of
+// ore per completed building, and pay per trained unit / built structure. Nobody
+// auto-produces - every unit is queued by command. Advanced units and the turret
+// also cost carbon, so harvesting the gas geyser matters.
 const STARTING_ORE: i32 = 200;
 pub const TRAIN_COST: i32 = 50;
 const INCOME_PER_BUILDING: Fx = Fx::from_ratio(1, 2); // per building, per tick
 
-// Construction: a worker can raise a new building at a point, paid in ore on
-// arrival. Buildings keep clear of each other by `BUILD_CLEAR`.
-const BUILD_COST: i32 = 150;
+/// `(ore, carbon)` cost to train a unit of `kind`.
+fn unit_cost(kind: UnitKind) -> (Fx, Fx) {
+    match kind {
+        UnitKind::Infantry => (Fx::from_int(TRAIN_COST), Fx::ZERO),
+        UnitKind::Heavy => (Fx::from_int(120), Fx::from_int(60)),
+        UnitKind::Worker => (Fx::from_int(40), Fx::ZERO),
+    }
+}
+
+/// `(ore, carbon)` cost to construct a building of `kind`.
+fn building_cost(kind: BuildingKind) -> (Fx, Fx) {
+    match kind {
+        BuildingKind::Barracks => (Fx::from_int(150), Fx::ZERO),
+        BuildingKind::Turret => (Fx::from_int(90), Fx::from_int(50)),
+    }
+}
+
+// Construction: a worker walks to a site and raises a building, paid on arrival.
+// The structure then ticks up over `CONSTRUCT_TICKS` before it is functional
+// (income / production / turret fire). Sites keep clear of each other.
+const CONSTRUCT_TICKS: i32 = 80;
 const BUILD_RANGE2: Fx = Fx::from_int(64); // worker builds within range 8 of the site
 const BUILD_CLEAR2: Fx = Fx::from_int(196); // sites must be >= 14 from other buildings
 
@@ -166,6 +217,7 @@ const UNIT_RADIUS: Fx = Fx::from_int(1);
 fn obstacle_radius(k: Kind) -> Option<Fx> {
     match k {
         Kind::Barracks => Some(Fx::from_int(6)),
+        Kind::Turret => Some(Fx::from_ratio(5, 2)), // 2.5
         Kind::OreNode | Kind::CarbonNode => Some(Fx::from_ratio(7, 2)), // 3.5
         _ => None,
     }
@@ -199,6 +251,9 @@ pub struct Snap {
     /// build progress (0..1). Display-only; not part of the state hash.
     pub queued: u32,
     pub build_frac: Fx,
+    /// Buildings only: construction progress, 1.0 once functional. Below 1.0 the
+    /// structure is still being raised (display-only fraction).
+    pub construct_frac: Fx,
 }
 
 #[derive(Default)]
@@ -272,6 +327,11 @@ pub struct World {
     carry_kind: Vec<u8>,
     /// Workers only, display-only: actively mining a node this tick.
     mining: Vec<bool>,
+    /// Buildings only: ticks of construction remaining (0 = functional).
+    construct: Vec<Fx>,
+    /// Barracks only: which unit kind it is currently producing (0 = Infantry,
+    /// 1 = Heavy).
+    prod_kind: Vec<u8>,
     /// Per-player flag: this player is driven by the in-sim bot commander.
     bot: Vec<bool>,
 }
@@ -304,6 +364,8 @@ impl World {
             carried: Vec::new(),
             carry_kind: Vec::new(),
             mining: Vec::new(),
+            construct: Vec::new(),
+            prod_kind: Vec::new(),
             bot: Vec::new(),
         }
     }
@@ -374,6 +436,8 @@ impl World {
             self.carried.push(Fx::ZERO);
             self.carry_kind.push(0);
             self.mining.push(false);
+            self.construct.push(Fx::ZERO);
+            self.prod_kind.push(0);
         }
     }
 
@@ -394,6 +458,10 @@ impl World {
         self.carried[i] = Fx::ZERO;
         self.carry_kind[i] = 0;
         self.mining[i] = false;
+        // Scenario / production spawns are instant; the Build path overrides this
+        // to ramp construction up over CONSTRUCT_TICKS.
+        self.construct[i] = Fx::ZERO;
+        self.prod_kind[i] = 0;
         if owner != NEUTRAL {
             let _ = self.ore_mut(owner); // materialize the owner's stockpile
         }
@@ -405,7 +473,7 @@ impl World {
     fn team_unit_count(&self, owner: PlayerId) -> usize {
         let mut n = 0;
         for i in 0..self.arena.capacity() {
-            if self.arena.alive[i] && self.kind[i] == Kind::Infantry && self.owner[i] == owner {
+            if self.arena.alive[i] && is_fighter(self.kind[i]) && self.owner[i] == owner {
                 n += 1;
             }
         }
@@ -529,7 +597,8 @@ impl World {
                             base = Some(self.pos[i]);
                         }
                     }
-                    Kind::Infantry => {
+                    Kind::Turret => building_count += 1,
+                    Kind::Infantry | Kind::Heavy => {
                         infantry_count += 1;
                         if self.order[i] == Order::Idle {
                             idle_infantry.push(i as u32);
@@ -539,21 +608,28 @@ impl World {
                 }
             }
             let ore = self.ore(owner);
-            let cost_build = Fx::from_int(BUILD_COST);
-            let cost_train = Fx::from_int(TRAIN_COST);
+            let carbon = self.carbon(owner);
+            // Expand economy first (a 2nd Barracks), then sprinkle Turrets.
+            let next_build = if building_count.is_multiple_of(2) {
+                BuildingKind::Turret
+            } else {
+                BuildingKind::Barracks
+            };
+            let (build_ore, build_carbon) = building_cost(next_build);
 
             // 1) Construct: when flush and under the cap, send a worker to build.
             let mut builder: Option<u32> = None;
             if building_count < BOT_MAX_BUILDINGS
                 && !worker_building
-                && ore >= cost_build + Fx::from_int(60)
+                && ore >= build_ore + Fx::from_int(60)
+                && carbon >= build_carbon
             {
                 builder = idle_workers.first().copied().or(any_worker);
                 if let (Some(w), Some(bp)) = (builder, base) {
                     let off = ((building_count % 3) as i32 - 1) * 24;
                     out.push(Command::Build {
                         unit: w,
-                        kind: BuildingKind::Barracks,
+                        kind: next_build,
                         x: bp.x + Fx::from_int(off),
                         y: bp.y + Fx::from_int(26),
                     });
@@ -570,15 +646,25 @@ impl World {
                 }
             }
 
-            // 3) Train: spend surplus ore (keeping a build reserve) on one unit.
+            // 3) Train: spend surplus ore (keeping a build reserve) on one unit;
+            // upgrade to a Heavy when the bot has banked enough carbon.
             let reserve = if building_count < BOT_MAX_BUILDINGS {
-                cost_build
+                build_ore
             } else {
                 Fx::ZERO
             };
+            let want = if carbon >= unit_cost(UnitKind::Heavy).1 {
+                UnitKind::Heavy
+            } else {
+                UnitKind::Infantry
+            };
+            let (uo, uc) = unit_cost(want);
             for &b in &barracks {
-                if self.queue[b as usize] < MAX_QUEUE && ore >= reserve + cost_train {
-                    out.push(Command::Train { building: b });
+                if self.queue[b as usize] < MAX_QUEUE && ore >= reserve + uo && carbon >= uc {
+                    out.push(Command::Train {
+                        building: b,
+                        kind: want,
+                    });
                     break;
                 }
             }
@@ -604,6 +690,7 @@ impl World {
         // Bot players issue their commands through the same path, deterministically.
         let ai = self.ai_commands();
         self.apply_commands(&ai);
+        self.construction();
         self.acquire_targets();
         self.economy();
         self.production();
@@ -611,10 +698,19 @@ impl World {
         self.tick += 1;
     }
 
-    /// Trickle ore income to each player for every building they own.
+    /// Tick down construction on buildings being raised.
+    fn construction(&mut self) {
+        for i in 0..self.arena.capacity() {
+            if self.arena.alive[i] && self.construct[i] > Fx::ZERO {
+                self.construct[i] = (self.construct[i] - Fx::ONE).max(Fx::ZERO);
+            }
+        }
+    }
+
+    /// Trickle ore income to each player for every completed building they own.
     fn economy(&mut self) {
         for i in 0..self.arena.capacity() {
-            if self.arena.alive[i] && self.kind[i] == Kind::Barracks {
+            if self.arena.alive[i] && is_building(self.kind[i]) && self.construct[i] <= Fx::ZERO {
                 let owner = self.owner[i];
                 *self.ore_mut(owner) += INCOME_PER_BUILDING;
             }
@@ -628,12 +724,14 @@ impl World {
                     let k = match kind {
                         UnitKind::Infantry => Kind::Infantry,
                         UnitKind::Worker => Kind::Worker,
+                        UnitKind::Heavy => Kind::Heavy,
                     };
                     self.spawn(k, owner, x, y);
                 }
                 Command::SpawnBuilding { owner, kind, x, y } => {
                     let k = match kind {
                         BuildingKind::Barracks => Kind::Barracks,
+                        BuildingKind::Turret => Kind::Turret,
                     };
                     self.spawn(k, owner, x, y);
                 }
@@ -668,17 +766,25 @@ impl World {
                         self.set_order(unit, Order::Attack { target });
                     }
                 }
-                Command::Train { building } => {
+                Command::Train { building, kind } => {
                     let b = building as usize;
-                    let cost = Fx::from_int(TRAIN_COST);
+                    // Barracks make fighters (workers come from the HQ tier; only
+                    // Infantry/Heavy are trainable here).
+                    let trainable = matches!(kind, UnitKind::Infantry | UnitKind::Heavy);
+                    let (ore, carbon) = unit_cost(kind);
                     if self.arena.alive_at(building)
                         && self.kind[b] == Kind::Barracks
+                        && self.construct[b] <= Fx::ZERO
+                        && trainable
                         && self.queue[b] < MAX_QUEUE
-                        && self.ore(self.owner[b]) >= cost
+                        && self.ore(self.owner[b]) >= ore
+                        && self.carbon(self.owner[b]) >= carbon
                     {
                         let owner = self.owner[b];
-                        *self.ore_mut(owner) -= cost;
+                        *self.ore_mut(owner) -= ore;
+                        *self.carbon_mut(owner) -= carbon;
                         self.queue[b] += 1;
+                        self.prod_kind[b] = if kind == UnitKind::Heavy { 1 } else { 0 };
                         if self.prod[b] <= Fx::ZERO {
                             self.prod[b] = Fx::from_int(PROD_TICKS);
                         }
@@ -703,13 +809,13 @@ impl World {
     /// Idle units auto-engage the nearest enemy within aggro range.
     fn acquire_targets(&mut self) {
         for i in 0..self.arena.capacity() {
-            if !self.arena.alive[i] || self.kind[i] != Kind::Infantry {
+            if !self.arena.alive[i] || !is_fighter(self.kind[i]) {
                 continue;
             }
             if self.order[i] != Order::Idle {
                 continue;
             }
-            let aggro2 = stats(Kind::Infantry).aggro2;
+            let aggro2 = stats(self.kind[i]).aggro2;
             if let Some((t, d2)) = self.nearest_enemy(i) {
                 if d2 <= aggro2 {
                     self.order[i] = Order::Attack { target: t };
@@ -720,7 +826,10 @@ impl World {
 
     fn production(&mut self) {
         for i in 0..self.arena.capacity() {
-            if !self.arena.alive[i] || self.kind[i] != Kind::Barracks {
+            if !self.arena.alive[i]
+                || self.kind[i] != Kind::Barracks
+                || self.construct[i] > Fx::ZERO
+            {
                 continue;
             }
             // Every building is manual: it builds only what has been queued.
@@ -750,9 +859,14 @@ impl World {
         let owner = self.owner[i];
         let p = self.pos[i];
         let rally = self.rally[i];
+        let kind = if self.prod_kind[i] == 1 {
+            Kind::Heavy
+        } else {
+            Kind::Infantry
+        };
         // tiny deterministic spread so they don't stack perfectly
         let jitter = Fx::from_ratio((self.rng.range_u32(7) as i64) - 3, 2);
-        let id = self.spawn(Kind::Infantry, owner, p.x + jitter, p.y - Fx::from_int(3));
+        let id = self.spawn(kind, owner, p.x + jitter, p.y - Fx::from_int(3));
         self.order[id.index as usize] = Order::Move {
             x: rally.x,
             y: rally.y,
@@ -850,17 +964,24 @@ impl World {
             }
 
             // Build is also self-contained: walk to the site, then raise the
-            // building if the owner can afford it and the spot is clear.
+            // building if the owner can afford it (ore + carbon) and the spot is
+            // clear. The new structure then ticks up over CONSTRUCT_TICKS.
             if let Order::Build { kind, x, y } = self.order[i] {
                 let owner = self.owner[i];
                 if dist2(me, x, y) <= BUILD_RANGE2 {
-                    let cost = Fx::from_int(BUILD_COST);
-                    if self.ore(owner) >= cost && self.site_clear(x, y) {
-                        *self.ore_mut(owner) -= cost;
+                    let (ore, carbon) = building_cost(kind);
+                    if self.ore(owner) >= ore
+                        && self.carbon(owner) >= carbon
+                        && self.site_clear(x, y)
+                    {
+                        *self.ore_mut(owner) -= ore;
+                        *self.carbon_mut(owner) -= carbon;
                         let k = match kind {
                             BuildingKind::Barracks => Kind::Barracks,
+                            BuildingKind::Turret => Kind::Turret,
                         };
-                        self.spawn(k, owner, x, y);
+                        let id = self.spawn(k, owner, x, y);
+                        self.construct[id.index as usize] = Fx::from_int(CONSTRUCT_TICKS);
                     }
                     self.order[i] = Order::Idle;
                 } else {
@@ -938,6 +1059,25 @@ impl World {
             self.cooldown[i] = (self.cooldown[i] - Fx::ONE).max(Fx::ZERO);
         }
 
+        // Turrets: immobile auto-defense. Acquire the nearest enemy in range and
+        // fire on cooldown, into the same damage buffer the mobile units use.
+        for i in 0..cap {
+            if !self.arena.alive[i] || self.kind[i] != Kind::Turret || self.construct[i] > Fx::ZERO
+            {
+                continue;
+            }
+            let st = stats(Kind::Turret);
+            if self.cooldown[i] <= Fx::ZERO {
+                if let Some((t, d2)) = self.nearest_enemy(i) {
+                    if d2 <= st.range2 {
+                        damage[t as usize] += st.damage;
+                        self.cooldown[i] = st.attack_cd;
+                    }
+                }
+            }
+            self.cooldown[i] = (self.cooldown[i] - Fx::ONE).max(Fx::ZERO);
+        }
+
         // Apply damage, then resolve deaths (deterministic: ascending index).
         for (i, &d) in damage.iter().enumerate() {
             if d > Fx::ZERO && self.arena.alive[i] {
@@ -954,11 +1094,14 @@ impl World {
         self.avoid_obstacles();
     }
 
-    /// True if `(x, y)` is far enough from every existing building to place one.
+    /// True if `(x, y)` is far enough from every existing building and resource
+    /// node to place one.
     fn site_clear(&self, x: Fx, y: Fx) -> bool {
         for j in 0..self.arena.capacity() {
-            if self.arena.alive[j]
-                && self.kind[j] == Kind::Barracks
+            if !self.arena.alive[j] {
+                continue;
+            }
+            if (is_building(self.kind[j]) || is_resource(self.kind[j]))
                 && dist2(self.pos[j], x, y) < BUILD_CLEAR2
             {
                 return false;
@@ -1095,6 +1238,11 @@ impl World {
             } else {
                 Fx::ZERO
             };
+            let construct_frac = if is_building(self.kind[i]) && self.construct[i] > Fx::ZERO {
+                (Fx::from_int(CONSTRUCT_TICKS) - self.construct[i]) / Fx::from_int(CONSTRUCT_TICKS)
+            } else {
+                Fx::ONE
+            };
             out.push(Snap {
                 index: i as u32,
                 generation: self.arena.generation[i],
@@ -1108,6 +1256,7 @@ impl World {
                 resource_frac,
                 queued: self.queue[i],
                 build_frac,
+                construct_frac,
             });
         }
         out
@@ -1130,6 +1279,8 @@ impl World {
                 Kind::Worker => 2,
                 Kind::OreNode => 3,
                 Kind::CarbonNode => 4,
+                Kind::Heavy => 5,
+                Kind::Turret => 6,
             });
             h.write_u32(self.owner[i] as u32);
             h.write_i64(self.pos[i].x.to_raw());
@@ -1141,6 +1292,8 @@ impl World {
             h.write_i64(self.amount[i].to_raw());
             h.write_i64(self.carried[i].to_raw());
             h.write_u64(self.carry_kind[i] as u64);
+            h.write_i64(self.construct[i].to_raw());
+            h.write_u64(self.prod_kind[i] as u64);
             let (tag, a, b) = match self.order[i] {
                 Order::Idle => (0u64, 0i64, 0i64),
                 Order::Move { x, y } => (1, x.to_raw(), y.to_raw()),
@@ -1329,8 +1482,14 @@ mod tests {
         assert_eq!(w.alive_count(), 1);
         // Queue training; units build over time.
         w.step(&[
-            Command::Train { building: 0 },
-            Command::Train { building: 0 },
+            Command::Train {
+                building: 0,
+                kind: UnitKind::Infantry,
+            },
+            Command::Train {
+                building: 0,
+                kind: UnitKind::Infantry,
+            },
         ]);
         for _ in 0..200 {
             w.step(&[]);
@@ -1369,7 +1528,10 @@ mod tests {
         // More Train commands than the 200 stockpile can pay for (50 each).
         let mut cmds = Vec::new();
         for _ in 0..8 {
-            cmds.push(Command::Train { building: 0 });
+            cmds.push(Command::Train {
+                building: 0,
+                kind: UnitKind::Infantry,
+            });
         }
         w.step(&cmds);
         // Only what we could afford got queued, and ore was spent.

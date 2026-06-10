@@ -290,6 +290,7 @@ pub fn draw(
     _paused: bool,
     _cursor: (f32, f32),
     _draw_cursor: bool,
+    _build_label: Option<&str>,
 ) {
 }
 
@@ -304,6 +305,7 @@ pub fn draw(
     paused: bool,
     cursor: (f32, f32),
     draw_cursor: bool,
+    build_label: Option<&str>,
 ) {
     use crate::terrain;
     use wasm_bindgen::JsCast;
@@ -448,6 +450,41 @@ pub fn draw(
             ctx.set_fill_style_str("rgba(255,211,107,0.95)");
             ctx.fill_rect(bx, by + bh - 3.0, bw * frac.clamp(0.0, 1.0) as f64, 3.0);
         }
+        ctx.set_fill_style_str("#9fb6da");
+        ctx.set_font("12px monospace");
+        let _ = ctx.fill_text("[H] Heavy  120 ore + 60 carbon", bx, by + bh + 16.0);
+    }
+
+    // Worker command card: build hotkeys when one of your workers is selected.
+    if game.has_worker_selected() {
+        let (bx, _, _, _) = train_btn_css(h);
+        let by = h as f64 - 96.0 + 70.0;
+        ctx.set_fill_style_str("#cfe0ff");
+        ctx.set_font("bold 13px monospace");
+        let _ = ctx.fill_text("WORKER", bx, by);
+        ctx.set_fill_style_str("#9fb6da");
+        ctx.set_font("12px monospace");
+        let _ = ctx.fill_text("[B] Barracks 150 ore   [V] Turret 90+50", bx, by + 16.0);
+    }
+
+    // Build placement banner: the next click drops the building.
+    if let Some(label) = build_label {
+        ctx.set_text_align("center");
+        ctx.set_fill_style_str("rgba(40,80,140,0.92)");
+        let bw2 = 380.0;
+        let bx2 = (wf - bw2) / 2.0;
+        ctx.fill_rect(bx2, 12.0, bw2, 30.0);
+        ctx.set_stroke_style_str("rgba(150,190,240,0.95)");
+        ctx.set_line_width(1.5);
+        ctx.stroke_rect(bx2, 12.0, bw2, 30.0);
+        ctx.set_fill_style_str("#eaf2ff");
+        ctx.set_font("bold 14px monospace");
+        let _ = ctx.fill_text(
+            &format!("PLACE {label} - click to build, Esc to cancel"),
+            wf / 2.0,
+            32.0,
+        );
+        ctx.set_text_align("left");
     }
 
     // Minimap: a diamond radar in a framed panel, tucked into the bottom-right

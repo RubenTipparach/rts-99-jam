@@ -22,6 +22,6 @@ fn reproducible_within_process() {
 /// `cargo run -p testkit --bin demo_hash` and update this value.
 #[test]
 fn matches_pinned_cross_platform_hash() {
-    const GOLDEN: u64 = 0x8302_3c4b_e0aa_bfe9;
+    const GOLDEN: u64 = 0x839f_168a_09a1_ed09;
     assert_eq!(final_hash(&demo_replay()), GOLDEN);
 }

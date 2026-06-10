@@ -282,6 +282,10 @@ struct App {
     last_css: (u32, u32),
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     first_frame_done: bool,
+    /// When set, the next left-click places this building (worker construction
+    /// mode); right-click / Esc cancels.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    build_mode: Option<protocol::BuildingKind>,
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     proxy: EventLoopProxy<UserEvent>,
 }
@@ -307,6 +311,7 @@ impl App {
             lobby: menu::Lobby::default(),
             last_css: (0, 0),
             first_frame_done: false,
+            build_mode: None,
             proxy,
         }
     }
@@ -316,6 +321,34 @@ impl App {
             .as_ref()
             .map(|g| (g.width as f32, g.height as f32))
             .unwrap_or((1.0, 1.0))
+    }
+
+    /// Draw the 3D scene (terrain, water, every unit/building mesh, rings) from
+    /// the current sim snapshot and camera.
+    fn render_scene(&mut self) {
+        if let Some(gfx) = self.gfx.as_mut() {
+            let aspect = gfx.aspect();
+            let (inf, ba, bh, ac, en, ore, carbon, heavies, turrets, rings) =
+                self.game.render_data();
+            let fow = self.game.fow_bytes();
+            let vp = self.camera.view_proj(aspect);
+            gfx.render(
+                &inf,
+                &ba,
+                &bh,
+                &ac,
+                &en,
+                &ore,
+                &carbon,
+                &heavies,
+                &turrets,
+                &rings,
+                &fow,
+                vp,
+                self.camera.eye(),
+                self.game.time(),
+            );
+        }
     }
 
     /// Confine the cursor to the window while playing and release it while
@@ -394,7 +427,7 @@ impl App {
         }
         let (x0, y0, x1, y1) = hud::train_button_rect(w, h);
         if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
-            self.game.train_selected();
+            self.game.train_selected(protocol::UnitKind::Infantry);
             true
         } else {
             false
@@ -583,9 +616,13 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::KeyboardInput { event, .. } => {
                 let down = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    // Esc: in the lobby step back to the menu; otherwise (in a
-                    // match) toggle pause and release the confined cursor.
+                    // Esc: cancel a pending build first; in the lobby step back to
+                    // the menu; otherwise (in a match) toggle pause.
                     if code == KeyCode::Escape && down {
+                        if self.build_mode.is_some() {
+                            self.build_mode = None;
+                            return;
+                        }
                         #[cfg(target_arch = "wasm32")]
                         {
                             if self.screen == menu::Screen::Lobby {
@@ -618,7 +655,19 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
                         KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
                         KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
-                        KeyCode::KeyT if down => self.game.train_selected(),
+                        KeyCode::KeyT if down => {
+                            self.game.train_selected(protocol::UnitKind::Infantry)
+                        }
+                        KeyCode::KeyH if down => {
+                            self.game.train_selected(protocol::UnitKind::Heavy)
+                        }
+                        // Worker build: B = barracks, V = turret -> placement mode.
+                        KeyCode::KeyB if down && self.game.has_worker_selected() => {
+                            self.build_mode = Some(protocol::BuildingKind::Barracks)
+                        }
+                        KeyCode::KeyV if down && self.game.has_worker_selected() => {
+                            self.build_mode = Some(protocol::BuildingKind::Turret)
+                        }
                         KeyCode::Digit1 if down => self.game.toggle_fog_unexplored(),
                         KeyCode::Digit2 if down => self.game.toggle_fog_explored(),
                         _ => {}
@@ -648,6 +697,19 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 // A click is a user gesture: (re)confine the cursor to the window.
                 self.apply_cursor_grab();
+                // Build placement: a left-click drops the pending building at the
+                // ground point; a right-click cancels. Consumes the click.
+                if let Some(kind) = self.build_mode {
+                    if button == MouseButton::Left && state == ElementState::Pressed {
+                        if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
+                            self.game.build_selected(kind, wx, wz);
+                        }
+                        self.build_mode = None;
+                    } else if button == MouseButton::Right && state == ElementState::Pressed {
+                        self.build_mode = None;
+                    }
+                    return;
+                }
                 match button {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
@@ -835,27 +897,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // sim's clock current so resuming doesn't replay a backlog.
                 if self.paused {
                     self.game.skip_tick();
-                    if let Some(gfx) = self.gfx.as_mut() {
-                        let aspect = gfx.aspect();
-                        let (infantry, b_astro, b_hollow, acolytes, engineers, ore, carbon, rings) =
-                            self.game.render_data();
-                        let fow = self.game.fow_bytes();
-                        let vp = self.camera.view_proj(aspect);
-                        gfx.render(
-                            &infantry,
-                            &b_astro,
-                            &b_hollow,
-                            &acolytes,
-                            &engineers,
-                            &ore,
-                            &carbon,
-                            &rings,
-                            &fow,
-                            vp,
-                            self.camera.eye(),
-                            self.game.time(),
-                        );
-                    }
+                    self.render_scene();
                     let (w, h) = self.dims();
                     // Paused: the OS cursor is back (lock released), so the HUD
                     // does not draw its own.
@@ -868,6 +910,7 @@ impl ApplicationHandler<UserEvent> for App {
                         true,
                         self.input.cursor,
                         false,
+                        None,
                     );
                     return;
                 }
@@ -929,30 +972,14 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 });
 
-                if let Some(gfx) = self.gfx.as_mut() {
-                    let aspect = gfx.aspect();
-                    let (infantry, b_astro, b_hollow, acolytes, engineers, ore, carbon, rings) =
-                        self.game.render_data();
-                    let fow = self.game.fow_bytes();
-                    let vp = self.camera.view_proj(aspect);
-                    gfx.render(
-                        &infantry,
-                        &b_astro,
-                        &b_hollow,
-                        &acolytes,
-                        &engineers,
-                        &ore,
-                        &carbon,
-                        &rings,
-                        &fow,
-                        vp,
-                        self.camera.eye(),
-                        self.game.time(),
-                    );
-                }
+                self.render_scene();
                 let (w, h) = self.dims();
                 // When the pointer is locked the browser hides the OS cursor, so
                 // the HUD draws our own at the tracked position.
+                let build_label = self.build_mode.map(|k| match k {
+                    protocol::BuildingKind::Barracks => "BARRACKS",
+                    protocol::BuildingKind::Turret => "TURRET",
+                });
                 hud::draw(
                     &self.camera,
                     &self.game,
@@ -962,6 +989,7 @@ impl ApplicationHandler<UserEvent> for App {
                     false,
                     self.input.cursor,
                     self.cursor_locked,
+                    build_label,
                 );
 
                 // Remove the loading overlay once the first frame is on screen.
