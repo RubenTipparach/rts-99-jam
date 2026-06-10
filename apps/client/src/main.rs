@@ -559,13 +559,19 @@ impl App {
             menu::Click::Back => self.screen = menu::Screen::Menu,
             menu::Click::Fullscreen => toggle_fullscreen(),
             menu::Click::Start => {
-                self.game.set_player_faction(self.lobby.faction);
-                // Load the chosen battlefield and rebuild its terrain.
+                // Load the chosen battlefield FIRST: each world carries its
+                // own fitted scenario, so the game must be built after the
+                // map is active. Then open the camera on the player's main.
                 crate::voxel::set_active(Some(self.lobby.map as usize));
                 if let Some(g) = self.gfx.as_mut() {
                     g.set_world();
                 }
+                self.game = Game::new();
+                self.game.set_player_faction(self.lobby.faction);
                 self.game.apply_terrain();
+                if let Some((hx, hz)) = self.game.player_hq() {
+                    self.camera.look_at(hx, hz);
+                }
                 self.screen = menu::Screen::InGame;
                 set_body_menu(false); // show the mobile test controls
                 self.apply_cursor_grab();

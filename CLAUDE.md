@@ -67,24 +67,26 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
 
 ## Maps and spawn sites
 
-- **The skirmish scenario is a site contract every baked world must honor.**
-  Worldgen parses `assets/maps/crossfire_basin.map` (`scenario_sites` in
-  `assets/worldgen/common.py`) and must give each HQ a flat, dry apron with
-  generous land around it, keep terrain features (craters, lineae, canyons,
-  volcanoes, lakes) off spawn discs and resource pads, level the ground
-  under every resource cluster, and keep everything connected: every spawn
-  must reach every other spawn and every resource cluster on foot, with no
-  base stranded in a minority pocket of the walkable map. Worldgen enforces
-  this by masking features away from sites, levelling sites afterward, and
-  grading ramp roads/causeways through whatever still cuts them apart
-  (`_site_mask` / `_level_sites` / `_connect_spawns` in
-  `assets/worldgen/densitygen.py`).
+- **The scenario fits the terrain, never the other way around.** Terrain
+  features (craters, lineae, canyons, volcanoes, seas) generate freely and
+  keep each world's natural character; then worldgen re-fits the skirmish
+  template (`assets/maps/crossfire_basin.map`) onto that ground: each main
+  (HQ + workers + ore line + geyser) moves rigidly to a viable spawn, and
+  shared clusters nudge to nearby usable spots - all inside the biggest
+  walkable region, mutually reachable, with no base in a minority pocket
+  (`_components` / `_choose_spawns` / `_place_scenario` in
+  `assets/worldgen/densitygen.py`). The only ground edits are small
+  levelled base pads under the final sites - never roads or causeways
+  carved across the map. `bake.py` writes the fitted layout to
+  `assets/maps/<key>.map`; the client loads that file for the chosen
+  world (`map::active_scenario`), so the game must be constructed after
+  the lobby picks the battlefield.
 - **Validate after every bake.** `python3 assets/worldgen/validate.py`
   replays the client's exact passability rule over each baked `.vxl` and
-  fails on a bad spawn apron, a severed spawn-to-spawn route, a minority
-  region, or an unreachable resource node. After touching worldgen or the
-  `.map`, run `bake.py` then `validate.py`, and fix the generator - never
-  loosen the validator.
+  its fitted `.map`, and fails on a bad spawn apron, a severed
+  spawn-to-spawn route, a minority region, or an unreachable resource
+  node. After touching worldgen or the template, run `bake.py` then
+  `validate.py`, and fix the generator - never loosen the validator.
 
 ## Game feel / fx
 

@@ -21,7 +21,7 @@ won't eat build space. A per-column buildable mask marks the flat, dry tops.
 
 import math
 
-from common import fbm, clamp, Rng, scenario_sites
+from common import fbm, clamp, Rng, scenario_template
 import voxel as vox
 
 # World is 1024 x 1024 units (HALF = 512), and the XZ grid is 257 samples = 256
@@ -156,7 +156,7 @@ def _crater_count(world):
     return 3                 # ice/volcanic/water resurfaced: nearly crater-free
 
 
-def _craters(ht, mat, seed, count, mask):
+def _craters(ht, mat, seed, count):
     rng = Rng(seed * 131 + 5)
     for _ in range(count):
         cx, cz = rng.uniform(0, NXZ), rng.uniform(0, NXZ)
@@ -167,8 +167,6 @@ def _craters(ht, mat, seed, count, mask):
         k0, k1 = max(0, int(cz - rad * 1.6)), min(NXZ, int(cz + rad * 1.6) + 1)
         for kk in range(k0, k1):
             for ii in range(i0, i1):
-                if mask[kk * NXZ + ii]:
-                    continue
                 d = math.hypot(ii - cx, kk - cz) / rad
                 if d > 1.5:
                     continue
@@ -189,14 +187,13 @@ def _craters(ht, mat, seed, count, mask):
 BRIDGE_EVERY = 56   # steps (~grid cells) between bridge centres
 
 
-def _fissures(ht, mat, seed, n, depth, halfw, mask):
+def _fissures(ht, mat, seed, n, depth, halfw):
     """Europa-style long, deep, narrow fissures (lineae) carved across the map.
 
     Accumulate a max-depth cut map (so overlapping steps do not stack into a
-    bottomless trench), then apply it once. Trenches never carve a masked
-    site. Returns the bridge sites, `(x, z, dir_x, dir_z)` in grid cells
-    along each trench, that keep the regions on either side connected for
-    ground units.
+    bottomless trench), then apply it once. Returns the bridge sites,
+    `(x, z, dir_x, dir_z)` in grid cells along each trench, that keep the
+    regions on either side connected for ground units.
     """
     rng = Rng(seed * 17 + 1)
     cut = [[0.0] * NXZ for _ in range(NXZ)]
@@ -215,14 +212,13 @@ def _fissures(ht, mat, seed, n, depth, halfw, mask):
                 break
             cyc = int((s + phase) // BRIDGE_EVERY)
             if ((s + phase) % BRIDGE_EVERY < 1.0 and cyc not in marked
-                    and 8 <= x < NXZ - 8 and 8 <= z < NXZ - 8
-                    and not mask[int(z) * NXZ + int(x)]):
+                    and 8 <= x < NXZ - 8 and 8 <= z < NXZ - 8):
                 marked.add(cyc)
                 bridges.append((x, z, math.cos(ang), math.sin(ang)))
             for dk in range(-halfw, halfw + 1):
                 for di in range(-halfw, halfw + 1):
                     ii, kk = int(x + di), int(z + dk)
-                    if 0 <= ii < NXZ and 0 <= kk < NXZ and not mask[kk * NXZ + ii]:
+                    if 0 <= ii < NXZ and 0 <= kk < NXZ:
                         dd = math.hypot(di, dk) / (halfw + 0.5)
                         if dd < 1.0:
                             cut[kk][ii] = max(cut[kk][ii], depth * (1.0 - dd * dd))
@@ -281,22 +277,20 @@ def _decks(grid, ht, bridges, dy):
                                             int(clamp(d, 0, 255)))
 
 
-def _canyon(ht, mat, seed, depth, halfw, mask):
+def _canyon(ht, mat, seed, depth, halfw):
     """One big meandering canyon across the middle (Mars: Valles Marineris)."""
     for ii in range(NXZ):
         u = ii / (NXZ - 1)
         cz = NXZ * 0.5 + math.sin(u * math.pi * 1.6) * NXZ * 0.06 \
             + (fbm(u * 3.0, 0.5, seed + 4, 2) - 0.5) * NXZ * 0.14
         for kk in range(NXZ):
-            if mask[kk * NXZ + ii]:
-                continue
             dd = abs(kk - cz) / halfw
             if dd < 1.0:
                 ht[kk][ii] -= depth * (1.0 - dd * dd)
                 mat[kk][ii] = MAT_HIGH if dd > 0.6 else MAT_LOW
 
 
-def _cones(ht, mat, seed, n, height, base_r, kind, mask, region=None):
+def _cones(ht, mat, seed, n, height, base_r, kind, region=None):
     """Build `n` volcanic cones with a summit caldera + hazard material.
 
     One builder for all of them, scaled by `height`/`base_r`:
@@ -317,8 +311,6 @@ def _cones(ht, mat, seed, n, height, base_r, kind, mask, region=None):
         k0, k1 = int(cz - base_r), int(cz + base_r) + 1
         for kk in range(max(0, k0), min(NXZ, k1)):
             for ii in range(max(0, i0), min(NXZ, i1)):
-                if mask[kk * NXZ + ii]:
-                    continue
                 d = math.hypot(ii - cx, kk - cz) / base_r
                 if d >= 1.0:
                     continue
@@ -332,18 +324,24 @@ def _cones(ht, mat, seed, n, height, base_r, kind, mask, region=None):
     return vents
 
 
-# The skirmish scenario's sites, parsed straight from the .map so they stay in
-# sync: every HQ must start on a flat, dry apron, every resource cluster on
-# usable land, and every spawn must reach every other spawn on foot. Worldgen
-# enforces this in three layers: features never stamp on a site (_site_mask),
-# sites are levelled after every feature pass (_level_sites), and roads are
-# graded between spawns a feature cut apart (_connect_spawns). Validate with
-# assets/worldgen/validate.py after baking.
-SPAWNS, RESOURCES = scenario_sites()
-SPAWN_R = NXZ * 0.075   # protected disc around each base (~77 world units)
-SPAWN_FLAT = 12.0       # cells levelled dead flat at a spawn (~48 world units)
-PAD_R = 7.0             # protected pad around a resource node (~28 world units)
-PAD_FLAT = 3.0          # cells levelled dead flat at a node (~12 world units)
+# The skirmish scenario template (crossfire_basin.map) is re-fitted onto each
+# world instead of re-carving the terrain to suit it: spawns move to naturally
+# viable ground (flat, dry, all in the same walkable region) and the shared
+# resource clusters shift to nearby usable spots. The only ground edits are
+# small levelled aprons under the final sites - base pads, not roads. The
+# fitted scenario is written to assets/maps/<key>.map by bake.py; validate
+# with assets/worldgen/validate.py after baking.
+NAME, TEMPLATE = scenario_template()
+SPAWN_R = NXZ * 0.075   # apron skirt around each base (~77 world units)
+SPAWN_FLAT = 10.0       # cells levelled dead flat at a spawn (~40 world units)
+PAD_R = 6.0             # feathered pad around a resource node
+PAD_FLAT = 2.5          # cells levelled dead flat at a node (~10 world units)
+MAIN_REACH = 65.0       # template entities this close to an HQ move with it
+WALK_STEP = 4.4         # max per-cell rise the site chooser calls walkable
+# The sea percentile shifts slightly when the base pads level the ground, so
+# the site chooser keeps this much headroom above its sea estimate: land that
+# barely clears the water is not trusted to stay connected.
+SEA_MARGIN = 3.5
 
 
 def _cell(x, z):
@@ -352,41 +350,221 @@ def _cell(x, z):
             (z + HALF) / (2.0 * HALF) * (NXZ - 1))
 
 
-def _spawn_dist(i, k):
-    best = 1e9
-    for sx, sz in SPAWNS:
-        ci, ck = _cell(sx, sz)
-        best = min(best, math.hypot(i - ci, k - ck))
-    return best
+def _to_world(i, k):
+    """Grid cell (i, k) -> world (x, z)."""
+    return (i / (NXZ - 1) * 2.0 * HALF - HALF,
+            k / (NXZ - 1) * 2.0 * HALF - HALF)
 
 
-def _site_mask():
-    """1 where terrain features must not stamp: spawn discs + resource pads."""
-    m = bytearray(NXZ * NXZ)
-
-    def disc(x, z, r):
-        ci, ck = _cell(x, z)
-        for kk in range(max(0, int(ck - r)), min(NXZ, int(ck + r) + 2)):
-            for ii in range(max(0, int(ci - r)), min(NXZ, int(ci + r) + 2)):
-                if math.hypot(ii - ci, kk - ck) <= r:
-                    m[kk * NXZ + ii] = 1
-
-    for sx, sz in SPAWNS:
-        disc(sx, sz, SPAWN_R)
-    for rx, rz in RESOURCES:
-        disc(rx, rz, PAD_R)
-    return m
+def _clusters(points, link=30.0):
+    """Greedy single-linkage grouping of world points within `link` units."""
+    groups = []
+    for p in points:
+        hits = [g for g in groups
+                if any(math.hypot(p[0] - q[0], p[1] - q[1]) <= link for q in g)]
+        if not hits:
+            groups.append([p])
+        else:
+            hits[0].append(p)
+            for g in hits[1:]:
+                hits[0].extend(g)
+                groups.remove(g)
+    return groups
 
 
-def _level_sites(ht, mat):
-    """Level the ground under every spawn and resource cluster.
+def _components(ht, sea_est):
+    """Label the walkable regions of the natural terrain.
 
-    Spawn discs become a flat apron at the disc's mean height (dead flat to
-    SPAWN_FLAT cells, feathered out to SPAWN_R); resource pads get the same
-    treatment at PAD_FLAT/PAD_R. Runs after every feature pass, so no
-    crater rim, linea, canyon or volcano leaves a base hanging on a cliff,
-    and hazard material is scrubbed from the levelled core.
+    A cell is walkable when it sits above the coming sea (wet worlds) and a
+    step to a neighbour is allowed when the rise stays under WALK_STEP.
+    Returns `(labels, main_id)` where `main_id` is the largest region.
     """
+    lab = [[0] * NXZ for _ in range(NXZ)]
+    sizes = {}
+    nxt = 0
+    for k0 in range(NXZ):
+        for i0 in range(NXZ):
+            if lab[k0][i0] != 0:
+                continue
+            if sea_est is not None and ht[k0][i0] <= sea_est + SEA_MARGIN:
+                continue
+            nxt += 1
+            lab[k0][i0] = nxt
+            stack = [(i0, k0)]
+            count = 0
+            while stack:
+                i, k = stack.pop()
+                count += 1
+                for di, dk in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    ni, nk = i + di, k + dk
+                    if (0 <= ni < NXZ and 0 <= nk < NXZ and lab[nk][ni] == 0
+                            and abs(ht[nk][ni] - ht[k][i]) <= WALK_STEP
+                            and (sea_est is None or ht[nk][ni] > sea_est + SEA_MARGIN)):
+                        lab[nk][ni] = nxt
+                        stack.append((ni, nk))
+            sizes[nxt] = count
+    main = max(sizes, key=sizes.get) if sizes else 0
+    return lab, main
+
+
+def _site_quality(ht, lab, main, ci, ck, r):
+    """How usable the disc of radius `r` cells at `(ci, ck)` is: the fraction
+    of sampled cells in the main walkable region and within 5 height units of
+    the centre. 1.0 = a clean, flat, connected apron."""
+    ci, ck = int(round(ci)), int(round(ck))
+    if not (0 <= ci < NXZ and 0 <= ck < NXZ) or lab[ck][ci] != main:
+        return 0.0
+    h0 = ht[ck][ci]
+    good = total = 0
+    ri = int(r)
+    for dk in range(-ri, ri + 1, 2):
+        for di in range(-ri, ri + 1, 2):
+            if di * di + dk * dk > r * r:
+                continue
+            ii, kk = ci + di, ck + dk
+            total += 1
+            if (0 <= ii < NXZ and 0 <= kk < NXZ and lab[kk][ii] == main
+                    and abs(ht[kk][ii] - h0) <= 5.0):
+                good += 1
+    return good / max(total, 1)
+
+
+def _choose_spawns(ht, lab, main, nominal):
+    """Pick a viable position for each template spawn: prefer ground close to
+    the nominal layout, but only where a base apron actually fits, every
+    spawn lands in the main walkable region, and spawns keep their distance
+    from each other. The terrain itself is left as generated."""
+    # Pre-score every other cell once; spawns then pick from this map.
+    qual = []
+    for ck in range(10, NXZ - 10, 2):
+        for ci in range(10, NXZ - 10, 2):
+            if lab[ck][ci] != main:
+                continue
+            q = _site_quality(ht, lab, main, ci, ck, 10.0)
+            if q >= 0.5:
+                qual.append((ci, ck, q))
+    chosen = []
+    min_sep = 55.0  # cells (~220 world units) between any two spawns
+    for (nx_, nz_) in nominal:
+        ni, nk = _cell(nx_, nz_)
+        best = None
+        for want in (0.88, 0.7, 0.5):
+            for (ci, ck, q) in qual:
+                if q < want:
+                    continue
+                if any(math.hypot(ci - pi, ck - pk) < min_sep for (pi, pk) in chosen):
+                    continue
+                score = q * 100.0 - 0.35 * math.hypot(ci - ni, ck - nk)
+                if best is None or score > best[0]:
+                    best = (score, ci, ck)
+            if best is not None:
+                break
+        if best is None:
+            best = (0.0, int(round(ni)), int(round(nk)))  # last resort
+        chosen.append((best[1], best[2]))
+    return [_to_world(ci, ck) for (ci, ck) in chosen]
+
+
+def _fit_cluster(ht, lab, main, x, z):
+    """Nudge a shared resource cluster's centroid to the best usable spot
+    near its nominal position (small flat patch inside the main region).
+    If nothing nearby works (the nominal spot drowned in a sea), fall back
+    to the best spot anywhere, nearest to the nominal position."""
+    ci0, ck0 = _cell(x, z)
+    best = None
+    r = 28
+    for dk in range(-r, r + 1, 2):
+        for di in range(-r, r + 1, 2):
+            ci, ck = int(round(ci0 + di)), int(round(ck0 + dk))
+            if not (8 <= ci < NXZ - 8 and 8 <= ck < NXZ - 8):
+                continue
+            q = _site_quality(ht, lab, main, ci, ck, 5.0)
+            if q <= 0.0:
+                continue
+            score = q * 100.0 - 0.9 * math.hypot(di, dk)
+            if best is None or score > best[0]:
+                best = (score, ci, ck)
+    if best is None:
+        for ck in range(10, NXZ - 10, 2):
+            for ci in range(10, NXZ - 10, 2):
+                if lab[ck][ci] != main:
+                    continue
+                q = _site_quality(ht, lab, main, ci, ck, 5.0)
+                if q < 0.7:
+                    continue
+                score = q * 100.0 - 0.25 * math.hypot(ci - ci0, ck - ck0)
+                if best is None or score > best[0]:
+                    best = (score, ci, ck)
+    if best is None:
+        return (x, z)
+    return _to_world(best[1], best[2])
+
+
+def _place_scenario(ht, lab, main):
+    """Re-fit the scenario template onto this world's natural terrain.
+
+    Each main (its HQ, workers, ore line and geyser) translates rigidly to a
+    chosen viable spawn; each shared cluster (naturals, centre, side bases)
+    nudges to the best usable ground near its nominal spot. Returns
+    `(spawns, entities)` in template order.
+    """
+    hqs = [(x, z) for (kind, _, x, z) in TEMPLATE if kind == "hq"]
+    spawns = _choose_spawns(ht, lab, main, hqs)
+
+    def main_of(x, z):
+        for n, (hx, hz) in enumerate(hqs):
+            if math.hypot(x - hx, z - hz) <= MAIN_REACH:
+                return n
+        return None
+
+    # Shared clusters: group the unattached resource nodes, fit each group.
+    shared = [(x, z) for (kind, _, x, z) in TEMPLATE
+              if kind in ("ore", "carbon") and main_of(x, z) is None]
+    deltas = {}
+    for g in _clusters(shared):
+        cx = sum(p[0] for p in g) / len(g)
+        cz = sum(p[1] for p in g) / len(g)
+        nx_, nz_ = _fit_cluster(ht, lab, main, cx, cz)
+        for p in g:
+            deltas[p] = (nx_ - cx, nz_ - cz)
+
+    entities = []
+    for (kind, owner, x, z) in TEMPLATE:
+        m = main_of(x, z)
+        if m is not None:
+            dx = spawns[m][0] - hqs[m][0]
+            dz = spawns[m][1] - hqs[m][1]
+        else:
+            dx, dz = deltas.get((x, z), (0.0, 0.0))
+        nx_, nz_ = x + dx, z + dz
+        if kind in ("ore", "carbon"):
+            # A rigidly-translated node can still straddle a cliff lip or
+            # the waterline; nudge each one onto the main region.
+            nx_, nz_ = _fit_node(lab, main, nx_, nz_)
+        entities.append((kind, owner, nx_, nz_))
+    return spawns, entities
+
+
+def _fit_node(lab, main, x, z):
+    """Snap a single node to the nearest main-region cell (within 8 cells)."""
+    ci0, ck0 = (int(round(c)) for c in _cell(x, z))
+    best = None
+    for dk in range(-8, 9):
+        for di in range(-8, 9):
+            ci, ck = ci0 + di, ck0 + dk
+            if not (0 <= ci < NXZ and 0 <= ck < NXZ) or lab[ck][ci] != main:
+                continue
+            d = di * di + dk * dk
+            if best is None or d < best[0]:
+                best = (d, ci, ck)
+    if best is None or best[0] == 0:
+        return (x, z)
+    return _to_world(best[1], best[2])
+
+
+def _level_sites(ht, mat, spawns, resources):
+    """Level a base apron under every chosen spawn and a small pad under
+    every placed resource node - local base pads only, never roads."""
 
     def level(x, z, r_flat, r_skirt):
         ci, ck = _cell(x, z)
@@ -411,150 +589,19 @@ def _level_sites(ht, mat):
                 if t > 0.5 and mat[kk][ii] == MAT_HAZARD:
                     mat[kk][ii] = None
 
-    for sx, sz in SPAWNS:
+    for sx, sz in spawns:
         level(sx, sz, SPAWN_FLAT, SPAWN_R)
-    for rx, rz in RESOURCES:
+    for rx, rz in resources:
         level(rx, rz, PAD_FLAT, PAD_R)
 
 
-# Road grading: the steepest per-cell rise (world units over the 4-unit cell)
-# the grader treats as walkable. The client blocks slopes over 1.3 h/unit
-# (game.rs MAX_WALK_SLOPE), so stay safely under it. The flat core half-width
-# matches the bridge decks: passability cells are 8 units, their centres sit
-# up to ~5.7 u off the road centreline and the slope probe reaches 4 u more,
-# so the bed must stay flat ~10 u (2.6 cells) each side.
-ROAD_STEP = 4.4
-ROAD_CORE = 2.6   # full-strength corridor half-width, cells
-ROAD_HALF = 4.4   # feathered corridor half-width, cells
-
-
-def _grade_road(ht, a, b, bed_min):
-    """Grade a walkable road between world points `a` and `b`: blur and
-    slope-limit the terrain profile along the straight line, then blend the
-    corridor toward it - a cut-and-fill ramp through whatever blocks it."""
-    ai, ak = _cell(*a)
-    bi, bk = _cell(*b)
-    steps = max(1, int(math.hypot(bi - ai, bk - ak)))
-    line = [(ai + (bi - ai) * s / steps, ak + (bk - ak) * s / steps)
-            for s in range(steps + 1)]
-    prof = [ht[int(round(k))][int(round(i))] for (i, k) in line]
-    for _ in range(3):
-        prof = [sum(prof[max(0, j - 4):j + 5]) / len(prof[max(0, j - 4):j + 5])
-                for j in range(len(prof))]
-    lim = ROAD_STEP * 0.8
-    for j in range(1, len(prof)):
-        prof[j] = clamp(prof[j], prof[j - 1] - lim, prof[j - 1] + lim)
-    for j in range(len(prof) - 2, -1, -1):
-        prof[j] = clamp(prof[j], prof[j + 1] - lim, prof[j + 1] + lim)
-    if bed_min is not None:
-        prof = [max(p, bed_min) for p in prof]
-    r = int(ROAD_HALF) + 1
-    for (ci, ck), target in zip(line, prof):
-        for dk in range(-r, r + 1):
-            for di in range(-r, r + 1):
-                ii, kk = int(round(ci + di)), int(round(ck + dk))
-                if not (0 <= ii < NXZ and 0 <= kk < NXZ):
-                    continue
-                d = math.hypot(ii - ci, kk - ck)
-                if d > ROAD_HALF:
-                    continue
-                w = 1.0 if d <= ROAD_CORE else \
-                    1.0 - (d - ROAD_CORE) / (ROAD_HALF - ROAD_CORE)
-                w = w * w * (3.0 - 2.0 * w)
-                ht[kk][ii] += (target - ht[kk][ii]) * w
-
-
-def _clusters(points, link=30.0):
-    """Greedy single-linkage grouping of world points within `link` units."""
-    groups = []
-    for p in points:
-        hits = [g for g in groups
-                if any(math.hypot(p[0] - q[0], p[1] - q[1]) <= link for q in g)]
-        if not hits:
-            groups.append([p])
-        else:
-            hits[0].append(p)
-            for g in hits[1:]:
-                hits[0].extend(g)
-                groups.remove(g)
-    return groups
-
-
-def _connect_spawns(ht, world):
-    """Guarantee every spawn reaches every other spawn and every resource
-    cluster on foot.
-
-    Flood-fill a per-cell walkability proxy from spawn 0 (a step is walkable
-    when the height delta stays under ROAD_STEP and, on wet worlds, the cell
-    stays above the coming sea); while any spawn or cluster centroid is
-    unreachable, grade a road to it and re-check. Wet worlds keep road beds
-    above the sea (same percentile _liquid uses), so a route over a methane
-    ocean becomes a causeway."""
-    key = world["key"]
-    sea_est = None
-    if key in ("titan", "earth"):
-        flat = sorted(ht[k][i] for k in range(NXZ) for i in range(NXZ))
-        frac = 0.46 if key == "earth" else 0.42
-        sea_est = flat[int(len(flat) * frac)]
-    bed_min = sea_est + 6.0 if sea_est is not None else None
-
-    spawn_cells = [tuple(int(round(c)) for c in _cell(sx, sz)) for sx, sz in SPAWNS]
-
-    def field():
-        seen = [[False] * NXZ for _ in range(NXZ)]
-        q = [spawn_cells[0]]
-        seen[spawn_cells[0][1]][spawn_cells[0][0]] = True
-        while q:
-            i, k = q.pop()
-            for di, dk in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                ni, nk = i + di, k + dk
-                if (0 <= ni < NXZ and 0 <= nk < NXZ and not seen[nk][ni]
-                        and abs(ht[nk][ni] - ht[k][i]) <= ROAD_STEP
-                        and (sea_est is None or ht[nk][ni] > sea_est + 0.3)):
-                    seen[nk][ni] = True
-                    q.append((ni, nk))
-        return seen
-
-    def unreachable(seen, points):
-        out = []
-        for (tx, tz) in points:
-            i, k = tuple(int(round(c)) for c in _cell(tx, tz))
-            if not seen[k][i]:
-                out.append((tx, tz))
-        return out
-
-    # Spawns first, always graded from spawn 0 (grading between two stranded
-    # spawns would just connect them to each other); clusters after, from
-    # whichever spawn is closest, once every spawn is on the network.
-    roads = 0
-    for _ in range(3):
-        todo = unreachable(field(), SPAWNS[1:])
-        if not todo:
-            break
-        for (tx, tz) in todo:
-            _grade_road(ht, SPAWNS[0], (tx, tz), bed_min)
-            roads += 1
-
-    centroids = []
-    for g in _clusters(RESOURCES):
-        centroids.append((sum(p[0] for p in g) / len(g),
-                          sum(p[1] for p in g) / len(g)))
-    for _ in range(3):
-        todo = unreachable(field(), centroids)
-        if not todo:
-            break
-        for (tx, tz) in todo:
-            src = min(SPAWNS, key=lambda s: math.hypot(s[0] - tx, s[1] - tz))
-            _grade_road(ht, src, (tx, tz), bed_min)
-            roads += 1
-    return roads
-
-
-def _liquid(grid, ht, world, dy):
+def _liquid(grid, ht, world, dy, spawns, resources):
     """Fill oceans (Titan methane, Earth seas), Earth lakes and rivers.
 
     Writes grid.liquid (per-column j+1 of the liquid surface) and grid.sea_level.
     Returns the set of liquid columns so they can be excluded from buildable.
+    The placed spawns and resource pads stay dry (they are chosen on land,
+    so this is a safety feather, not a re-shaping).
     """
     key = world["key"]
     wet = set()
@@ -568,8 +615,16 @@ def _liquid(grid, ht, world, dy):
     grid.sea_level = YMIN + 0.0  # set below after mapping to world y
     sea_y = sea  # ht is already in world-y units after shift
 
+    spawn_cells = [_cell(sx, sz) for (sx, sz) in spawns]
+
+    def spawn_dist(i, k):
+        return min(
+            (math.hypot(i - ci, k - ck) for (ci, ck) in spawn_cells),
+            default=1e9,
+        )
+
     pad_cells = set()
-    for rx, rz in RESOURCES:
+    for rx, rz in resources:
         ci, ck = _cell(rx, rz)
         r = int(PAD_R) + 1
         for kk in range(max(0, int(ck - r)), min(NXZ, int(ck + r) + 1)):
@@ -578,18 +633,18 @@ def _liquid(grid, ht, world, dy):
                     pad_cells.add((ii, kk))
 
     def set_liquid(i, k, surf_y):
-        if _spawn_dist(i, k) < SPAWN_R * 0.85 or (i, k) in pad_cells:
+        if spawn_dist(i, k) < SPAWN_R * 0.85 or (i, k) in pad_cells:
             return  # spawn discs and resource pads stay dry
         j = int(round((surf_y - YMIN) / dy))
         j = max(0, min(NY - 1, j))
         grid.liquid[k * NXZ + i] = j + 1
         wet.add((i, k))
 
-    # Dome every spawn disc above the sea: the centre is guaranteed dry land,
-    # feathering back to the natural terrain at the disc's edge.
+    # Safety dome: keep every chosen spawn disc above the sea, feathering
+    # back to the natural terrain at the disc's edge.
     for k in range(NXZ):
         for i in range(NXZ):
-            d = _spawn_dist(i, k) / SPAWN_R
+            d = spawn_dist(i, k) / SPAWN_R
             if d >= 1.0:
                 continue
             need = sea_y + 6.0
@@ -600,7 +655,7 @@ def _liquid(grid, ht, world, dy):
                 ht[k][i] += (need - ht[k][i]) * t * t
 
     # Resource pads stay dry too: dome each node's pad above the sea.
-    for rx, rz in RESOURCES:
+    for rx, rz in resources:
         ci, ck = _cell(rx, rz)
         for kk in range(max(0, int(ck - PAD_R)), min(NXZ, int(ck + PAD_R) + 2)):
             for ii in range(max(0, int(ci - PAD_R)), min(NXZ, int(ci + PAD_R) + 2)):
@@ -706,33 +761,26 @@ def build(world):
     ht = _smooth(ht, SMOOTH.get(key, 1))
 
     # Material overrides + vents collected by the feature passes. Features
-    # never stamp on a masked site (spawn discs, resource pads).
+    # stamp wherever they like: the scenario is fitted to the terrain
+    # afterward, never the other way around.
     mat = [[None] * NXZ for _ in range(NXZ)]
     vents = []
-    mask = _site_mask()
 
-    _craters(ht, mat, t["seed"], _crater_count(world), mask)
+    _craters(ht, mat, t["seed"], _crater_count(world))
     bridges = []
     if key == "europa":
-        bridges += _fissures(ht, mat, t["seed"], 7, depth=16.0, halfw=2, mask=mask)
+        bridges += _fissures(ht, mat, t["seed"], 7, depth=16.0, halfw=2)
     if key == "ariel":
-        bridges += _fissures(ht, mat, t["seed"], 4, depth=12.0, halfw=2, mask=mask)
+        bridges += _fissures(ht, mat, t["seed"], 4, depth=12.0, halfw=2)
     if key == "mars":
-        _canyon(ht, mat, t["seed"], depth=22.0, halfw=NXZ * 0.07, mask=mask)
+        _canyon(ht, mat, t["seed"], depth=22.0, halfw=NXZ * 0.07)
     if key == "io":
-        vents += _cones(ht, mat, t["seed"], 4, height=66.0, base_r=NXZ * 0.18,
-                        kind="volcano", mask=mask)
+        vents += _cones(ht, mat, t["seed"], 4, height=66.0, base_r=NXZ * 0.18, kind="volcano")
     if key == "enceladus":
         vents += _cones(ht, mat, t["seed"], 9, height=13.0, base_r=NXZ * 0.05,
-                        kind="geyser", mask=mask, region="south")
+                        kind="geyser", region="south")
     if key == "triton":
-        vents += _cones(ht, mat, t["seed"], 6, height=11.0, base_r=NXZ * 0.05,
-                        kind="geyser", mask=mask)
-
-    # Level every site after the features, then guarantee spawns reach each
-    # other on foot (grading ramp roads through anything that cut them apart).
-    _level_sites(ht, mat)
-    roads = _connect_spawns(ht, world)
+        vents += _cones(ht, mat, t["seed"], 6, height=11.0, base_r=NXZ * 0.05, kind="geyser")
 
     # Shift so the lowest point sits at 0, then voxelize.
     lo0 = min(min(r) for r in ht)
@@ -751,12 +799,25 @@ def build(world):
                 f = min(1.0, max(0.0, (r - 0.82) / 0.30))
                 ht[k][i] = max(-34.0, ht[k][i] - 55.0 * f * f)
 
+    # Fit the skirmish scenario onto the natural terrain: walkable regions,
+    # then spawns and clusters onto viable ground in the biggest one, then
+    # small levelled base pads under the final sites.
+    sea_est = None
+    if key in ("titan", "earth"):
+        flat_h = sorted(ht[k][i] for k in range(NXZ) for i in range(NXZ))
+        frac = 0.46 if key == "earth" else 0.42
+        sea_est = flat_h[int(len(flat_h) * frac)]
+    lab, main_region = _components(ht, sea_est)
+    spawns, scenario = _place_scenario(ht, lab, main_region)
+    resources = [(x, z) for (kind, _, x, z) in scenario if kind in ("ore", "carbon")]
+    _level_sites(ht, mat, spawns, resources)
+
     grid = vox.VoxelGrid(NXZ, NY, NXZ, (-HALF, HALF, YMIN, YMAX, -HALF, HALF))
     hi = max(max(r) for r in ht)
     span = hi or 1.0
     slope_per_unit = 120.0 / dy
 
-    wet = _liquid(grid, ht, world, dy)
+    wet = _liquid(grid, ht, world, dy, spawns, resources)
 
     # Subsurface material: what an exposed face / crater wall / cave reveals under
     # the thin surface skin. This is what makes texture a genuine 3D property
@@ -834,7 +895,8 @@ def build(world):
     flat_final = sum(grid.buildable) / (NXZ * NXZ)
     grid.flat_permil = int(round(flat_final * 1000))
     stats = dict(flat=flat_final, step=step, caves=placed, hi=hi,
-                 vents=vents, wet=len(wet), sea=grid.sea_level, roads=roads)
+                 vents=vents, wet=len(wet), sea=grid.sea_level,
+                 name=NAME, scenario=scenario, spawns=spawns)
     return grid, stats
 
 

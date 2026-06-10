@@ -550,6 +550,11 @@ pub fn set_active(idx: Option<usize>) {
     SELECTED.with(|s| s.set(idx.filter(|&i| i < MAP_COUNT)));
 }
 
+/// Index of the active voxel map in [`MAPS`] order, if one is selected.
+pub fn active_index() -> Option<usize> {
+    SELECTED.with(|s| s.get())
+}
+
 /// The active voxel map, if one is selected (parsed + cached on first use).
 pub fn active() -> Option<&'static VoxelGrid> {
     let i = SELECTED.with(|s| s.get())?;

@@ -161,7 +161,6 @@ def check(key, spawns, resources):
 
 
 def main():
-    spawns, resources = scenario_sites()
     keys = sys.argv[1:] or [w["key"] for w in cat.WORLDS]
     bad = 0
     for key in keys:
@@ -169,6 +168,10 @@ def main():
         if not os.path.exists(path):
             print(f"  {key:10s} SKIP  (not baked)")
             continue
+        # Each world carries its own fitted scenario (bake.py writes it);
+        # fall back to the shared template for maps baked before that.
+        scen = os.path.join(MAPS_DIR, key + ".map")
+        spawns, resources = scenario_sites(scen if os.path.exists(scen) else None)
         if not check(key, spawns, resources):
             bad += 1
     if bad:

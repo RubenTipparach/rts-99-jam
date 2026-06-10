@@ -222,9 +222,10 @@ impl Default for Game {
 impl Game {
     pub fn new() -> Self {
         // The whole starting layout (bases, garrisons, and the resource
-        // clusters) is baked into the human-readable map file; the player's
-        // main sits near the camera start.
-        let map = crate::map::parse(crate::map::SKIRMISH).expect("baked map is invalid");
+        // clusters) is baked into the active battlefield's map file: each
+        // voxel world carries the skirmish template fitted onto its own
+        // viable ground, so construct the Game AFTER the lobby picks a map.
+        let map = crate::map::parse(crate::map::active_scenario()).expect("baked map is invalid");
         log::info!("loading map: {}", map.name);
         let setup = map.commands;
 
@@ -1544,6 +1545,16 @@ impl Game {
                 born: self.time,
             });
         }
+    }
+
+    /// World position of the local player's (first) HQ, for the camera's
+    /// opening shot on whatever spawn this world fitted the base onto.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn player_hq(&self) -> Option<(f32, f32)> {
+        self.curr
+            .iter()
+            .find(|s| s.owner == 0 && s.kind == Kind::Hq)
+            .map(|s| (f(s.pos.x), f(s.pos.y)))
     }
 
     /// The local player's ore stockpile (for the HUD).
