@@ -800,17 +800,27 @@ fn engineer_mesh() -> Vec<UnitVertex> {
 /// Ore: a cluster of bright, faceted crystals erupting from a dark rock base.
 /// "Shininess" is faked with near-white tips and bright inner cores (the
 /// flat-shaded pipeline has no real translucency).
+/// Ore node, opaque part: just the rock pedestal. The crystal shards render
+/// separately through the blended crystal pipeline (`ore_crystal_mesh`).
 fn ore_node_mesh() -> Vec<UnitVertex> {
     let mut m = Vec::new();
-    let body = [0.47, 0.84, 0.92];
-    let body2 = [0.36, 0.74, 0.86];
-    let core = [0.82, 0.97, 1.0];
     let rock = [0.28, 0.32, 0.38];
     let rock_dk = [0.17, 0.20, 0.25];
     push_frustum(
         &mut m, 0.0, 0.0, 3.4, 2.6, 0.0, 1.0, rock_dk, 0.0, 7, 0.0, false,
     );
     push_prism(&mut m, 0.0, 0.0, 2.6, 0.0, 0.45, rock, 0.0, 7, 0.0, true);
+    m
+}
+
+/// The ore crystal shards: drawn alpha-blended with env reflections
+/// (Warcraft 3 style), riding the same instance transform as the rock base.
+/// Also reused tiny (scaled down) as the load a hauling worker carries.
+fn ore_crystal_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let body = [0.47, 0.84, 0.92];
+    let body2 = [0.36, 0.74, 0.86];
+    let core = [0.82, 0.97, 1.0];
     // (cx, cz, r, height, body color)
     let shards = [
         (0.0, 0.0, 1.2, 5.4, body),
@@ -825,32 +835,17 @@ fn ore_node_mesh() -> Vec<UnitVertex> {
         let ytip = y0 + hgt;
         push_prism(&mut m, cx, cz, r, y0, ymid, col, 0.0, 5, 0.0, false);
         push_pyramid(&mut m, cx, cz, r, ymid, ytip, core, 0.0, 5, 0.0);
-        // Bright inner core, slightly inset, reads as a glowing seam.
-        push_prism(
-            &mut m,
-            cx,
-            cz,
-            r * 0.42,
-            y0,
-            ymid + 0.2,
-            core,
-            0.0,
-            5,
-            0.4,
-            false,
-        );
     }
     m
 }
 
-/// Carbon: a vented rock mound with a glowing green gas crater. (Rising smoke is
-/// a separate transparent effect, not yet in the opaque unit pipeline.)
+/// Carbon node, opaque part: the vented rock mound. The glowing gas pool in
+/// the crater renders through the blended crystal pipeline
+/// (`carbon_pool_mesh`), and the rising green smoke is an fx emitter.
 fn carbon_node_mesh() -> Vec<UnitVertex> {
     let mut m = Vec::new();
     let vent = [0.21, 0.25, 0.23];
     let vent_dk = [0.13, 0.16, 0.15];
-    let glow = [0.50, 0.95, 0.60];
-    let glow_core = [0.80, 1.0, 0.84];
     push_frustum(
         &mut m, 0.0, 0.0, 4.0, 3.0, 0.0, 1.6, vent_dk, 0.0, 8, 0.0, false,
     );
@@ -867,11 +862,32 @@ fn carbon_node_mesh() -> Vec<UnitVertex> {
             0.0,
         );
     }
-    // Glowing crater fissure.
+    m
+}
+
+/// The glowing gas pool capping a carbon geyser: a shallow translucent dome,
+/// blended like the crystals so it reads as liquid light.
+fn carbon_pool_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let glow = [0.50, 0.95, 0.60];
+    let glow_core = [0.80, 1.0, 0.84];
     push_prism(&mut m, 0.0, 0.0, 1.9, 3.0, 3.2, glow, 0.0, 8, 0.0, true);
     push_prism(
         &mut m, 0.0, 0.0, 1.3, 3.1, 3.35, glow_core, 0.0, 8, 0.0, true,
     );
+    m
+}
+
+/// The barrel of green sludge a worker hauls home from a carbon geyser.
+/// Authored tiny at the origin; the instance places it on the carrier.
+fn barrel_mesh() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let drum = [0.30, 0.42, 0.32];
+    let band = [0.18, 0.22, 0.20];
+    let sludge = [0.55, 0.95, 0.50];
+    push_prism(&mut m, 0.0, 0.0, 0.45, 0.0, 1.0, drum, 0.0, 6, 0.0, false);
+    push_prism(&mut m, 0.0, 0.0, 0.49, 0.40, 0.62, band, 0.0, 6, 0.0, false);
+    push_prism(&mut m, 0.0, 0.0, 0.38, 1.0, 1.10, sludge, 0.0, 6, 0.0, true);
     m
 }
 
@@ -1031,16 +1047,27 @@ fn terrain_mesh() -> (Vec<Vertex3>, Vec<u32>) {
     (verts, idx)
 }
 
-fn water_quad() -> [[f32; 3]; 6] {
+/// The Earthlike ocean sheet: a tessellated full-map grid at sea level (one
+/// big quad gives the water vertex waves nothing to bend).
+fn water_quad() -> Vec<[f32; 3]> {
+    const N: usize = 96;
     let h = terrain::HALF;
-    [
-        [-h, 0.0, -h],
-        [h, 0.0, -h],
-        [h, 0.0, h],
-        [-h, 0.0, -h],
-        [h, 0.0, h],
-        [-h, 0.0, h],
-    ]
+    let s = 2.0 * h / N as f32;
+    let mut out = Vec::with_capacity(N * N * 6);
+    for k in 0..N {
+        for i in 0..N {
+            let (x0, z0) = (-h + i as f32 * s, -h + k as f32 * s);
+            let (x1, z1) = (x0 + s, z0 + s);
+            let a = [x0, 0.0, z0];
+            let b = [x1, 0.0, z0];
+            let c = [x1, 0.0, z1];
+            let d = [x0, 0.0, z1];
+            for v in [a, b, c, a, c, d] {
+                out.push(v);
+            }
+        }
+    }
+    out
 }
 
 /// Tessellate selection rings into ground-decal triangles whose vertices sit a
@@ -1146,11 +1173,13 @@ pub struct Gfx {
     terrain_pipeline: wgpu::RenderPipeline,
     water_pipeline: wgpu::RenderPipeline,
     unit_pipeline: wgpu::RenderPipeline,
+    crystal_pipeline: wgpu::RenderPipeline,
     ring_pipeline: wgpu::RenderPipeline,
     terrain_vbuf: wgpu::Buffer,
     terrain_ibuf: wgpu::Buffer,
     terrain_indices: u32,
     water_buf: wgpu::Buffer,
+    water_len: u32,
     infantry_buf: wgpu::Buffer,
     infantry_len: u32,
     barracks_astro_buf: wgpu::Buffer,
@@ -1169,6 +1198,12 @@ pub struct Gfx {
     ore_node_len: u32,
     carbon_node_buf: wgpu::Buffer,
     carbon_node_len: u32,
+    ore_crystal_buf: wgpu::Buffer,
+    ore_crystal_len: u32,
+    carbon_pool_buf: wgpu::Buffer,
+    carbon_pool_len: u32,
+    barrel_buf: wgpu::Buffer,
+    barrel_len: u32,
     turret_buf: wgpu::Buffer,
     turret_len: u32,
     supply_buf: wgpu::Buffer,
@@ -1598,9 +1633,20 @@ impl Gfx {
             &pl_plain,
             "vs_unit",
             "fs_unit",
-            &[v3u, inst],
+            &[v3u.clone(), inst.clone()],
             &opaque_t,
             &depth_opaque,
+        );
+        // Crystals/gas pools: same instancing as units, but alpha-blended
+        // with env-mapped shine (drawn after the opaque world and water).
+        let crystal_pipeline = mk(
+            "crystal",
+            &pl_plain,
+            "vs_unit",
+            "fs_crystal",
+            &[v3u, inst],
+            &blend_t,
+            &depth_blend,
         );
         let voxel_pipeline = mk(
             "voxel",
@@ -1712,6 +1758,24 @@ impl Gfx {
             bytemuck::cast_slice(&carbon_node),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let ore_crystal = ore_crystal_mesh();
+        let ore_crystal_buf = mkbuf(
+            "ore-crystal",
+            bytemuck::cast_slice(&ore_crystal),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let carbon_pool = carbon_pool_mesh();
+        let carbon_pool_buf = mkbuf(
+            "carbon-pool",
+            bytemuck::cast_slice(&carbon_pool),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let barrel = barrel_mesh();
+        let barrel_buf = mkbuf(
+            "barrel",
+            bytemuck::cast_slice(&barrel),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let turret = turret_mesh();
         let turret_buf = mkbuf(
             "turret",
@@ -1780,11 +1844,13 @@ impl Gfx {
             terrain_pipeline,
             water_pipeline,
             unit_pipeline,
+            crystal_pipeline,
             ring_pipeline,
             terrain_vbuf,
             terrain_ibuf,
             terrain_indices: ti.len() as u32,
             water_buf,
+            water_len: water.len() as u32,
             infantry_buf,
             infantry_len: infantry.len() as u32,
             barracks_astro_buf,
@@ -1803,6 +1869,12 @@ impl Gfx {
             ore_node_len: ore_node.len() as u32,
             carbon_node_buf,
             carbon_node_len: carbon_node.len() as u32,
+            ore_crystal_buf,
+            ore_crystal_len: ore_crystal.len() as u32,
+            carbon_pool_buf,
+            carbon_pool_len: carbon_pool.len() as u32,
+            barrel_buf,
+            barrel_len: barrel.len() as u32,
             turret_buf,
             turret_len: turret.len() as u32,
             supply_buf,
@@ -1990,7 +2062,10 @@ impl Gfx {
         heavies: &[InstanceRaw],
         turrets: &[InstanceRaw],
         supplies: &[InstanceRaw],
+        barrels: &[InstanceRaw],
         particles: &[InstanceRaw],
+        ore_crystals: &[InstanceRaw],
+        carbon_pools: &[InstanceRaw],
         fx_lights: &[FxLight],
         rings: &[RingRaw],
         fow: &[u8],
@@ -2000,8 +2075,9 @@ impl Gfx {
     ) {
         // All meshes share one instance buffer, packed in order: infantry,
         // the faction barracks, the faction HQs, Acolytes, Engineers, ore
-        // nodes, carbon nodes, heavies, turrets, supply depots. Each mesh
-        // draws its own range.
+        // nodes, carbon nodes, heavies, turrets, supply depots, sludge
+        // barrels, particles, then the alpha-blended crystal groups last.
+        // Each mesh draws its own range.
         let groups = [
             infantry.len(),
             barracks_astro.len(),
@@ -2015,16 +2091,19 @@ impl Gfx {
             heavies.len(),
             turrets.len(),
             supplies.len(),
+            barrels.len(),
             particles.len(),
+            ore_crystals.len(),
+            carbon_pools.len(),
         ];
         // Clamp each group's count so the running total never exceeds the buffer.
-        let mut counts = [0usize; 13];
+        let mut counts = [0usize; 16];
         let mut used = 0usize;
         for (c, &g) in counts.iter_mut().zip(groups.iter()) {
             *c = g.min(MAX_INSTANCES - used);
             used += *c;
         }
-        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr, nsp, npt] = counts;
+        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr, nsp, nbr, npt, noc, ncp] = counts;
         let ring_verts = ring_decals(rings);
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
         let mut light_pos = [[0.0f32; 4]; MAX_LIGHTS];
@@ -2081,7 +2160,10 @@ impl Gfx {
             &heavies[..nhv],
             &turrets[..ntr],
             &supplies[..nsp],
+            &barrels[..nbr],
             &particles[..npt],
+            &ore_crystals[..noc],
+            &carbon_pools[..ncp],
         ];
         let mut off = 0u64;
         for s in slices {
@@ -2183,6 +2265,7 @@ impl Gfx {
                     (&self.heavy_buf, self.heavy_len, nhv),
                     (&self.turret_buf, self.turret_len, ntr),
                     (&self.supply_buf, self.supply_len, nsp),
+                    (&self.barrel_buf, self.barrel_len, nbr),
                     (&self.particle_buf, self.particle_len, npt),
                 ];
                 let mut base = 0u32;
@@ -2212,13 +2295,43 @@ impl Gfx {
             } else if !voxel {
                 pass.set_bind_group(1, &self.terrain_bind, &[]);
                 pass.set_vertex_buffer(0, self.water_buf.slice(..));
-                pass.draw(0..6, 0..1);
+                pass.draw(0..self.water_len, 0..1);
             }
 
             if nrv > 0 {
                 pass.set_pipeline(&self.ring_pipeline);
                 pass.set_vertex_buffer(0, self.ring_buf.slice(..));
                 pass.draw(0..nrv as u32, 0..1);
+            }
+
+            // Crystals and gas pools last: alpha-blended over the opaque
+            // world, water and ground decals. Their instances sit at the
+            // tail of the shared buffer (slot 1 is still bound).
+            if noc + ncp > 0 {
+                pass.set_pipeline(&self.crystal_pipeline);
+                let opaque: u32 = (ni
+                    + na
+                    + nh
+                    + nqa
+                    + nqh
+                    + nac
+                    + nen
+                    + nor
+                    + ncar
+                    + nhv
+                    + ntr
+                    + nsp
+                    + nbr
+                    + npt) as u32;
+                if noc > 0 {
+                    pass.set_vertex_buffer(0, self.ore_crystal_buf.slice(..));
+                    pass.draw(0..self.ore_crystal_len, opaque..opaque + noc as u32);
+                }
+                if ncp > 0 {
+                    pass.set_vertex_buffer(0, self.carbon_pool_buf.slice(..));
+                    let b = opaque + noc as u32;
+                    pass.draw(0..self.carbon_pool_len, b..b + ncp as u32);
+                }
             }
         }
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -2262,6 +2375,9 @@ mod tests {
         check_mesh(&engineer_mesh(), "engineer");
         check_mesh(&ore_node_mesh(), "ore-node");
         check_mesh(&carbon_node_mesh(), "carbon-node");
+        check_mesh(&ore_crystal_mesh(), "ore-crystal");
+        check_mesh(&carbon_pool_mesh(), "carbon-pool");
+        check_mesh(&barrel_mesh(), "barrel");
         check_mesh(&turret_mesh(), "turret");
         check_mesh(&supply_mesh(), "supply");
         check_mesh(&particle_mesh(), "particle");

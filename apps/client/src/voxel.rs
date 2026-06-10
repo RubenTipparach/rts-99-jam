@@ -120,12 +120,25 @@ impl VoxelGrid {
         (i, k)
     }
 
-    /// World-space height of the topmost solid surface under `(x, z)`.
+    /// World-space height of the topmost solid surface under `(x, z)`,
+    /// bilinearly blended across the four surrounding columns so units glide
+    /// along the surface instead of snapping per voxel column.
     pub fn surface_height(&self, x: f32, z: f32) -> f32 {
-        let (i, k) = self.col_index(x, z);
+        let fi = ((x - self.bounds[0]) / self.dx()).clamp(0.0, self.nx as f32 - 1.0);
+        let fk = ((z - self.bounds[4]) / self.dz()).clamp(0.0, self.nz as f32 - 1.0);
+        let (i0, k0) = (fi.floor() as usize, fk.floor() as usize);
+        let (i1, k1) = ((i0 + 1).min(self.nx - 1), (k0 + 1).min(self.nz - 1));
+        let (tx, tz) = (fi - i0 as f32, fk - k0 as f32);
+        let a = self.column_height(i0, k0) * (1.0 - tx) + self.column_height(i1, k0) * tx;
+        let b = self.column_height(i0, k1) * (1.0 - tx) + self.column_height(i1, k1) * tx;
+        a * (1.0 - tz) + b * tz
+    }
+
+    /// Surface height of one column: the top solid voxel, eased against the
+    /// air voxel above it.
+    fn column_height(&self, i: usize, k: usize) -> f32 {
         for j in (0..self.ny).rev() {
             if self.density[self.lin(i, j, k)] >= ISO {
-                // interpolate against the air voxel above for a smooth surface
                 let here = self.density[self.lin(i, j, k)] as f32;
                 if j + 1 < self.ny {
                     let above = self.density[self.lin(i, j + 1, k)] as f32;
@@ -315,20 +328,56 @@ impl VoxelGrid {
         (lj > 0).then(|| self.world(i, (lj - 1) as usize, k)[1])
     }
 
-    /// A flat quad per liquid column at its surface height: the water/methane
-    /// mesh, rendered by the water pipeline. Empty if the world has no liquid.
+    /// The water/methane surface mesh, rendered by the water pipeline.
+    /// Empty if the world has no liquid.
+    ///
+    /// The open sea draws as one tessellated sheet across the whole map at
+    /// the dominant liquid level: the depth test sinks it under the land, so
+    /// the shoreline is the exact terrain intersection instead of the old
+    /// stair-stepped column quads hovering over the banks, and the dense
+    /// grid gives the vertex waves something to bend. Lakes and rivers above
+    /// the sea keep per-column quads, tucked down to hug their basins.
     pub fn liquid_mesh(&self) -> Vec<[f32; 3]> {
         let mut out = Vec::new();
         let dx = self.dx();
         let dz = self.dz();
+        // The sea level is the modal liquid layer (the format stores liquid
+        // per column; a real sea floods hundreds of columns at one level).
+        let mut hist = [0u32; 256];
+        for &l in self.liquid.iter() {
+            hist[l as usize] += 1;
+        }
+        let sea_j = (1..256).max_by_key(|&j| hist[j]).filter(|&j| hist[j] > 200);
+        if let Some(j) = sea_j {
+            let sea = self.world(0, j - 1, 0)[1] - 0.2;
+            const N: usize = 128;
+            let sx = (self.bounds[1] - self.bounds[0]) / N as f32;
+            let sz = (self.bounds[5] - self.bounds[4]) / N as f32;
+            for k in 0..N {
+                for i in 0..N {
+                    let (x0, z0) = (
+                        self.bounds[0] + i as f32 * sx,
+                        self.bounds[4] + k as f32 * sz,
+                    );
+                    let (x1, z1) = (x0 + sx, z0 + sz);
+                    let a = [x0, sea, z0];
+                    let b = [x1, sea, z0];
+                    let c = [x1, sea, z1];
+                    let d = [x0, sea, z1];
+                    for v in [a, b, c, a, c, d] {
+                        out.push(v);
+                    }
+                }
+            }
+        }
         for k in 0..self.nz {
             for i in 0..self.nx {
                 let lj = self.liquid[k * self.nx + i];
-                if lj == 0 {
+                if lj == 0 || Some(lj as usize) == sea_j {
                     continue;
                 }
                 let p = self.world(i, (lj - 1) as usize, k);
-                let (x0, y, z0) = (p[0], p[1], p[2]);
+                let (x0, y, z0) = (p[0], p[1] - 0.3, p[2]);
                 let (x1, z1) = (x0 + dx, z0 + dz);
                 let a = [x0, y, z0];
                 let b = [x1, y, z0];

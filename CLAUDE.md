@@ -59,11 +59,32 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
   per-kind spacing) so the no-stacking rule holds.
 - **No auto-production and no passive income.** Every unit is queued by
   `Command::Train`, and every resource is mined by a worker carrying loads
-  from a node to a drop-off - buildings never generate income on their own.
-  See `STARTING_ORE`/`TRAIN_COST` in `crates/sim`. The player drives
-  production from the HUD command card; the enemy is static until an AI
-  issues `Train`. Ore is part of the state hash, so tuning it re-pins the
-  golden value.
+  from a node back to the HQ - the only drop-off (`is_dropoff`); buildings
+  never generate income on their own. See `STARTING_ORE`/`TRAIN_COST` in
+  `crates/sim`. The player drives production from the HUD command card; the
+  enemy is static until an AI issues `Train`. Ore is part of the state
+  hash, so tuning it re-pins the golden value.
+
+## Maps and spawn sites
+
+- **The skirmish scenario is a site contract every baked world must honor.**
+  Worldgen parses `assets/maps/crossfire_basin.map` (`scenario_sites` in
+  `assets/worldgen/common.py`) and must give each HQ a flat, dry apron with
+  generous land around it, keep terrain features (craters, lineae, canyons,
+  volcanoes, lakes) off spawn discs and resource pads, level the ground
+  under every resource cluster, and keep everything connected: every spawn
+  must reach every other spawn and every resource cluster on foot, with no
+  base stranded in a minority pocket of the walkable map. Worldgen enforces
+  this by masking features away from sites, levelling sites afterward, and
+  grading ramp roads/causeways through whatever still cuts them apart
+  (`_site_mask` / `_level_sites` / `_connect_spawns` in
+  `assets/worldgen/densitygen.py`).
+- **Validate after every bake.** `python3 assets/worldgen/validate.py`
+  replays the client's exact passability rule over each baked `.vxl` and
+  fails on a bad spawn apron, a severed spawn-to-spawn route, a minority
+  region, or an unreachable resource node. After touching worldgen or the
+  `.map`, run `bake.py` then `validate.py`, and fix the generator - never
+  loosen the validator.
 
 ## Game feel / fx
 

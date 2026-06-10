@@ -68,9 +68,11 @@ fn is_producer(k: Kind) -> bool {
     matches!(k, Kind::Hq | Kind::Barracks)
 }
 
-/// Workers deposit their load at these (the HQ, or a forward Barracks).
+/// Workers deposit their load at these. Only the HQ takes deliveries:
+/// hauling home is part of the harvest loop's economy, so a forward
+/// Barracks must never shortcut it.
 fn is_dropoff(k: Kind) -> bool {
-    matches!(k, Kind::Hq | Kind::Barracks)
+    matches!(k, Kind::Hq)
 }
 
 /// Harvestable resource nodes (neutral, static, not valid combat targets).
@@ -298,6 +300,9 @@ pub struct Snap {
     pub moving: bool,
     /// Workers only, display-only: actively mining a node this tick.
     pub mining: bool,
+    /// Workers only, display-only: what the worker is hauling
+    /// (0 = nothing, 1 = ore, 2 = carbon), so the client can show the load.
+    pub carry: u8,
     /// Resource nodes only, display-only: fraction of the node remaining (1..0).
     pub resource_frac: Fx,
     /// Buildings only: units queued for production and the current unit's
@@ -1660,6 +1665,15 @@ impl World {
                 max_hp: stats(self.kind[i]).max_hp,
                 moving: !matches!(self.order[i], Order::Idle),
                 mining: self.mining[i],
+                carry: if self.carried[i] > Fx::ZERO {
+                    if self.carry_kind[i] == 1 {
+                        2
+                    } else {
+                        1
+                    }
+                } else {
+                    0
+                },
                 resource_frac,
                 queued: self.queue[i],
                 build_frac,

@@ -14,8 +14,38 @@ asset tools (see CLAUDE.md, "Two worlds, one wall").
 """
 
 import math
+import os
 import struct
 import zlib
+
+
+# --------------------------------------------------------------------------- #
+# skirmish scenario sites
+# --------------------------------------------------------------------------- #
+def scenario_sites(path=None):
+    """Parse the skirmish `.map` for the sites worldgen must respect.
+
+    Returns `(spawns, resources)`: lists of world `(x, z)` floats for every
+    `hq` and every `ore`/`carbon` line. Worldgen keeps terrain features off
+    these sites and levels the ground there, so the parser is the single
+    source of truth - move a base or a cluster in the map file and the next
+    bake protects the new spot.
+    """
+    if path is None:
+        path = os.path.join(os.path.dirname(__file__), "..", "maps",
+                            "crossfire_basin.map")
+    spawns, resources = [], []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if parts[0] == "hq":
+                spawns.append((float(parts[2]), float(parts[3])))
+            elif parts[0] in ("ore", "carbon"):
+                resources.append((float(parts[1]), float(parts[2])))
+    return spawns, resources
 
 
 # --------------------------------------------------------------------------- #

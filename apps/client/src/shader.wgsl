@@ -180,10 +180,15 @@ struct WaterOut {
 @vertex
 fn vs_water(@location(0) pos: vec3<f32>) -> WaterOut {
     var o: WaterOut;
-    // Pass the vertex through: the Earthlike ocean quad is built at sea level and
-    // each voxel-world liquid surface carries its own per-column height.
-    o.world = pos;
-    o.clip = cam.view_proj * vec4<f32>(pos, 1.0);
+    // Small travelling swells bend the tessellated sheet so the body of
+    // water feels alive (the per-pixel ripples ride on top of these).
+    var p = pos;
+    let t = cam.params.x;
+    p.y += sin(p.x * 0.045 + t * 1.0) * 0.18
+        + sin(p.z * 0.052 - t * 0.8) * 0.18
+        + sin(dot(p.xz, vec2<f32>(0.11, 0.09)) + t * 1.7) * 0.08;
+    o.world = p;
+    o.clip = cam.view_proj * vec4<f32>(p, 1.0);
     return o;
 }
 // Animated surface normal, evaluated per fragment: large slow swells plus fine
@@ -200,6 +205,9 @@ fn water_normal(p: vec2<f32>, t: f32, amp: f32) -> vec3<f32> {
     d += vec2<f32>(0.0, 1.0) * 0.08 * cos(p.y * 0.390 + t * 2.40);
     d += normalize(vec2<f32>(1.0, 1.0)) * 0.06 * cos(dot(p, vec2<f32>(0.330, 0.300)) + t * 3.10);
     d += normalize(vec2<f32>(-1.0, 0.4)) * 0.05 * cos(dot(p, vec2<f32>(0.21, -0.18)) - t * 3.7);
+    // Fine chop: high-frequency glitter so the surface sparkles per pixel.
+    d += normalize(vec2<f32>(0.8, -1.0)) * 0.045 * cos(dot(p, vec2<f32>(0.9, 0.75)) + t * 4.6);
+    d += normalize(vec2<f32>(-0.3, 1.0)) * 0.04 * cos(dot(p, vec2<f32>(0.7, -0.95)) - t * 5.2);
     return normalize(vec3<f32>(d.x * amp, 1.0, d.y * amp));
 }
 
@@ -336,31 +344,44 @@ fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
         return vec4<f32>(in.albedo * (1.1 * scan), 1.0);
     }
     let n = normalize(in.normal);
-    let l = normalize(cam.light_dir.xyz);
-    if in.mode < 0.0 {
-        // Crystal resource node: glassy and lit from within. A fresnel rim
-        // pulls glancing facets toward white, a sharp sun glint rides the
-        // faces, and face-on pixels drop one in four (screen-door) so the
-        // body reads translucent against the ground behind it.
-        let v = normalize(cam.eye.xyz - in.world);
-        let fres = pow(1.0 - max(dot(n, v), 0.0), 2.0);
-        let px = vec2<u32>(in.clip.xy);
-        if fres < 0.45 && (px.x & 1u) == 0u && (px.y & 1u) == 1u {
-            discard;
-        }
-        let spec = pow(max(dot(reflect(-l, n), v), 0.0), 40.0);
-        let ndl = max(dot(n, l), 0.0);
-        let lit = 0.5 + 0.6 * ndl;
-        var col = in.albedo * (vec3<f32>(lit, lit, lit) + point_lights(in.world, n));
-        col += in.albedo * 0.35;
-        col = mix(col, vec3<f32>(1.0, 1.0, 1.0), fres * 0.55);
-        col += vec3<f32>(1.0, 1.0, 1.0) * spec * 0.9;
-        return vec4<f32>(col, 1.0);
-    }
-    let ndl = max(dot(n, l), 0.0);
+    let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
     let lit = 0.45 + 0.7 * ndl;
     let col = in.albedo * (vec3<f32>(lit, lit, lit) + point_lights(in.world, n));
     return vec4<f32>(col, 1.0);
+}
+
+// ---------------- crystals / gas pools (blended) ----------------
+// A tiny analytic environment map standing in for a cubemap: deep space
+// below the horizon, a cool sky band above, a bright zenith and the sun.
+fn env_color(r: vec3<f32>) -> vec3<f32> {
+    let t = clamp(r.y * 0.5 + 0.5, 0.0, 1.0);
+    var c = mix(vec3<f32>(0.04, 0.05, 0.10), vec3<f32>(0.38, 0.66, 0.95), pow(t, 1.6));
+    c = mix(c, vec3<f32>(0.92, 0.97, 1.0), pow(max(r.y, 0.0), 6.0) * 0.5);
+    let sun = pow(max(dot(r, normalize(cam.light_dir.xyz)), 0.0), 48.0);
+    return c + vec3<f32>(1.0, 0.95, 0.8) * sun;
+}
+
+// Warcraft 3 style crystal: true alpha blending (no dither), an env-mapped
+// reflection that sharpens at glancing angles (fresnel), a sun glint, and a
+// slow pulsing inner glow (each cluster offset by its world position so a
+// field of nodes doesn't throb in unison).
+@fragment
+fn fs_crystal(in: UnitOut) -> @location(0) vec4<f32> {
+    let n = normalize(in.normal);
+    let v = normalize(cam.eye.xyz - in.world);
+    let l = normalize(cam.light_dir.xyz);
+    let r = reflect(-v, n);
+    let fres = 0.06 + 0.94 * pow(1.0 - max(dot(n, v), 0.0), 3.0);
+    let ndl = max(dot(n, l), 0.0);
+    let pulse = 0.5 + 0.5 * sin(cam.params.x * 2.4 + dot(in.world.xz, vec2<f32>(0.13, 0.17)));
+    var col = in.albedo * (0.45 + 0.55 * ndl);
+    col += in.albedo * (0.15 + 0.45 * pulse);
+    col += point_lights(in.world, n) * in.albedo;
+    col = mix(col, env_color(r), 0.30 + 0.55 * fres);
+    let spec = pow(max(dot(r, l), 0.0), 60.0);
+    col += vec3<f32>(1.0, 1.0, 1.0) * spec;
+    let alpha = clamp(0.42 + 0.55 * fres + 0.08 * pulse, 0.0, 0.95);
+    return vec4<f32>(col, alpha);
 }
 
 // ---------------- selection rings (ground decals) ----------------

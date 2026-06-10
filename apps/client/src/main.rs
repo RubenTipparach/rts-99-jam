@@ -356,8 +356,7 @@ impl App {
                     .ground_pick(cx, cy, w, h)
                     .map(|(wx, wz)| (kind, wx, wz))
             });
-            let (inf, ba, bh, hqa, hqh, ac, en, ore, carbon, heavies, turrets, supplies, rings) =
-                self.game.render_data(ghost);
+            let rd = self.game.render_data(ghost);
             let particles = self.game.fx_instances();
             // Transient fx flashes take the light slots first; the steady
             // world lights (floodlights, node glow) fill what remains,
@@ -369,21 +368,24 @@ impl App {
             let fow = self.game.fow_bytes();
             let vp = self.camera.view_proj(aspect);
             gfx.render(
-                &inf,
-                &ba,
-                &bh,
-                &hqa,
-                &hqh,
-                &ac,
-                &en,
-                &ore,
-                &carbon,
-                &heavies,
-                &turrets,
-                &supplies,
+                &rd.infantry,
+                &rd.barracks_astro,
+                &rd.barracks_hollow,
+                &rd.hq_astro,
+                &rd.hq_hollow,
+                &rd.acolytes,
+                &rd.engineers,
+                &rd.ore_nodes,
+                &rd.carbon_nodes,
+                &rd.heavies,
+                &rd.turrets,
+                &rd.supplies,
+                &rd.barrels,
                 &particles,
+                &rd.ore_crystals,
+                &rd.carbon_pools,
                 &fx_lights,
-                &rings,
+                &rd.rings,
                 &fow,
                 vp,
                 self.camera.eye(),

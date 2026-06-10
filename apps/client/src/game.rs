@@ -134,25 +134,28 @@ fn pad_radius(kind: BuildingKind) -> f32 {
     }
 }
 
-/// Per-mesh instance lists + selection rings, in draw order: infantry, the two
-/// faction barracks, the two faction HQs, the two faction workers, the two
-/// resource nodes, heavies, turrets, supply depots, then rings. Matches
-/// `Gfx::render`'s argument order.
-pub type RenderData = (
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<InstanceRaw>,
-    Vec<RingRaw>,
-);
+/// Per-mesh instance lists + selection rings, matching `Gfx::render`'s
+/// argument order. The crystal/pool groups draw alpha-blended after the
+/// opaque world; barrels are the sludge loads hauling workers carry.
+#[derive(Default)]
+pub struct RenderData {
+    pub infantry: Vec<InstanceRaw>,
+    pub barracks_astro: Vec<InstanceRaw>,
+    pub barracks_hollow: Vec<InstanceRaw>,
+    pub hq_astro: Vec<InstanceRaw>,
+    pub hq_hollow: Vec<InstanceRaw>,
+    pub acolytes: Vec<InstanceRaw>,
+    pub engineers: Vec<InstanceRaw>,
+    pub ore_nodes: Vec<InstanceRaw>,
+    pub carbon_nodes: Vec<InstanceRaw>,
+    pub heavies: Vec<InstanceRaw>,
+    pub turrets: Vec<InstanceRaw>,
+    pub supplies: Vec<InstanceRaw>,
+    pub barrels: Vec<InstanceRaw>,
+    pub ore_crystals: Vec<InstanceRaw>,
+    pub carbon_pools: Vec<InstanceRaw>,
+    pub rings: Vec<RingRaw>,
+}
 
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -460,6 +463,22 @@ impl Game {
         for (from, to, carbon) in beams {
             self.fx.mining_beam(from, to, carbon);
         }
+
+        // Carbon geysers vent: every visible gas node breathes a wisp of
+        // green smoke from its crater (jittered cadence, fog-gated).
+        let vents: Vec<[f32; 3]> = self
+            .curr
+            .iter()
+            .filter(|s| s.kind == Kind::CarbonNode)
+            .filter(|s| self.cell_visible(f(s.pos.x), f(s.pos.y)))
+            .map(|s| {
+                let (wx, wz) = (f(s.pos.x), f(s.pos.y));
+                [wx, terrain::height(wx, wz) + 3.2, wz]
+            })
+            .collect();
+        for v in vents {
+            self.fx.geyser_smoke(v);
+        }
     }
 
     /// Emissive particle instances for the renderer.
@@ -486,31 +505,36 @@ impl Game {
             let ground = terrain::height(wx, wz);
             let light = match s.kind {
                 // Floodlights only come on once construction is finished.
+                // Hung high and driven hard so the pool on the pad actually
+                // reads against the lit terrain.
                 Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
                     if f(s.construct_frac) >= 0.999 =>
                 {
                     let radius = match s.kind {
-                        Kind::Hq => 17.0,
-                        Kind::Barracks => 14.0,
-                        Kind::Supply => 11.0,
-                        _ => 9.0,
+                        Kind::Hq => 22.0,
+                        Kind::Barracks => 18.0,
+                        Kind::Supply => 14.0,
+                        _ => 12.0,
                     };
                     FxLight {
-                        pos: [wx, ground + 3.0, wz],
+                        pos: [wx, ground + 6.0, wz],
                         radius,
-                        color: [0.85, 0.66, 0.38],
+                        color: [1.6, 1.2, 0.65],
                     }
                 }
+                // Node glow pulses in step with the crystal shader (same
+                // world-position phase), dimming as the node depletes.
                 Kind::OreNode | Kind::CarbonNode => {
-                    let glow = 0.4 + 0.6 * f(s.resource_frac);
+                    let pulse = 0.75 + 0.25 * (self.time * 2.4 + wx * 0.13 + wz * 0.17).sin();
+                    let glow = (0.5 + 0.7 * f(s.resource_frac)) * pulse;
                     let color = if s.kind == Kind::OreNode {
                         [0.30 * glow, 0.62 * glow, 1.05 * glow]
                     } else {
                         [0.28 * glow, 1.0 * glow, 0.45 * glow]
                     };
                     FxLight {
-                        pos: [wx, ground + 2.0, wz],
-                        radius: 10.0,
+                        pos: [wx, ground + 2.5, wz],
+                        radius: 11.0,
                         color,
                     }
                 }
@@ -801,6 +825,9 @@ impl Game {
         let mut heavies = Vec::new();
         let mut turrets = Vec::new();
         let mut supplies = Vec::new();
+        let mut barrels = Vec::new();
+        let mut ore_crystals = Vec::new();
+        let mut carbon_pools = Vec::new();
         let mut rings = Vec::new();
         for s in &self.curr {
             let (wx, wz) = self.lerped(s);
@@ -811,20 +838,22 @@ impl Game {
             let tint = team_color(s.owner);
             if matches!(s.kind, Kind::OreNode | Kind::CarbonNode) {
                 // Nodes shrink as they deplete (resource_frac runs 1 -> 0).
-                // Tint alpha -1 is the shader's crystal mode: glassy fresnel
-                // rim, sun glint, and screen-door translucency.
+                // The rock pedestal draws opaque; the crystal shards / gas
+                // pool ride the same transform through the blended pipeline.
                 let scl = 0.55 + 0.45 * f(s.resource_frac);
                 let inst = InstanceRaw {
                     offset: [wx, ground, wz],
                     scale: [scl, scl, scl],
-                    color: [1.0, 1.0, 1.0, -1.0],
+                    color: [1.0, 1.0, 1.0, 0.0],
                     rot: ROT_NONE,
                     anim: ANIM_NONE,
                 };
                 if s.kind == Kind::OreNode {
                     ore_nodes.push(inst);
+                    ore_crystals.push(inst);
                 } else {
                     carbon_nodes.push(inst);
+                    carbon_pools.push(inst);
                 }
             } else if matches!(
                 s.kind,
@@ -926,6 +955,37 @@ impl Game {
                 match self.faction_of(s.owner) {
                     Faction::Astromancer => acolytes.push(inst),
                     Faction::Hollowmen => engineers.push(inst),
+                }
+                // The hauled load rides visibly on the worker: a little
+                // crystal (ore) or a barrel of green sludge (carbon), held
+                // out front along the facing direction.
+                if s.carry > 0 {
+                    let fl = (f(s.facing.x).powi(2) + f(s.facing.y).powi(2))
+                        .sqrt()
+                        .max(0.001);
+                    let (dx, dz) = (f(s.facing.x) / fl, f(s.facing.y) / fl);
+                    let cargo = [
+                        inst.offset[0] + dx * 0.9,
+                        inst.offset[1] + 1.15,
+                        inst.offset[2] + dz * 0.9,
+                    ];
+                    if s.carry == 1 {
+                        ore_crystals.push(InstanceRaw {
+                            offset: cargo,
+                            scale: [0.16, 0.16, 0.16],
+                            color: [1.0, 1.0, 1.0, 0.0],
+                            rot: inst.rot,
+                            anim: ANIM_NONE,
+                        });
+                    } else {
+                        barrels.push(InstanceRaw {
+                            offset: cargo,
+                            scale: [1.0, 1.0, 1.0],
+                            color: [1.0, 1.0, 1.0, 0.0],
+                            rot: inst.rot,
+                            anim: ANIM_NONE,
+                        });
+                    }
                 }
                 if sel.contains(&s.index) {
                     rings.push(RingRaw {
@@ -1071,7 +1131,7 @@ impl Game {
             });
         }
 
-        (
+        RenderData {
             infantry,
             barracks_astro,
             barracks_hollow,
@@ -1084,8 +1144,11 @@ impl Game {
             heavies,
             turrets,
             supplies,
+            barrels,
+            ore_crystals,
+            carbon_pools,
             rings,
-        )
+        }
     }
 
     /// True if a building of `kind` can be placed at `(wx, wz)`: far enough

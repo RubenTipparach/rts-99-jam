@@ -22,8 +22,12 @@ struct Particle {
     max_life: f32,
     size: f32,
     color: [f32; 3],
-    /// 0 = drifts, 1 = full ballistic fall.
+    /// 0 = drifts, 1 = full ballistic fall (negative = buoyant, rises).
     weight: f32,
+    /// Beam particles: instance yaw (cos, sin) and full length along +z.
+    /// Zero length = a normal point particle.
+    rot: [f32; 2],
+    beam_len: f32,
 }
 
 struct Light {
@@ -77,6 +81,8 @@ impl Fx {
                 size: size * (0.7 + 0.3 * js),
                 color,
                 weight,
+                rot: ROT_NONE,
+                beam_len: 0.0,
             });
         }
     }
@@ -116,6 +122,8 @@ impl Fx {
                 size: 0.32,
                 color: [1.0, 0.85, 0.45],
                 weight: 0.0,
+                rot: ROT_NONE,
+                beam_len: 0.0,
             });
         }
         self.burst(hit, [1.0, 0.8, 0.35], 4, 6.0, 0.28, 0.28, 0.6);
@@ -211,10 +219,10 @@ impl Fx {
         }
     }
 
-    /// A worker's mining laser: a bead-chain beam from the tool to the
-    /// crystal's contact point, with sparks and a glint where it bites.
-    /// Re-fed every sim tick while mining, so the beam reads continuous
-    /// (the short-lived beads stay in their white-hot birth phase).
+    /// A worker's mining laser: one continuous beam (a thin emissive box
+    /// stretched from the tool to the crystal's contact point), with sparks
+    /// and a glint where it bites. Re-fed every sim tick while mining, so
+    /// the short-lived beam stays in its white-hot phase and reads solid.
     pub fn mining_beam(&mut self, from: [f32; 3], to: [f32; 3], carbon: bool) {
         let color = if carbon {
             [0.45, 0.95, 0.55]
@@ -223,20 +231,23 @@ impl Fx {
         };
         let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
         let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(0.001);
-        let n = ((len / 1.1).ceil() as usize).clamp(2, 24);
-        for k in 0..n {
-            if self.particles.len() >= MAX_PARTICLES {
-                break;
-            }
-            let t = (k as f32 + 0.5) / n as f32;
+        let flat = (d[0] * d[0] + d[2] * d[2]).sqrt().max(0.001);
+        if self.particles.len() < MAX_PARTICLES {
             self.particles.push(Particle {
-                pos: [from[0] + d[0] * t, from[1] + d[1] * t, from[2] + d[2] * t],
+                pos: [
+                    from[0] + d[0] * 0.5,
+                    from[1] + d[1] * 0.5,
+                    from[2] + d[2] * 0.5,
+                ],
                 vel: [0.0, 0.0, 0.0],
                 life: 0.12,
                 max_life: 0.12,
-                size: 0.2,
+                size: 0.13,
                 color,
                 weight: 0.0,
+                // The beam mesh points +z; yaw it onto the firing line.
+                rot: [d[2] / flat, d[0] / flat],
+                beam_len: len,
             });
         }
         // Impact: crystal chips fly off the contact point under a glint.
@@ -247,6 +258,27 @@ impl Fx {
             [color[0] * 0.7, color[1] * 0.7, color[2] * 0.7],
             0.15,
         );
+    }
+
+    /// A carbon geyser's ambient plume: slow wisps of green gas climbing out
+    /// of the vent. Called with a jittered cadence per visible node.
+    pub fn geyser_smoke(&mut self, pos: [f32; 3]) {
+        if self.particles.len() >= MAX_PARTICLES {
+            return;
+        }
+        let (jx, jz) = (self.jitter(), self.jitter());
+        let lift = 1.5 + 0.7 * self.jitter().abs();
+        self.particles.push(Particle {
+            pos: [pos[0] + jx * 0.7, pos[1], pos[2] + jz * 0.7],
+            vel: [jx * 0.5, lift, jz * 0.5],
+            life: 2.4,
+            max_life: 2.4,
+            size: 0.6,
+            color: [0.30, 0.80, 0.42],
+            weight: -0.04, // buoyant: the plume climbs instead of falling
+            rot: ROT_NONE,
+            beam_len: 0.0,
+        });
     }
 
     /// Advance and expire particles/lights.
@@ -283,9 +315,14 @@ impl Fx {
                 ];
                 InstanceRaw {
                     offset: q.pos,
-                    scale: [s, s, s],
+                    // Beams stretch the unit cube along +z to span their line.
+                    scale: if q.beam_len > 0.0 {
+                        [s, s, q.beam_len]
+                    } else {
+                        [s, s, s]
+                    },
                     color: [col[0], col[1], col[2], 3.0 + t],
-                    rot: ROT_NONE,
+                    rot: q.rot,
                     anim: ANIM_NONE,
                 }
             })
