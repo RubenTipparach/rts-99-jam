@@ -432,9 +432,21 @@ const TETS = [[0,1,2,6],[0,2,3,6],[0,3,7,6],[0,7,4,6],[0,4,5,6],[0,5,1,6]];
 
 // Marching cubes (tetrahedral, same scheme as the engine) over the density field
 // -> a textured triangle soup centred on the origin (y centred about the world).
-function buildMesh3d() {
-  const t0 = performance.now();
-  const { nx, ny, nz, dx, dy, dz } = M, x0 = M.bounds[0], y0 = M.bounds[2], z0 = M.bounds[4], cy = cyOf();
+// Pure marching cubes over a density grid -> typed vertex arrays. Self-contained
+// (no globals) so it can run verbatim inside a Web Worker via toString().
+function meshFromGrid(g) {
+  const ISO = 128;
+  const C = [[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]];
+  const TETS = [[0,1,2,6],[0,2,3,6],[0,3,7,6],[0,7,4,6],[0,4,5,6],[0,5,1,6]];
+  const { density: D, material: MAT, nx, ny, nz, x0, y0, z0, dx, dy, dz, cy } = g;
+  const clampi = (v, n) => v < 0 ? 0 : v >= n ? n - 1 : v;
+  const dens = (i, j, k) => D[(clampi(j, ny) * nz + clampi(k, nz)) * nx + clampi(i, nx)];
+  const gnormal = (wx, wy, wz) => {
+    const i = Math.round((wx - x0) / dx), j = Math.round((wy - y0) / dy), k = Math.round((wz - z0) / dz);
+    const a = dens(i - 1, j, k) - dens(i + 1, j, k), b = dens(i, j - 1, k) - dens(i, j + 1, k), c = dens(i, j, k - 1) - dens(i, j, k + 1);
+    const l = Math.hypot(a, b, c) || 1;
+    return [a / l, b / l, c / l];
+  };
   const pos = [], nor = [], wgt = [], haz = [];
   const cv8 = new Float32Array(8), cp = [];
   for (let q = 0; q < 8; q++) cp.push([0, 0, 0]);
@@ -447,15 +459,15 @@ function buildMesh3d() {
     pos.push(p[0], p[1] - cy, p[2]); nor.push(n[0], n[1], n[2]);
     wgt.push(w[0], w[1], w[2], w[3]); haz.push(h);
   };
-  const D = M.density, sY = nz * nx, sZ = nx;
-  const offs = C.map((c) => c[1] * sY + c[2] * sZ + c[0]); // corner linear offsets
+  const sY = nz * nx, sZ = nx;
+  const offs = C.map((c) => c[1] * sY + c[2] * sZ + c[0]);
   for (let k = 0; k < nz - 1; k++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
     const base = (j * nz + k) * nx + i;
     let mn = 255, mx = 0;
     for (let q = 0; q < 8; q++) { const v = D[base + offs[q]]; cv8[q] = v; if (v < mn) mn = v; if (v > mx) mx = v; }
     if (mn >= ISO || mx < ISO) continue;
     for (let q = 0; q < 8; q++) cp[q] = [x0 + (i + C[q][0]) * dx, y0 + (j + C[q][1]) * dy, z0 + (k + C[q][2]) * dz];
-    const m = Math.min(4, M.material[base]);
+    const m = Math.min(4, MAT[base]);
     const w = [m === 1 ? 1 : 0, m === 0 ? 1 : 0, m === 2 ? 1 : 0, m === 3 ? 1 : 0], h = m === 4 ? 1 : 0;
     for (const tet of TETS) {
       const sol = [], air = [];
@@ -477,16 +489,33 @@ function buildMesh3d() {
       }
     }
   }
-  idxCount = pos.length / 3;
+  return { pos: new Float32Array(pos), nor: new Float32Array(nor), wgt: new Float32Array(wgt), haz: new Float32Array(haz) };
+}
+
+// The grid inputs meshFromGrid needs, read straight off the current map.
+function gridSnapshot() {
+  const { nx, ny, nz, dx, dy, dz } = M;
+  return { density: M.density, material: M.material, nx, ny, nz, x0: M.bounds[0], y0: M.bounds[2], z0: M.bounds[4], dx, dy, dz, cy: cyOf() };
+}
+
+// Upload a mesh result (typed arrays) to the GL buffers.
+function uploadMesh(r) {
+  idxCount = r.pos.length / 3;
   gl.bindVertexArray(vao);
   const bind = (buf, arr, name, size) => {
     const loc = gl.getAttribLocation(prog, name);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
   };
-  bind(bufs.pos, pos, "a_pos", 3); bind(bufs.norm, nor, "a_norm", 3);
-  bind(bufs.w, wgt, "a_w", 4); bind(bufs.haz, haz, "a_haz", 1);
+  bind(bufs.pos, r.pos, "a_pos", 3); bind(bufs.norm, r.nor, "a_norm", 3);
+  bind(bufs.w, r.wgt, "a_w", 4); bind(bufs.haz, r.haz, "a_haz", 1);
   gl.bindVertexArray(null);
+}
+
+// Synchronous build + upload (fallback when no worker). Returns elapsed ms.
+function buildMesh3d() {
+  const t0 = performance.now();
+  uploadMesh(meshFromGrid(gridSnapshot()));
   return performance.now() - t0;
 }
 
@@ -544,11 +573,22 @@ function voxelSphere(wx, wy, wz, R, add) {
   const j0 = Math.max(0, Math.floor((wy - R - y0) / M.dy)), j1 = Math.min(M.ny - 1, Math.ceil((wy + R - y0) / M.dy));
   const k0 = Math.max(0, Math.floor((wz - R - z0) / M.dz)), k1 = Math.min(M.nz - 1, Math.ceil((wz + R - z0) / M.dz));
   const R2 = R * R;
+  // Deposit/erode density with radial falloff, scaled by Strength, instead of
+  // snapping voxels straight to solid/air - so the brush is gentle at low
+  // Strength and builds up over a stroke (Strength is the sensitivity here).
+  const amt = ui.strength * 6;
   for (let k = k0; k <= k1; k++) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
     const vx = x0 + i * M.dx, vy = y0 + j * M.dy, vz = z0 + k * M.dz;
-    if ((vx - wx) ** 2 + (vy - wy) ** 2 + (vz - wz) ** 2 > R2) continue;
-    const o = lin(i, j, k);
-    if (add) { M.density[o] = 255; M.material[o] = ui.mat; } else M.density[o] = 0;
+    const d2 = (vx - wx) ** 2 + (vy - wy) ** 2 + (vz - wz) ** 2;
+    if (d2 > R2) continue;
+    const fall = 1 - Math.sqrt(d2) / R; // 1 at the centre -> 0 at the rim
+    const o = lin(i, j, k), delta = amt * fall;
+    if (add) {
+      M.density[o] = Math.min(255, M.density[o] + delta);
+      if (M.density[o] >= ISO) M.material[o] = ui.mat;
+    } else {
+      M.density[o] = Math.max(0, M.density[o] - delta);
+    }
   }
   for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) recache(i, k);
 }
@@ -581,10 +621,42 @@ function applyLayout(mode) {
 // 2D updates live during a stroke (cheap); the 3D mesh rebuild (marching cubes)
 // is deferred to stroke end via remesh3d().
 function refresh2d() { if (paneVisible("2d")) render(); }
+// Marching cubes runs in a Web Worker so a big rebuild never freezes the UI.
+// `mcWorker` is null (untried), false (unavailable -> synchronous), or a Worker.
+let mcWorker = null, mcBusy = false, mcPending = false, mcT0 = 0;
+function ensureWorker() {
+  if (mcWorker !== null) return; // already a Worker or known-unavailable (false)
+  try {
+    const src = "self.onmessage=function(e){var f=" + meshFromGrid.toString() +
+      ";var r=f(e.data);self.postMessage(r,[r.pos.buffer,r.nor.buffer,r.wgt.buffer,r.haz.buffer]);};";
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    w.onmessage = (e) => {
+      const ms = performance.now() - mcT0;
+      uploadMesh(e.data); render3d();
+      status(`${M.key}: ${(idxCount / 3 | 0)} tris, meshed in ${ms | 0} ms (worker)`);
+      mcBusy = false;
+      if (mcPending) { mcPending = false; remesh3d(); }
+    };
+    w.onerror = () => { mcWorker = false; mcBusy = false; }; // give up -> sync path
+    mcWorker = w;
+  } catch (_) { mcWorker = false; }
+}
+
 function remesh3d() {
   if (!gl || !M || !paneVisible("3d")) return;
-  const ms = buildMesh3d(); render3d();
-  status(`${M.key}: ${(idxCount / 3 | 0)} tris, meshed in ${ms | 0} ms`);
+  ensureWorker();
+  if (mcWorker) {
+    // Coalesce: if a build is in flight, just remember to rebuild once it lands.
+    if (mcBusy) { mcPending = true; return; }
+    mcBusy = true; mcT0 = performance.now();
+    // Send copies of the grids (transferred) so editing can continue meanwhile.
+    const g = gridSnapshot();
+    g.density = M.density.slice(); g.material = M.material.slice();
+    mcWorker.postMessage(g, [g.density.buffer, g.material.buffer]);
+  } else {
+    const ms = buildMesh3d(); render3d();
+    status(`${M.key}: ${(idxCount / 3 | 0)} tris, meshed in ${ms | 0} ms`);
+  }
 }
 
 function panCam(dx, dy) {
