@@ -88,8 +88,8 @@ pub struct FxLight {
 }
 
 /// Point-light slots in the camera uniform: transient fx lights plus the
-/// steady world lights (building floodlights, resource-node glow).
-pub const MAX_LIGHTS: usize = 48;
+/// steady world lights (per-corner building floodlights, node glow).
+pub const MAX_LIGHTS: usize = 64;
 
 /// One voxel-terrain vertex: position, normal, and soft texture blend weights
 /// (four tile slots + a hazard channel) the shader triplanar-blends from.
@@ -1639,6 +1639,18 @@ impl Gfx {
         );
         // Crystals/gas pools: same instancing as units, but alpha-blended
         // with env-mapped shine (drawn after the opaque world and water).
+        // Depth writes stay ON, and fs_crystal discards back-facing
+        // fragments by the authored outward normal (mesh winding is not
+        // consistent, so hardware face culling would cut the wrong faces);
+        // together only the nearest front-facing facet blends, instead of
+        // interior and rear facets stacking in arbitrary triangle order.
+        let depth_crystal = wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
         let crystal_pipeline = mk(
             "crystal",
             &pl_plain,
@@ -1646,7 +1658,7 @@ impl Gfx {
             "fs_crystal",
             &[v3u, inst],
             &blend_t,
-            &depth_blend,
+            &depth_crystal,
         );
         let voxel_pipeline = mk(
             "voxel",
@@ -2510,6 +2522,34 @@ mod tests {
         for (name, mesh) in jobs {
             let img = rasterize(&mesh, team, 560, 640);
             img.save(format!("target/previews/{name}.png")).unwrap();
+        }
+    }
+
+    /// Renders a small icon PNG of every unit and building mesh to
+    /// `target/previews/icons/`. A dev tool, not a check: run on demand with
+    /// `cargo test -p client render_unit_icons -- --ignored` and copy the
+    /// output to `assets/icons/` (embedded by the HUD command card).
+    #[test]
+    #[ignore = "writes icon PNGs to target/previews/icons; run on demand"]
+    fn render_unit_icons() {
+        let team = [0.25, 0.55, 1.0]; // the player's blue
+        let jobs: [(&str, Vec<UnitVertex>); 10] = [
+            ("hq-astromancer", hq_mesh_astro()),
+            ("hq-hollowmen", hq_mesh_hollow()),
+            ("barracks-astromancer", barracks_mesh_astro()),
+            ("barracks-hollowmen", barracks_mesh_hollow()),
+            ("turret", turret_mesh()),
+            ("supply", supply_mesh()),
+            ("worker-acolyte", acolyte_mesh()),
+            ("worker-engineer", engineer_mesh()),
+            ("infantry", infantry_mesh()),
+            ("heavy", heavy_mesh()),
+        ];
+        std::fs::create_dir_all("target/previews/icons").unwrap();
+        for (name, mesh) in jobs {
+            let img = rasterize(&mesh, team, 96, 96);
+            img.save(format!("target/previews/icons/{name}.png"))
+                .unwrap();
         }
     }
 }

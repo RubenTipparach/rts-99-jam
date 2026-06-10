@@ -6,13 +6,15 @@ struct Camera {
     eye: vec4<f32>,
     light_dir: vec4<f32>,
     params: vec4<f32>, // x = time, y = map half-size, z = sea level, w = light count
-    light_pos: array<vec4<f32>, 48>, // xyz = position, w = radius
-    light_col: array<vec4<f32>, 48>, // rgb
+    light_pos: array<vec4<f32>, 64>, // xyz = position, w = radius
+    light_col: array<vec4<f32>, 64>, // rgb
 };
 @group(0) @binding(0) var<uniform> cam: Camera;
 
-// Dynamic fx point lights (muzzle flashes, mining sparks, explosions):
-// quadratic falloff to the radius, diffuse against the surface normal.
+// Dynamic point lights (muzzle flashes, floodlights, node glow): quadratic
+// falloff to the radius, diffuse against the surface normal. Evaluated in
+// the VERTEX stages only - this game is exclusively vertex-lit, so the
+// light pools land on terrain vertices and interpolate across triangles.
 fn point_lights(world: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     var sum = vec3<f32>(0.0, 0.0, 0.0);
     let count = u32(cam.params.w);
@@ -84,12 +86,14 @@ struct TerrainOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) plight: vec3<f32>,
 };
 @vertex
 fn vs_terrain(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>) -> TerrainOut {
     var o: TerrainOut;
     o.world = pos;
     o.normal = normal;
+    o.plight = point_lights(pos, normalize(normal));
     o.clip = cam.view_proj * vec4<f32>(pos, 1.0);
     return o;
 }
@@ -111,7 +115,7 @@ fn fs_terrain(in: TerrainOut) -> @location(0) vec4<f32> {
 
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
     let lit = 0.45 + 0.7 * ndl;
-    col = col * (vec3<f32>(lit, lit, lit) + point_lights(in.world, n)) * fow(in.world);
+    col = col * (vec3<f32>(lit, lit, lit) + in.plight) * fow(in.world);
     return vec4<f32>(col, 1.0);
 }
 
@@ -128,6 +132,7 @@ struct VoxelOut {
     @location(1) normal: vec3<f32>,
     @location(2) w: vec4<f32>,
     @location(3) haz: f32,
+    @location(4) plight: vec3<f32>,
 };
 @vertex
 fn vs_voxel(
@@ -141,6 +146,7 @@ fn vs_voxel(
     o.normal = normal;
     o.w = w;
     o.haz = haz;
+    o.plight = point_lights(pos, normalize(normal));
     o.clip = cam.view_proj * vec4<f32>(pos, 1.0);
     return o;
 }
@@ -168,7 +174,7 @@ fn fs_voxel(in: VoxelOut) -> @location(0) vec4<f32> {
     let emis = vec3<f32>(1.0, 0.45, 0.12) * world.tint.a * haz;
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
     let base = 0.4 + 0.7 * ndl;
-    let lit = (col * (vec3<f32>(base, base, base) + point_lights(in.world, n)) + emis) * fow(in.world);
+    let lit = (col * (vec3<f32>(base, base, base) + in.plight) + emis) * fow(in.world);
     return vec4<f32>(lit, 1.0);
 }
 
@@ -228,7 +234,9 @@ fn water_sky(dir: vec3<f32>) -> vec3<f32> {
 fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
     let t = cam.params.x;
     let amp = clamp(world.liquid.a, 0.25, 1.5);
-    let n = water_normal(in.world.xz, t, amp);
+    // The 2.6x UV scale shrinks every ripple wavelength, packing far more
+    // surface detail into each screen-space stretch of water.
+    let n = water_normal(in.world.xz * 2.6, t, amp);
     let view = normalize(cam.eye.xyz - in.world); // surface -> eye
     let refl = reflect(-view, n); // reflected view ray, into the sky
     let sky = water_sky(refl);
@@ -266,6 +274,7 @@ struct UnitOut {
     @location(1) albedo: vec3<f32>,
     @location(2) mode: f32,
     @location(3) world: vec3<f32>,
+    @location(4) plight: vec3<f32>,
 };
 @vertex
 fn vs_unit(
@@ -310,6 +319,7 @@ fn vs_unit(
     o.mode = tcol.a;
     let world = rp + offset;
     o.world = world;
+    o.plight = point_lights(world, normalize(rn));
     o.clip = cam.view_proj * vec4<f32>(world, 1.0);
     return o;
 }
@@ -346,7 +356,7 @@ fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
     let lit = 0.45 + 0.7 * ndl;
-    let col = in.albedo * (vec3<f32>(lit, lit, lit) + point_lights(in.world, n));
+    let col = in.albedo * (vec3<f32>(lit, lit, lit) + in.plight);
     return vec4<f32>(col, 1.0);
 }
 
@@ -369,6 +379,12 @@ fn env_color(r: vec3<f32>) -> vec3<f32> {
 fn fs_crystal(in: UnitOut) -> @location(0) vec4<f32> {
     let n = normalize(in.normal);
     let v = normalize(cam.eye.xyz - in.world);
+    // Mesh winding is not consistent, so cull back faces here by the
+    // authored outward normal: with depth writes on, only the nearest
+    // front-facing facet blends (no interior/rear facet mush).
+    if dot(n, v) <= 0.0 {
+        discard;
+    }
     let l = normalize(cam.light_dir.xyz);
     let r = reflect(-v, n);
     let fres = 0.06 + 0.94 * pow(1.0 - max(dot(n, v), 0.0), 3.0);
@@ -376,7 +392,7 @@ fn fs_crystal(in: UnitOut) -> @location(0) vec4<f32> {
     let pulse = 0.5 + 0.5 * sin(cam.params.x * 2.4 + dot(in.world.xz, vec2<f32>(0.13, 0.17)));
     var col = in.albedo * (0.45 + 0.55 * ndl);
     col += in.albedo * (0.15 + 0.45 * pulse);
-    col += point_lights(in.world, n) * in.albedo;
+    col += in.plight * in.albedo;
     col = mix(col, env_color(r), 0.30 + 0.55 * fres);
     let spec = pow(max(dot(r, l), 0.0), 60.0);
     col += vec3<f32>(1.0, 1.0, 1.0) * spec;

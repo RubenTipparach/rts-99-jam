@@ -32,7 +32,14 @@ impl Camera {
             PITCH.sin(),
             YAW.sin() * PITCH.cos(),
         );
-        (t + dir * self.distance, t)
+        let mut eye = t + dir * self.distance;
+        // Never let the eye sink into (or under) the terrain: when a zoom or
+        // pan would bury it, snap it to a safe height above the surface.
+        let floor = crate::terrain::height(eye.x, eye.z) + 6.0;
+        if eye.y < floor {
+            eye.y = floor;
+        }
+        (eye, t)
     }
 
     pub fn eye(&self) -> [f32; 3] {

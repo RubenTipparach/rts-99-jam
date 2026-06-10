@@ -513,23 +513,33 @@ impl Game {
                 continue;
             }
             let ground = terrain::height(wx, wz);
-            let light = match s.kind {
-                // Floodlights only come on once construction is finished.
-                // Hung high and driven hard so the pool on the pad actually
-                // reads against the lit terrain.
+            match s.kind {
+                // Floodlights only come on once construction is finished:
+                // wall lamps just outside the footprint corners, hugging the
+                // ground so the pool lands on the terrain vertices around
+                // the pad (Earth 2150 style), never on the building's roof.
                 Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
                     if f(s.construct_frac) >= 0.999 =>
                 {
-                    let radius = match s.kind {
-                        Kind::Hq => 22.0,
-                        Kind::Barracks => 18.0,
-                        Kind::Supply => 14.0,
-                        _ => 12.0,
+                    let r = match s.kind {
+                        Kind::Hq => 7.0,
+                        Kind::Barracks => 6.0,
+                        Kind::Supply => 3.0,
+                        _ => 2.5,
                     };
-                    FxLight {
-                        pos: [wx, ground + 6.0, wz],
-                        radius,
-                        color: [1.6, 1.2, 0.65],
+                    // Big structures light all four corners; small ones two.
+                    let corners: &[(f32, f32)] = if r > 4.0 {
+                        &[(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)]
+                    } else {
+                        &[(1.0, 1.0), (-1.0, -1.0)]
+                    };
+                    for (sx, sz) in corners {
+                        let (lx, lz) = (wx + sx * (r + 1.0), wz + sz * (r + 1.0));
+                        out.push(FxLight {
+                            pos: [lx, terrain::height(lx, lz) + 1.6, lz],
+                            radius: r * 2.4 + 4.0,
+                            color: [1.3, 1.0, 0.55],
+                        });
                     }
                 }
                 // Node glow pulses in step with the crystal shader (same
@@ -542,15 +552,14 @@ impl Game {
                     } else {
                         [0.28 * glow, 1.0 * glow, 0.45 * glow]
                     };
-                    FxLight {
+                    out.push(FxLight {
                         pos: [wx, ground + 2.5, wz],
                         radius: 11.0,
                         color,
-                    }
+                    });
                 }
-                _ => continue,
-            };
-            out.push(light);
+                _ => {}
+            }
         }
         out.sort_by(|a, b| {
             let d = |l: &FxLight| {
@@ -1694,10 +1703,50 @@ impl Game {
         true
     }
 
+    /// If `(wx, wz)` lands on a placed hologram and workers are selected,
+    /// re-issue the build to them and refresh the ghost's clock. Returns
+    /// whether the click was consumed.
+    fn resume_pending_build(&mut self, wx: f32, wz: f32) -> bool {
+        let Some(idx) = self
+            .pending_builds
+            .iter()
+            .position(|pb| (wx - pb.wx).hypot(wz - pb.wz) <= pad_radius(pb.kind) + 1.5)
+        else {
+            return false;
+        };
+        let (kind, bx, bz) = {
+            let pb = &self.pending_builds[idx];
+            (pb.kind, pb.wx, pb.wz)
+        };
+        let mut issued = false;
+        for u in self.selected.clone() {
+            if self.is_worker(u) {
+                self.pending.push(Command::Build {
+                    unit: u,
+                    kind,
+                    x: fx(bx),
+                    y: fx(bz),
+                });
+                issued = true;
+            }
+        }
+        if issued {
+            self.pending_builds[idx].born = self.time;
+            self.ping(Ping::Move, bx, bz, None);
+        }
+        issued
+    }
+
     /// Right-click order at a ground point. `attack` (Ctrl held) forces an
     /// attack-move: the group advances and engages anything on the way.
     pub fn order(&mut self, wx: f32, wz: f32, attack: bool) {
         if self.selected.is_empty() {
+            return;
+        }
+        // Right-clicking a placed hologram with workers selected resumes
+        // the pending build (re-tasking them onto a site whose original
+        // builder died or was pulled away).
+        if !attack && self.resume_pending_build(wx, wz) {
             return;
         }
         // Right-clicking a resource node sends selected workers to harvest it;

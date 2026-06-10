@@ -534,18 +534,74 @@ impl World {
         self.cell_passable(x, y) && !self.obstacle_blocked(from, x, y)
     }
 
-    /// Move entity `i` to `(nx, ny)` if the terrain and footprints allow; a
-    /// blocked step slides along whichever single axis stays open, so units
-    /// skirt water, cliffs and buildings instead of walking into them.
+    /// The centre of the nearest footprint that blocks stepping onto
+    /// `(x, y)` from `from`, if any (fixed ascending order, nearest wins).
+    fn blocking_obstacle(&self, from: Vec3, x: Fx, y: Fx) -> Option<Vec3> {
+        let mut best: Option<(Fx, Vec3)> = None;
+        for j in 0..self.arena.capacity() {
+            if !self.arena.alive[j] {
+                continue;
+            }
+            if let Some(r) = obstacle_radius(self.kind[j]) {
+                let rr = r + UNIT_RADIUS;
+                let dx = x - self.pos[j].x;
+                let dy = y - self.pos[j].y;
+                let d2 = dx * dx + dy * dy;
+                if d2 < rr * rr {
+                    let fx_ = from.x - self.pos[j].x;
+                    let fy_ = from.y - self.pos[j].y;
+                    if fx_ * fx_ + fy_ * fy_ >= rr * rr
+                        && best.map(|(bd, _)| d2 < bd).unwrap_or(true)
+                    {
+                        best = Some((d2, self.pos[j]));
+                    }
+                }
+            }
+        }
+        best.map(|(_, c)| c)
+    }
+
+    /// Move entity `i` to `(nx, ny)` if the terrain and footprints allow.
+    /// A blocked step slides along whichever single axis stays open; if both
+    /// axes are blocked by a building, deflect tangentially around its
+    /// footprint (whichever way agrees with the intended direction), so a
+    /// unit aimed dead-centre at a structure walks around it instead of
+    /// jamming against the wall.
     fn try_move(&mut self, i: usize, nx: Fx, ny: Fx) {
         let cur = self.pos[i];
         if self.spot_free(cur, nx, ny) {
             self.pos[i].x = nx;
             self.pos[i].y = ny;
-        } else if self.spot_free(cur, nx, cur.y) {
+            return;
+        }
+        if self.spot_free(cur, nx, cur.y) {
             self.pos[i].x = nx;
-        } else if self.spot_free(cur, cur.x, ny) {
+            return;
+        }
+        if self.spot_free(cur, cur.x, ny) {
             self.pos[i].y = ny;
+            return;
+        }
+        if let Some(c) = self.blocking_obstacle(cur, nx, ny) {
+            let rx = cur.x - c.x;
+            let ry = cur.y - c.y;
+            let rl = (rx * rx + ry * ry).sqrt();
+            if rl <= Fx::ZERO {
+                return;
+            }
+            let (mvx, mvy) = (nx - cur.x, ny - cur.y);
+            let step = (mvx * mvx + mvy * mvy).sqrt();
+            // Tangent (-ry, rx), flipped to agree with the intended move.
+            let (mut tx, mut ty) = (-ry / rl, rx / rl);
+            if tx * mvx + ty * mvy < Fx::ZERO {
+                tx = -tx;
+                ty = -ty;
+            }
+            let (cx_, cy_) = (cur.x + tx * step, cur.y + ty * step);
+            if self.spot_free(cur, cx_, cy_) {
+                self.pos[i].x = cx_;
+                self.pos[i].y = cy_;
+            }
         }
     }
 
