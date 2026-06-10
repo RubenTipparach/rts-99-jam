@@ -9,6 +9,12 @@ Concept render: `assets/concepts/buildings.png` (regenerate with
 `python3 assets/render_buildings.py`). It is **rough massing only**: approximate
 shapes, proportions, and palettes in the game's iso camera, not final art.
 
+The **in-engine meshes** (the real `gfx.rs` geometry, with the game camera and
+the unit shader's lighting) are previewed in `docs/buildings/previews/*.png`;
+regenerate them with
+`cargo test -p client render_building_previews -- --ignored` (writes to
+`apps/client/target/previews/`, then copy the keepers here).
+
 ---
 
 ## 1. What we took from Blizzard's RTS design
