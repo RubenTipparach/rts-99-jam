@@ -39,7 +39,7 @@ fn team_color(owner: u16) -> [f32; 4] {
 /// Which faction a player fields. Drives which placeholder building/unit meshes
 /// are drawn for that player; set from the skirmish lobby. Only the two launch
 /// factions exist so far.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub enum Faction {
     Astromancer,

@@ -4,6 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Astromancers</title>
+    <!-- Mobile debugging: append ?debug (or ?eruda) to the URL to load the eruda
+         on-screen console. Off by default so normal players don't fetch it. -->
+    <script>
+      if (/[?&](debug|eruda)\b/.test(location.search)) {
+        var s = document.createElement("script");
+        s.src = "https://cdn.jsdelivr.net/npm/eruda";
+        s.onload = function () { window.eruda && eruda.init(); };
+        document.head.appendChild(s);
+      }
+    </script>
     <meta name="description" content="Astromancers - Space · Magic · Real-Time Strategy." />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Astromancers" />

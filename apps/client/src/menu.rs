@@ -42,7 +42,7 @@ impl Default for Lobby {
 }
 
 /// A click the front-end recognized, returned by `hit` for the app to act on.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub enum Click {
     None,

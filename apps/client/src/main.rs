@@ -456,7 +456,9 @@ impl App {
     #[cfg(target_arch = "wasm32")]
     fn front_end_click(&mut self, cx: f32, cy: f32) {
         let (w, h) = self.dims();
-        match menu::hit(self.screen, &self.lobby, cx, cy, w, h) {
+        let click = menu::hit(self.screen, &self.lobby, cx, cy, w, h);
+        log::info!("front_end_click at ({cx:.0},{cy:.0}) dims={w:.0}x{h:.0} -> {click:?}");
+        match click {
             menu::Click::Skirmish => self.screen = menu::Screen::Lobby,
             menu::Click::SetFaction(f) => self.lobby.faction = f,
             menu::Click::AddBot => self.lobby.bots = (self.lobby.bots + 1).min(3),
@@ -629,6 +631,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // Front-end screens (web): clicks drive the menu/lobby, not the game.
                 #[cfg(target_arch = "wasm32")]
                 if self.screen != menu::Screen::InGame {
+                    log::info!("menu MouseInput {button:?} {state:?} at ({cx:.0},{cy:.0})");
                     if button == MouseButton::Left && state == ElementState::Pressed {
                         self.front_end_click(cx, cy);
                     }
@@ -719,6 +722,10 @@ impl ApplicationHandler<UserEvent> for App {
                 let (cx, cy) = (touch.location.x as f32, touch.location.y as f32);
                 self.input.cursor = (cx, cy);
                 self.pointer_is_touch = true;
+                #[cfg(target_arch = "wasm32")]
+                if matches!(touch.phase, TouchPhase::Started | TouchPhase::Ended) {
+                    log::info!("touch {:?} at ({cx:.0},{cy:.0})", touch.phase);
+                }
                 // Menus and the pause overlay: a tap acts on release, like a
                 // click (taps never reach gameplay from these screens).
                 #[cfg(target_arch = "wasm32")]
