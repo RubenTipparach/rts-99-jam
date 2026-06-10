@@ -30,19 +30,30 @@ pub enum CursorKind {
     Rally,
 }
 
-/// Height of the unified bottom HUD strip (CSS px): one continuous surface
-/// whose left section holds the minimap, the centre the selection panel,
-/// and the right the command card - discrete areas split by dividers,
-/// nothing floating over anything else.
+/// The bottom HUD reads as an inverted T (StarCraft silhouette): two tall
+/// wing sections - the minimap (left) and the command card (right) at
+/// [`HUD_H`] - joined by a shorter centre console at [`MID_H`] holding the
+/// selection panel. Three discrete, non-overlapping areas.
 #[cfg(target_arch = "wasm32")]
 const HUD_H: f64 = 184.0;
-
-/// True when a physical-pixel point sits over the in-game UI (the bottom
-/// HUD strip), so edge-panning and world cursors stand down there.
 #[cfg(target_arch = "wasm32")]
-pub fn over_ui(_game: &Game, _cx: f32, cy: f32, _w_phys: f32, h_phys: f32) -> bool {
+const MID_H: f64 = 108.0;
+
+/// True when a physical-pixel point sits over the in-game UI (any of the
+/// three bottom HUD sections), so edge-panning and world cursors stand
+/// down there.
+#[cfg(target_arch = "wasm32")]
+pub fn over_ui(_game: &Game, cx: f32, cy: f32, w_phys: f32, h_phys: f32) -> bool {
     let d = dpr();
-    cy >= h_phys - HUD_H as f32 * d
+    if cy >= h_phys - MID_H as f32 * d {
+        return true; // the centre console spans the full width
+    }
+    if cy >= h_phys - HUD_H as f32 * d {
+        // The tall wings: minimap section left, command card section right.
+        let (cw, _, _, _) = card_panel_css(w_phys / d, h_phys / d);
+        return cx <= HUD_H as f32 * d || cx >= (cw - 12.0) as f32 * d;
+    }
+    false
 }
 
 // --- icon art -------------------------------------------------------------
@@ -899,27 +910,29 @@ pub fn draw(
         ctx.stroke_rect(x0 as f64, y0 as f64, (x1 - x0) as f64, (y1 - y0) as f64);
     }
 
-    // The bottom HUD: one continuous strip split by thin dividers into
-    // three discrete sections - minimap | selection | command card. No
-    // panels float on top of other panels.
-    let bar = HUD_H;
+    // The bottom HUD: an inverted T. Two tall wings (minimap left, command
+    // card right) joined by a shorter centre console - three discrete,
+    // non-overlapping sections drawn as one outline.
+    let bar = MID_H;
+    let (card_x, _, _, _) = card_panel_css(w, h);
+    let div_l = HUD_H; // right edge of the minimap wing (12 + map + 12)
+    let div_r = card_x - 12.0;
     ctx.set_fill_style_str("rgba(8,14,26,0.92)");
-    ctx.fill_rect(0.0, hf - bar, wf, bar);
+    ctx.begin_path();
+    ctx.move_to(0.0, hf - HUD_H);
+    ctx.line_to(div_l, hf - HUD_H);
+    ctx.line_to(div_l, hf - MID_H);
+    ctx.line_to(div_r, hf - MID_H);
+    ctx.line_to(div_r, hf - HUD_H);
+    ctx.line_to(wf, hf - HUD_H);
+    ctx.line_to(wf, hf);
+    ctx.line_to(0.0, hf);
+    ctx.close_path();
+    ctx.fill();
     ctx.set_stroke_style_str("rgba(120,160,210,0.85)");
     ctx.set_line_width(2.0);
-    ctx.stroke_rect(1.0, hf - bar + 1.0, wf - 2.0, bar - 2.0);
-    let (card_x, _, _, _) = card_panel_css(w, h);
-    let div_l = HUD_H; // right edge of the minimap section (12 + map + 12)
-    let div_r = card_x - 12.0;
-    ctx.set_stroke_style_str("rgba(120,160,210,0.45)");
-    ctx.set_line_width(1.5);
-    for x in [div_l, div_r] {
-        ctx.begin_path();
-        ctx.move_to(x, hf - bar + 10.0);
-        ctx.line_to(x, hf - 10.0);
-        ctx.stroke();
-    }
-    // Centre of the selection section, for everything drawn in it.
+    ctx.stroke();
+    // Centre of the console section, for everything drawn in it.
     let mid_c = (div_l + div_r) / 2.0;
 
     // Resource readout with proper icons (top-RIGHT corner, StarCraft
@@ -974,7 +987,7 @@ pub fn draw(
             let cols = 8.min(n);
             let cell = 38.0_f64;
             let px = mid_c - cols as f64 * cell / 2.0;
-            let py = hf - bar + 24.0;
+            let py = hf - bar + 12.0;
             for (i, u) in units.iter().take(n).enumerate() {
                 let x = px + (i % 8) as f64 * cell;
                 let y = py + (i / 8) as f64 * (cell + 4.0);
