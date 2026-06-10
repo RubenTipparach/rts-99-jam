@@ -16,6 +16,41 @@ fn dpr() -> f32 {
         .unwrap_or(1.0)
 }
 
+/// Context cursor shown in-game; the HUD draws it and the OS cursor hides.
+#[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub enum CursorKind {
+    Select,
+    AddSelect,
+    Pan,
+    Move,
+    Harvest,
+    Attack,
+    Build,
+    Rally,
+}
+
+/// True when a physical-pixel point sits over in-game UI (the command bar or
+/// the minimap), so edge-panning and world cursors stand down there.
+#[cfg(target_arch = "wasm32")]
+pub fn over_ui(game: &Game, cx: f32, cy: f32, w_phys: f32, h_phys: f32) -> bool {
+    let d = dpr();
+    if cy >= h_phys - 96.0 * d {
+        return true; // the command bar strip
+    }
+    let (x0, y0, x1, y1) = minimap_rect(w_phys, h_phys);
+    if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
+        return true;
+    }
+    for (k, _) in card_actions(game).iter().enumerate() {
+        let (x0, y0, x1, y1) = card_button_rect(k, h_phys);
+        if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
+            return true;
+        }
+    }
+    false
+}
+
 /// A command-card button's effect when clicked.
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Copy, PartialEq)]
@@ -142,9 +177,126 @@ pub fn fullscreen_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) 
     css_to_phys(fullscreen_btn_css(w_phys / d, h_phys / d), d)
 }
 
-/// Draw the in-game cursor at `(x, y)` in CSS pixels. Used while the pointer is
-/// locked, when the browser hides the real cursor. A small arrowhead with a dark
-/// outline so it reads over both terrain and water.
+/// Draw the context cursor at `(x, y)` in CSS pixels: an arrowhead for
+/// selection, plus order-specific glyphs (move/harvest/attack/build/rally/
+/// pan), each with a dark outline so it reads over terrain and water.
+#[cfg(target_arch = "wasm32")]
+fn draw_cursor_glyph(ctx: &web_sys::CanvasRenderingContext2d, x: f64, y: f64, kind: CursorKind) {
+    use std::f64::consts::TAU;
+    ctx.save();
+    ctx.set_line_width(2.0);
+    let outline = |ctx: &web_sys::CanvasRenderingContext2d| {
+        ctx.set_stroke_style_str("rgba(0,0,0,0.85)");
+        ctx.set_line_width(3.5);
+        ctx.stroke();
+        ctx.set_line_width(2.0);
+    };
+    match kind {
+        CursorKind::Select | CursorKind::AddSelect => {
+            draw_cursor_arrow(ctx, x, y);
+            if kind == CursorKind::AddSelect {
+                // a small green plus beside the arrow (shift: add to selection)
+                ctx.begin_path();
+                ctx.move_to(x + 14.0, y + 4.0);
+                ctx.line_to(x + 22.0, y + 4.0);
+                ctx.move_to(x + 18.0, y);
+                ctx.line_to(x + 18.0, y + 8.0);
+                outline(ctx);
+                ctx.set_stroke_style_str("#7dff9a");
+                ctx.stroke();
+            }
+        }
+        CursorKind::Pan => {
+            // four-way pan arrows
+            ctx.begin_path();
+            for (dx, dy) in [(0.0, -10.0), (0.0, 10.0), (-10.0, 0.0), (10.0, 0.0)] {
+                ctx.move_to(x, y);
+                ctx.line_to(x + dx, y + dy);
+                let (px, py) = (x + dx, y + dy);
+                let (ax, ay) = (dx.signum() * 4.0, dy.signum() * 4.0);
+                ctx.move_to(px - ay - ax, py - ax - ay);
+                ctx.line_to(px, py);
+                ctx.line_to(px + ay - ax, py + ax - ay);
+            }
+            outline(ctx);
+            ctx.set_stroke_style_str("#eaf2ff");
+            ctx.stroke();
+        }
+        CursorKind::Move => {
+            ctx.begin_path();
+            ctx.move_to(x, y - 8.0);
+            ctx.line_to(x + 8.0, y);
+            ctx.line_to(x, y + 8.0);
+            ctx.line_to(x - 8.0, y);
+            ctx.close_path();
+            outline(ctx);
+            ctx.set_stroke_style_str("#7dff9a");
+            ctx.stroke();
+            ctx.set_fill_style_str("#7dff9a");
+            ctx.begin_path();
+            let _ = ctx.arc(x, y, 2.0, 0.0, TAU);
+            ctx.fill();
+        }
+        CursorKind::Harvest => {
+            // a cyan crystal
+            ctx.begin_path();
+            ctx.move_to(x, y - 9.0);
+            ctx.line_to(x + 6.0, y - 2.0);
+            ctx.line_to(x + 3.0, y + 7.0);
+            ctx.line_to(x - 3.0, y + 7.0);
+            ctx.line_to(x - 6.0, y - 2.0);
+            ctx.close_path();
+            outline(ctx);
+            ctx.set_fill_style_str("rgba(102,217,232,0.9)");
+            ctx.fill();
+            ctx.set_stroke_style_str("#bdeefc");
+            ctx.stroke();
+        }
+        CursorKind::Attack => {
+            // a red crosshair
+            ctx.begin_path();
+            let _ = ctx.arc(x, y, 7.0, 0.0, TAU);
+            for (dx, dy) in [(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0)] {
+                ctx.move_to(x + dx * 4.0, y + dy * 4.0);
+                ctx.line_to(x + dx * 11.0, y + dy * 11.0);
+            }
+            outline(ctx);
+            ctx.set_stroke_style_str("#ff5a4a");
+            ctx.stroke();
+        }
+        CursorKind::Build => {
+            // a green footprint square with a plus
+            ctx.begin_path();
+            ctx.rect(x - 7.0, y - 7.0, 14.0, 14.0);
+            ctx.move_to(x - 4.0, y);
+            ctx.line_to(x + 4.0, y);
+            ctx.move_to(x, y - 4.0);
+            ctx.line_to(x, y + 4.0);
+            outline(ctx);
+            ctx.set_stroke_style_str("#7dff9a");
+            ctx.stroke();
+        }
+        CursorKind::Rally => {
+            // an amber flag
+            ctx.begin_path();
+            ctx.move_to(x, y + 8.0);
+            ctx.line_to(x, y - 9.0);
+            outline(ctx);
+            ctx.set_stroke_style_str("#ffd36b");
+            ctx.stroke();
+            ctx.begin_path();
+            ctx.move_to(x, y - 9.0);
+            ctx.line_to(x + 10.0, y - 5.5);
+            ctx.line_to(x, y - 2.0);
+            ctx.close_path();
+            ctx.set_fill_style_str("#ffd36b");
+            ctx.fill();
+        }
+    }
+    ctx.restore();
+}
+
+/// The selection arrowhead (also the base of the Select cursor).
 #[cfg(target_arch = "wasm32")]
 fn draw_cursor_arrow(ctx: &web_sys::CanvasRenderingContext2d, x: f64, y: f64) {
     ctx.save();
@@ -416,7 +568,7 @@ pub fn draw(
     _drag: Option<(f32, f32, f32, f32)>,
     _paused: bool,
     _cursor: (f32, f32),
-    _draw_cursor: bool,
+    _cursor_kind: Option<CursorKind>,
     _build_mode: Option<BuildingKind>,
     _card_pressed: Option<usize>,
     _outcome: Option<bool>,
@@ -433,7 +585,7 @@ pub fn draw(
     drag: Option<(f32, f32, f32, f32)>,
     paused: bool,
     cursor: (f32, f32),
-    draw_cursor: bool,
+    cursor_kind: Option<CursorKind>,
     build_mode: Option<BuildingKind>,
     card_pressed: Option<usize>,
     outcome: Option<bool>,
@@ -835,10 +987,11 @@ pub fn draw(
 
     ctx.restore();
 
-    // In-game cursor (pointer locked): the cursor arrives in physical pixels, so
-    // bring it into the CSS space we draw in. Drawn under the pause overlay.
-    if draw_cursor {
-        draw_cursor_arrow(&ctx, (cursor.0 / dpr) as f64, (cursor.1 / dpr) as f64);
+    // In-game context cursor: the OS cursor is hidden during play, so the HUD
+    // draws an order-aware glyph at the tracked position (physical pixels,
+    // brought into the CSS space we draw in). Drawn under the pause overlay.
+    if let Some(kind) = cursor_kind {
+        draw_cursor_glyph(&ctx, (cursor.0 / dpr) as f64, (cursor.1 / dpr) as f64, kind);
     }
 
     // Pause overlay sits on top of everything when the game is paused.

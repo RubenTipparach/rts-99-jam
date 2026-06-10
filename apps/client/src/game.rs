@@ -426,14 +426,16 @@ impl Game {
             self.fx.fire(pos, severity, spread);
         }
 
-        // Mining workers spark against their node.
-        let mines: Vec<([f32; 3], bool)> = self
+        // Mining workers fire a cutting laser at their node: beam from the
+        // tool to the contact point on the crystal pile's core sphere
+        // (radius ~2.2 around the node center), sparks where it bites.
+        let beams: Vec<([f32; 3], [f32; 3], bool)> = self
             .curr
             .iter()
             .filter(|s| s.mining)
             .filter(|s| s.owner == 0 || self.cell_visible(f(s.pos.x), f(s.pos.y)))
-            .map(|s| {
-                let carbon = self
+            .filter_map(|s| {
+                let node = self
                     .curr
                     .iter()
                     .filter(|n| matches!(n.kind, Kind::OreNode | Kind::CarbonNode))
@@ -441,14 +443,22 @@ impl Game {
                         let da = dist_f(s, a);
                         let db = dist_f(s, b);
                         da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .map(|n| n.kind == Kind::CarbonNode)
-                    .unwrap_or(false);
-                (at(s), carbon)
+                    })?;
+                let (wx, wz) = (f(s.pos.x), f(s.pos.y));
+                let (nx, nz) = (f(node.pos.x), f(node.pos.y));
+                let (dx, dz) = (wx - nx, wz - nz);
+                let l = dx.hypot(dz).max(0.001);
+                let contact = [
+                    nx + dx / l * 2.2,
+                    terrain::height(nx, nz) + 2.0,
+                    nz + dz / l * 2.2,
+                ];
+                let from = [wx, terrain::height(wx, wz) + 1.4, wz];
+                Some((from, contact, node.kind == Kind::CarbonNode))
             })
             .collect();
-        for (pos, carbon) in mines {
-            self.fx.mining(pos, carbon);
+        for (from, to, carbon) in beams {
+            self.fx.mining_beam(from, to, carbon);
         }
     }
 
@@ -790,14 +800,22 @@ impl Game {
                     Kind::Hq => 9.0,
                     _ => 8.0,
                 };
-                // Faked 90s contact shadow: a soft dark disc decal under the
-                // footprint (the levelled pad keeps it flat). Reads as
-                // grounding for the Hollowmen and as a hover shadow for the
-                // floating Astromancer shells.
+                // Earth 2150-style ground lights: the building's floodlights
+                // pool warm light on the pad beneath it (two stacked soft
+                // discs; the levelled pad keeps them flat). Fades in with
+                // construction, hugging the footprint better than the old
+                // one-size shadow blob.
+                let glow = 0.16 * cf;
+                rings.push(RingRaw {
+                    center: [wx, ground, wz],
+                    radius: radius * 1.45,
+                    color: [1.0, 0.82, 0.50, glow * 0.5],
+                    inner: 0.0,
+                });
                 rings.push(RingRaw {
                     center: [wx, ground, wz],
                     radius: radius * 1.08,
-                    color: [0.0, 0.0, 0.0, 0.38 * cf],
+                    color: [1.0, 0.86, 0.55, glow],
                     inner: 0.0,
                 });
                 match s.kind {
@@ -1469,6 +1487,41 @@ impl Game {
         self.curr
             .iter()
             .any(|s| s.index == unit && s.kind == Kind::Worker)
+    }
+
+    /// What the current selection can do, for the context cursor:
+    /// `(any mobile units, any workers, a production building)`.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn selection_profile(&self) -> (bool, bool, bool) {
+        let sel: HashSet<u32> = self.selected.iter().copied().collect();
+        let mut units = false;
+        let mut workers = false;
+        for s in &self.curr {
+            if !sel.contains(&s.index) {
+                continue;
+            }
+            match s.kind {
+                Kind::Worker => {
+                    units = true;
+                    workers = true;
+                }
+                Kind::Infantry | Kind::Heavy => units = true,
+                _ => {}
+            }
+        }
+        (units, workers, self.selected_producer().is_some())
+    }
+
+    /// A visible enemy under the point (context cursor: attack).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn hover_enemy(&self, wx: f32, wz: f32) -> bool {
+        self.nearest_enemy(wx, wz, 5.0).is_some()
+    }
+
+    /// A resource node under the point (context cursor: harvest).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn hover_node(&self, wx: f32, wz: f32) -> bool {
+        self.nearest_node(wx, wz, 10.0).is_some()
     }
 
     fn ping(&mut self, ping: Ping, wx: f32, wz: f32, target: Option<u32>) {

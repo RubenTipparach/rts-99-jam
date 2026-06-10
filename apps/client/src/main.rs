@@ -962,6 +962,9 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.screen != menu::Screen::InGame {
                     self.game.skip_tick();
                     let (w, h) = self.dims();
+                    if let Some(win) = &self.window {
+                        win.set_cursor_visible(true);
+                    }
                     menu::draw(
                         self.screen,
                         &self.lobby,
@@ -1004,6 +1007,9 @@ impl ApplicationHandler<UserEvent> for App {
                     let (w, h) = self.dims();
                     // Paused: the OS cursor is back (lock released), so the HUD
                     // does not draw its own.
+                    if let Some(win) = &self.window {
+                        win.set_cursor_visible(true);
+                    }
                     hud::draw(
                         &self.camera,
                         &self.game,
@@ -1012,7 +1018,7 @@ impl ApplicationHandler<UserEvent> for App {
                         None,
                         true,
                         self.input.cursor,
-                        false,
+                        None,
                         None,
                         None,
                         self.outcome,
@@ -1028,16 +1034,16 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.input.cursor_in && !self.pointer_is_touch && !self.input.middle_down {
                     let (sw, sh) = self.dims();
                     let (cx, cy) = self.input.cursor;
-                    // The minimap now lives at the screen edge, so a cursor over
-                    // it (or actively scrubbing it) must not also edge-pan.
+                    // Never edge-pan from over the in-game UI (command bar,
+                    // its buttons, the minimap) or while scrubbing the minimap.
                     #[cfg(target_arch = "wasm32")]
-                    let blocked = self.input.minimap_drag || {
-                        let (x0, y0, x1, y1) = hud::minimap_rect(sw, sh);
-                        cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1
-                    };
+                    let blocked =
+                        self.input.minimap_drag || hud::over_ui(&self.game, cx, cy, sw, sh);
                     #[cfg(not(target_arch = "wasm32"))]
                     let blocked = false;
-                    const EDGE: f32 = 28.0;
+                    // A hair-trigger zone: panning only from the outermost
+                    // pixels, so the cursor can rest anywhere on screen.
+                    const EDGE: f32 = 2.0;
                     if !blocked && sw > 1.0 && sh > 1.0 {
                         if cx <= EDGE {
                             right -= 1.0;
@@ -1097,6 +1103,47 @@ impl ApplicationHandler<UserEvent> for App {
                 let (w, h) = self.dims();
                 // When the pointer is locked the browser hides the OS cursor, so
                 // the HUD draws our own at the tracked position.
+                // Context cursor: the OS cursor hides during play and the
+                // HUD draws an order-aware glyph instead.
+                if let Some(win) = &self.window {
+                    win.set_cursor_visible(false);
+                }
+                let cursor_kind = {
+                    let (cx, cy) = self.input.cursor;
+                    #[cfg(target_arch = "wasm32")]
+                    let on_ui = hud::over_ui(&self.game, cx, cy, w, h);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let on_ui = false;
+                    const EDGE: f32 = 2.0;
+                    let at_edge = self.input.cursor_in
+                        && !self.pointer_is_touch
+                        && (cx <= EDGE || cy <= EDGE || cx >= w - EDGE || cy >= h - EDGE);
+                    if self.build_mode.is_some() {
+                        hud::CursorKind::Build
+                    } else if self.input.middle_down || (at_edge && !on_ui) {
+                        hud::CursorKind::Pan
+                    } else if self.input.shift {
+                        hud::CursorKind::AddSelect
+                    } else if on_ui {
+                        hud::CursorKind::Select
+                    } else {
+                        let (units, workers, producer) = self.game.selection_profile();
+                        match self.camera.ground_pick(cx, cy, w, h) {
+                            Some((wx, wz)) if units && self.game.hover_enemy(wx, wz) => {
+                                hud::CursorKind::Attack
+                            }
+                            Some((wx, wz)) if workers && self.game.hover_node(wx, wz) => {
+                                hud::CursorKind::Harvest
+                            }
+                            Some((wx, wz)) if producer && self.game.hover_node(wx, wz) => {
+                                hud::CursorKind::Harvest
+                            }
+                            Some(_) if producer && !units => hud::CursorKind::Rally,
+                            Some(_) if units => hud::CursorKind::Move,
+                            _ => hud::CursorKind::Select,
+                        }
+                    }
+                };
                 hud::draw(
                     &self.camera,
                     &self.game,
@@ -1105,7 +1152,7 @@ impl ApplicationHandler<UserEvent> for App {
                     drag_rect,
                     false,
                     self.input.cursor,
-                    self.cursor_locked,
+                    Some(cursor_kind),
                     self.build_mode,
                     self.card_flash
                         .and_then(|(k, t)| (t.elapsed().as_secs_f32() < 0.15).then_some(k)),

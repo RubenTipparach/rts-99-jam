@@ -211,19 +211,40 @@ impl Fx {
         }
     }
 
-    /// A worker chipping at a node: crystal sparks + a soft teal glint.
-    pub fn mining(&mut self, pos: [f32; 3], carbon: bool) {
-        let p = [pos[0], pos[1] + 1.0, pos[2]];
+    /// A worker's mining laser: a bead-chain beam from the tool to the
+    /// crystal's contact point, with sparks and a glint where it bites.
+    /// Re-fed every sim tick while mining, so the beam reads continuous
+    /// (the short-lived beads stay in their white-hot birth phase).
+    pub fn mining_beam(&mut self, from: [f32; 3], to: [f32; 3], carbon: bool) {
         let color = if carbon {
             [0.45, 0.95, 0.55]
         } else {
             [0.55, 0.90, 1.0]
         };
-        self.burst(p, color, 2, 3.5, 0.4, 0.18, 0.9);
+        let d = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(0.001);
+        let n = ((len / 1.1).ceil() as usize).clamp(2, 24);
+        for k in 0..n {
+            if self.particles.len() >= MAX_PARTICLES {
+                break;
+            }
+            let t = (k as f32 + 0.5) / n as f32;
+            self.particles.push(Particle {
+                pos: [from[0] + d[0] * t, from[1] + d[1] * t, from[2] + d[2] * t],
+                vel: [0.0, 0.0, 0.0],
+                life: 0.12,
+                max_life: 0.12,
+                size: 0.2,
+                color,
+                weight: 0.0,
+            });
+        }
+        // Impact: crystal chips fly off the contact point under a glint.
+        self.burst(to, color, 2, 4.5, 0.4, 0.18, 0.8);
         self.light(
-            p,
-            6.0,
-            [color[0] * 0.6, color[1] * 0.6, color[2] * 0.6],
+            to,
+            7.0,
+            [color[0] * 0.7, color[1] * 0.7, color[2] * 0.7],
             0.15,
         );
     }
