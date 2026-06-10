@@ -179,32 +179,55 @@ def _craters(ht, mat, seed, count):
                     mat[kk][ii] = MAT_ACCENT              # bright ejecta rays
 
 
+# Land bridges across fissures: without them a long linea is a moat (its walls
+# are far steeper than units can walk) and can cut whole regions off the map.
+# Every BRIDGE_EVERY steps along a fissure the cut tapers to nothing, leaving
+# an uncut span of surface crossing the trench at natural ground height.
+BRIDGE_EVERY = 56   # steps (~grid cells) between bridge centres
+BRIDGE_RAMP = 5.0   # steps over which the cut eases from full depth to zero
+
+
 def _fissures(ht, mat, seed, n, depth, halfw):
     """Europa-style long, deep, narrow fissures (lineae) carved across the map.
 
     Accumulate a max-depth cut map (so overlapping steps do not stack into a
-    bottomless trench), then apply it once.
+    bottomless trench), then apply it once. Periodic land bridges (see
+    BRIDGE_EVERY above) keep the regions on either side connected for ground
+    units.
     """
     rng = Rng(seed * 17 + 1)
     cut = [[0.0] * NXZ for _ in range(NXZ)]
+    bridge_half = halfw + 2.0  # half-span of the fully uncut crossing, in steps
     for _ in range(n):
         x, z = rng.uniform(0, NXZ), rng.uniform(0, NXZ)
         ang = rng.uniform(0, 2 * math.pi)
         length = int(NXZ * rng.uniform(0.8, 1.4))
-        for _ in range(length):
+        phase = rng.uniform(0, BRIDGE_EVERY)
+        for s in range(length):
             x += math.cos(ang)
             z += math.sin(ang)
             ang += (rng.rand() - 0.5) * 0.18
             if not (0 <= x < NXZ and 0 <= z < NXZ):
                 break
+            # Distance (in steps) to the nearest bridge centre along this
+            # fissure; inside `bridge_half` nothing is carved, then the depth
+            # eases back in over BRIDGE_RAMP steps (smoothstep, so the trench
+            # ends ramp instead of dropping off a cliff face).
+            t = (s + phase) % BRIDGE_EVERY
+            t = min(t, BRIDGE_EVERY - t)
+            sc = clamp((t - bridge_half) / BRIDGE_RAMP, 0.0, 1.0)
+            sc = sc * sc * (3.0 - 2.0 * sc)
+            if sc <= 0.0:
+                continue
             for dk in range(-halfw, halfw + 1):
                 for di in range(-halfw, halfw + 1):
                     ii, kk = int(x + di), int(z + dk)
                     if 0 <= ii < NXZ and 0 <= kk < NXZ:
                         dd = math.hypot(di, dk) / (halfw + 0.5)
                         if dd < 1.0:
-                            cut[kk][ii] = max(cut[kk][ii], depth * (1.0 - dd * dd))
-                            mat[kk][ii] = MAT_ACCENT
+                            cut[kk][ii] = max(cut[kk][ii], sc * depth * (1.0 - dd * dd))
+                            if sc > 0.5:
+                                mat[kk][ii] = MAT_ACCENT
     for k in range(NXZ):
         for i in range(NXZ):
             ht[k][i] -= cut[k][i]
