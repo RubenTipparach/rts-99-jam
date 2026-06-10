@@ -37,7 +37,7 @@ the asymmetry:
 | ⚙️ Hollowmen | None: they deny it (null-fields) and burn allies' bottled magic | Generate (reactors) | "We make our own power" |
 | 🐱 Ninefold (cats) | Generate, tied to a lunar cycle | None | Run on "instinct" |
 | 🐀 Warren (rats) | Scavenge from salvage and the converted dead | None | Run on "genetics" |
-| 🦑 Rimelings | Cannot produce; drain it from nearby enemy casters (plus a trickle from ether-collectors) | Generate (reactors) | The only faction on both energies |
+| 🦑 Rimelings (note might change to leviathans) | Cannot produce; drain it from nearby enemy casters (plus a trickle from ether-collectors) | Generate (reactors) | The only faction on both energies |
 
 **Signature resources.** Two factions layer a unique progression resource on top
 of the shared five, each drawn from that faction's own core loop:
@@ -45,7 +45,7 @@ of the shared five, each drawn from that faction's own core loop:
 | Faction | Resource | Income | Spent on |
 |---|---|---|---|
 | 🐱 Ninefold | ⭐ Instinct | An XP pool banked when their *own* units fall: the experience of the dead returns to the living | Granting **individual** cats new abilities; you customize each character one by one |
-| 🐀 Warren | 🥚 Genetics | Grows with the population: every rat bred, and every enemy turned by plague, deepens the gene-pool | **Pivoting the swarm**: adapting its traits / genes (and buildings) to counter whatever the enemy fields |
+| 🐀 Warren | 🧬 Genetics | Grows with the population: every rat bred, and every enemy turned by plague, deepens the gene-pool | **Pivoting the swarm**: adapting its traits / genes (and buildings) to counter whatever the enemy fields |
 
 The two mirror each other twice over. In **income**, the cats bank the *dead* and
 the rats bank the *born*. In **spending**, the cats specialize the *individual*
