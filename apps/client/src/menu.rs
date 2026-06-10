@@ -371,100 +371,94 @@ mod web {
         v
     }
 
-    /// A diamond (isometric) thumbnail of a world: its surface colour plus the
-    /// landform that defines it (craters / seas / volcanoes) and the player (blue)
-    /// vs enemy (red) starts. Oriented as a diamond to match the in-game camera.
-    fn draw_diamond(ctx: &Ctx, cx: f64, cy: f64, a: f64, b: f64, idx: usize) {
-        use std::f64::consts::TAU;
-        let sw = crate::voxel::MAP_SWATCH[idx];
-        let name = crate::voxel::MAP_NAMES[idx];
-        let shade = |m: f64| {
-            format!(
-                "rgb({},{},{})",
-                (sw[0] as f64 * m) as u8,
-                (sw[1] as f64 * m) as u8,
-                (sw[2] as f64 * m) as u8
-            )
-        };
-        // Map the unit square to an iso diamond centred at (cx, cy): the four
-        // square corners become top / right / bottom / left of the diamond.
-        let iso = |u: f64, t: f64| (cx + (u - t) * a, cy + (u + t - 1.0) * b);
-        let corners = [iso(0.0, 0.0), iso(1.0, 0.0), iso(1.0, 1.0), iso(0.0, 1.0)];
-        let path = |c: &[(f64, f64); 4]| {
-            ctx.begin_path();
-            ctx.move_to(c[0].0, c[0].1);
-            for p in &c[1..] {
-                ctx.line_to(p.0, p.1);
-            }
-            ctx.close_path();
-        };
-        path(&corners);
-        ctx.set_fill_style_str(&shade(1.0));
-        ctx.fill();
+    thread_local! {
+        /// Decoded preview RGBA per map (the embedded PNGs, decoded once).
+        static PREVIEW_RGBA: std::cell::RefCell<std::collections::HashMap<usize, (u32, u32, Vec<u8>)>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+        /// Nearest-scaled `ImageData` per (map, target width), rebuilt on resize.
+        static PREVIEW_SCALED: std::cell::RefCell<std::collections::HashMap<(usize, u32), web_sys::ImageData>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
 
-        // Wrapping: the splitmix constant overflows u64 for any idx >= 2, which
-        // panics in builds with overflow checks (it nuked the lobby in prod).
-        let mut s: u64 = (idx as u64)
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            .wrapping_add(1);
-        let mut rnd = || {
-            s = s
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            ((s >> 33) & 0xFFFF) as f64 / 65535.0
-        };
-        let dot = |u: f64, t: f64, r: f64, col: &str| {
+    /// The pre-rendered 3D battlefield preview (the actual voxel terrain
+    /// rasterized at the game camera angle, embedded as a PNG), blitted
+    /// centred at `(cx, cy)` and fitted inside the `2a x 2b` box. The blit is
+    /// in physical pixels (putImageData ignores the canvas transform), and the
+    /// PNG bakes the lobby backdrop colour so it composes seamlessly. Player
+    /// (blue) and enemy (red) start markers overlay the terrain.
+    fn draw_map_preview(ctx: &Ctx, cx: f64, cy: f64, a: f64, b: f64, idx: usize) {
+        use std::f64::consts::TAU;
+        let d = dpr() as f64;
+        // Decode the PNG once per map.
+        let (iw, ih) = PREVIEW_RGBA.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let (iw, ih, _) = cache.entry(idx).or_insert_with(|| {
+                match image::load_from_memory(crate::voxel::MAP_PREVIEWS[idx]) {
+                    Ok(img) => {
+                        let rgba = img.to_rgba8();
+                        (rgba.width(), rgba.height(), rgba.into_raw())
+                    }
+                    Err(_) => (1, 1, vec![11, 18, 36, 255]),
+                }
+            });
+            (*iw, *ih)
+        });
+        // Fit inside the box, preserving the render's aspect.
+        let scale = (2.0 * a * d / iw as f64).min(2.0 * b * d / ih as f64);
+        let (tw, th) = (
+            ((iw as f64 * scale) as u32).max(1),
+            ((ih as f64 * scale) as u32).max(1),
+        );
+        let ok = PREVIEW_SCALED.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if !cache.contains_key(&(idx, tw)) {
+                let scaled = PREVIEW_RGBA.with(|src| {
+                    let src = src.borrow();
+                    let (iw, ih, rgba) = src.get(&idx).unwrap();
+                    let mut out = vec![0u8; (tw * th * 4) as usize];
+                    for y in 0..th {
+                        let sy = (y as u64 * *ih as u64 / th as u64) as u32;
+                        for x in 0..tw {
+                            let sx = (x as u64 * *iw as u64 / tw as u64) as u32;
+                            let si = ((sy * iw + sx) * 4) as usize;
+                            let di = ((y * tw + x) * 4) as usize;
+                            out[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+                        }
+                    }
+                    out
+                });
+                let Ok(data) = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+                    wasm_bindgen::Clamped(&scaled),
+                    tw,
+                    th,
+                ) else {
+                    return false;
+                };
+                cache.insert((idx, tw), data);
+            }
+            let data = cache.get(&(idx, tw)).unwrap();
+            ctx.put_image_data(data, cx * d - tw as f64 / 2.0, cy * d - th as f64 / 2.0)
+                .is_ok()
+        });
+        if !ok {
+            return;
+        }
+        // Start markers, in the diamond's unit-square coordinates: the player
+        // main sits south, the two enemy mains north (see the baked map).
+        let half_w = tw as f64 / (2.0 * d);
+        let half_h = th as f64 / (2.0 * d);
+        let iso = |u: f64, t: f64| (cx + (u - t) * half_w, cy + (u + t - 1.0) * half_h * 0.92);
+        let dot = |u: f64, t: f64, col: &str| {
             let (px, py) = iso(u, t);
             ctx.set_fill_style_str(col);
             ctx.begin_path();
-            let _ = ctx.ellipse(px, py, r, r * 0.6, 0.0, 0.0, TAU);
+            let _ = ctx.ellipse(px, py, half_w * 0.035, half_w * 0.021, 0.0, 0.0, TAU);
             ctx.fill();
         };
-        let rr = a * 0.07;
-        if name == "EARTH" {
-            for _ in 0..6 {
-                dot(
-                    0.18 + rnd() * 0.64,
-                    0.18 + rnd() * 0.64,
-                    rr * 1.7,
-                    "#2f6dab",
-                );
-            }
-            dot(0.6, 0.42, rr, "#e8eef4");
-        } else if name == "TITAN" {
-            for _ in 0..4 {
-                dot(
-                    0.18 + rnd() * 0.64,
-                    0.18 + rnd() * 0.64,
-                    rr * 1.8,
-                    "#23252f",
-                );
-            }
-        } else if name == "IO" {
-            for _ in 0..4 {
-                let (u, t) = (0.22 + rnd() * 0.56, 0.22 + rnd() * 0.56);
-                dot(u, t, rr * 1.6, &shade(1.15));
-                dot(u, t, rr * 0.7, "#ec7a2c");
-            }
-        } else {
-            let n = if matches!(name, "ENCELADUS" | "TRITON" | "PLUTO" | "MARS") {
-                5
-            } else {
-                11
-            };
-            for _ in 0..n {
-                let (u, t) = (0.14 + rnd() * 0.72, 0.14 + rnd() * 0.72);
-                dot(u, t, rr * 1.1, &shade(1.25));
-                dot(u, t, rr * 0.7, &shade(0.7));
-            }
-        }
-        dot(0.3, 0.3, rr * 0.9, "#4aa3ff");
-        dot(0.7, 0.7, rr * 0.9, "#ff5a4a");
-
-        path(&corners);
-        ctx.set_stroke_style_str("rgba(120,160,210,0.95)");
-        ctx.set_line_width(1.5);
-        ctx.stroke();
+        // World (x, z) -> unit square: u = (x + 512) / 1024, t = (z + 512) / 1024.
+        dot(0.5, 0.705, "#4aa3ff"); // player main (0, 210)
+        dot(0.353, 0.314, "#ff5a4a"); // enemy main NW (-150, -190)
+        dot(0.646, 0.314, "#ff5a4a"); // enemy main NE (150, -190)
     }
 
     /// The scrollable map-select modal: a list (with scrollbar) on the left and a
@@ -532,7 +526,7 @@ mod web {
         ));
         let _ = ctx.fill_text(crate::voxel::MAP_NAMES[mi], pcx, my + 92.0 * s);
         let pa = (mx + mw - 30.0 * s - px) * 0.46;
-        draw_diamond(ctx, pcx, my + mh * 0.52, pa, pa * 0.6, mi);
+        draw_map_preview(ctx, pcx, my + mh * 0.52, pa, pa * 0.75, mi);
         ctx.set_text_align("left");
     }
 
@@ -618,7 +612,7 @@ mod web {
                     rx,
                     326.0 * s,
                 );
-                draw_diamond(&ctx, rx + 190.0 * s, 432.0 * s, 180.0 * s, 95.0 * s, mi);
+                draw_map_preview(&ctx, rx + 190.0 * s, 432.0 * s, 180.0 * s, 100.0 * s, mi);
             }
             Screen::InGame => {}
         }
