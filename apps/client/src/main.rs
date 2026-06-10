@@ -551,7 +551,7 @@ impl ApplicationHandler<UserEvent> for App {
                 #[cfg(target_arch = "wasm32")]
                 if self.screen != menu::Screen::InGame {
                     if button == MouseButton::Left && state == ElementState::Pressed {
-                        match menu::hit(self.screen, &self.lobby, cx, cy) {
+                        match menu::hit(self.screen, &self.lobby, cx, cy, w, h) {
                             menu::Click::Skirmish => self.screen = menu::Screen::Lobby,
                             menu::Click::SetFaction(f) => self.lobby.faction = f,
                             menu::Click::AddBot => self.lobby.bots = (self.lobby.bots + 1).min(3),
@@ -730,34 +730,14 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                 }
-                // Front-end screens (web): freeze the sim and draw the menu/lobby
-                // over a static render of the scene, then skip the game loop.
+                // Front-end screens (web): the match has not started, so freeze the
+                // sim and draw the menu/lobby on its own opaque backdrop. The 3D
+                // scene is not rendered (no map is chosen yet).
                 #[cfg(target_arch = "wasm32")]
                 if self.screen != menu::Screen::InGame {
                     self.game.skip_tick();
-                    if let Some(gfx) = self.gfx.as_mut() {
-                        let aspect = gfx.aspect();
-                        let (infantry, b_astro, b_hollow, acolytes, engineers, ore, carbon, rings) =
-                            self.game.render_data();
-                        let fow = self.game.fow_bytes();
-                        let vp = self.camera.view_proj(aspect);
-                        gfx.render(
-                            &infantry,
-                            &b_astro,
-                            &b_hollow,
-                            &acolytes,
-                            &engineers,
-                            &ore,
-                            &carbon,
-                            &rings,
-                            &fow,
-                            vp,
-                            self.camera.eye(),
-                            self.game.time(),
-                        );
-                    }
-                    menu::draw(self.screen, &self.lobby);
-                    #[cfg(target_arch = "wasm32")]
+                    let (w, h) = self.dims();
+                    menu::draw(self.screen, &self.lobby, w, h);
                     if self.gfx.is_some() && !self.first_frame_done {
                         self.first_frame_done = true;
                         hide_loading();

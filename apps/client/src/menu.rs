@@ -207,13 +207,23 @@ mod web {
         v
     }
 
-    fn ctx() -> Option<(Ctx, f64, f64, f32)> {
+    /// Fetch the HUD canvas context, sizing the backing buffer to the screen
+    /// (physical pixels) so the front-end fills it - the in-game HUD sizes the
+    /// same canvas, but it never runs on the menu screens. Returns the context
+    /// plus the CSS width/height to lay out in, and the device pixel ratio.
+    fn ctx(w_phys: f64, h_phys: f64) -> Option<(Ctx, f64, f64, f32)> {
         let win = web_sys::window()?;
         let canvas = win
             .document()?
             .get_element_by_id("hud")?
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .ok()?;
+        if w_phys >= 2.0 && canvas.width() != w_phys as u32 {
+            canvas.set_width(w_phys as u32);
+        }
+        if h_phys >= 2.0 && canvas.height() != h_phys as u32 {
+            canvas.set_height(h_phys as u32);
+        }
         let ctx = canvas.get_context("2d").ok()??.dyn_into::<Ctx>().ok()?;
         let d = dpr();
         let _ = ctx.set_transform(d as f64, 0.0, 0.0, d as f64, 0.0, 0.0);
@@ -455,12 +465,18 @@ mod web {
         ctx.set_text_align("left");
     }
 
-    pub fn draw(screen: Screen, lobby: &Lobby) {
-        let Some((ctx, w, h, _)) = ctx() else { return };
+    pub fn draw(screen: Screen, lobby: &Lobby, w_phys: f32, h_phys: f32) {
+        let Some((ctx, w, h, _)) = ctx(w_phys as f64, h_phys as f64) else {
+            return;
+        };
         ctx.clear_rect(0.0, 0.0, w, h);
-        // Dim the 3D scene behind the front-end.
-        ctx.set_fill_style_str("rgba(4,7,14,0.82)");
+        // Opaque backdrop: the match hasn't started (no map chosen yet), so the
+        // front-end fully covers the scene rather than dimming it. Two dark bands
+        // give a touch of depth without needing the gradient API.
+        ctx.set_fill_style_str("#070b16");
         ctx.fill_rect(0.0, 0.0, w, h);
+        ctx.set_fill_style_str("#0b1224");
+        ctx.fill_rect(0.0, 0.0, w, h * 0.5);
 
         ctx.set_text_baseline("alphabetic");
         match screen {
@@ -535,8 +551,15 @@ mod web {
         ctx.set_text_baseline("alphabetic");
     }
 
-    pub fn hit(screen: Screen, lobby: &Lobby, cx_phys: f32, cy_phys: f32) -> Click {
-        let Some((_, w, h, d)) = ctx() else {
+    pub fn hit(
+        screen: Screen,
+        lobby: &Lobby,
+        cx_phys: f32,
+        cy_phys: f32,
+        w_phys: f32,
+        h_phys: f32,
+    ) -> Click {
+        let Some((_, w, h, d)) = ctx(w_phys as f64, h_phys as f64) else {
             return Click::None;
         };
         let (cx, cy) = ((cx_phys / d) as f64, (cy_phys / d) as f64);
