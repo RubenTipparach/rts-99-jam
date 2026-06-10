@@ -504,17 +504,47 @@ impl World {
         self.passable[(iy * self.pass_n + ix) as usize]
     }
 
-    /// Move entity `i` to `(nx, ny)` if the terrain allows; a blocked step
-    /// slides along whichever single axis stays open, so units skirt water
-    /// and cliffs instead of walking into them.
+    /// True when stepping from `from` to `(x, y)` would walk into a static
+    /// footprint (building or resource node). A unit already overlapping a
+    /// footprint may keep moving (so the separation push can evict it);
+    /// only entering is blocked. Fixed iteration order, pure predicate.
+    fn obstacle_blocked(&self, from: Vec3, x: Fx, y: Fx) -> bool {
+        for j in 0..self.arena.capacity() {
+            if !self.arena.alive[j] {
+                continue;
+            }
+            if let Some(r) = obstacle_radius(self.kind[j]) {
+                let rr = r + UNIT_RADIUS;
+                let dx = x - self.pos[j].x;
+                let dy = y - self.pos[j].y;
+                if dx * dx + dy * dy < rr * rr {
+                    let fx_ = from.x - self.pos[j].x;
+                    let fy_ = from.y - self.pos[j].y;
+                    if fx_ * fx_ + fy_ * fy_ >= rr * rr {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Whether a mobile unit standing at `from` may step onto `(x, y)`.
+    fn spot_free(&self, from: Vec3, x: Fx, y: Fx) -> bool {
+        self.cell_passable(x, y) && !self.obstacle_blocked(from, x, y)
+    }
+
+    /// Move entity `i` to `(nx, ny)` if the terrain and footprints allow; a
+    /// blocked step slides along whichever single axis stays open, so units
+    /// skirt water, cliffs and buildings instead of walking into them.
     fn try_move(&mut self, i: usize, nx: Fx, ny: Fx) {
         let cur = self.pos[i];
-        if self.cell_passable(nx, ny) {
+        if self.spot_free(cur, nx, ny) {
             self.pos[i].x = nx;
             self.pos[i].y = ny;
-        } else if self.cell_passable(nx, cur.y) {
+        } else if self.spot_free(cur, nx, cur.y) {
             self.pos[i].x = nx;
-        } else if self.cell_passable(cur.x, ny) {
+        } else if self.spot_free(cur, cur.x, ny) {
             self.pos[i].y = ny;
         }
     }

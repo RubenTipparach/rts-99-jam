@@ -101,6 +101,16 @@ const MAX_PAD_CUT: f32 = 3.0;
 /// anything steeper is fed to the sim as impassable, along with water.
 const MAX_WALK_SLOPE: f32 = 1.3;
 
+/// Building placement locks to this grid pitch (world units): structures
+/// line up into predictable lanes, and the placement preview can show a
+/// per-cell validity dot-grid.
+const BUILD_GRID: f32 = 4.0;
+
+/// Snap a world coordinate onto the build grid.
+fn snap(v: f32) -> f32 {
+    (v / BUILD_GRID).round() * BUILD_GRID
+}
+
 /// A build order awaiting its worker: a placed hologram holds the site until
 /// the structure spawns (or the order quietly dies and the ghost times out).
 struct PendingBuild {
@@ -1037,9 +1047,12 @@ impl Game {
                 }
             }
         }
-        // Build-placement hologram: the pending building at the cursor, tinted
-        // by whether the site is clear, with a footprint ring (StarCraft-style).
-        if let Some((kind, gx, gz)) = ghost {
+        // Build-placement hologram: the pending building at the cursor
+        // (snapped to the build grid), tinted by whether the site is clear,
+        // with a footprint ring (StarCraft-style) and a validity dot-grid
+        // showing at a glance where placement is legal nearby.
+        if let Some((kind, cx, cz)) = ghost {
+            let (gx, gz) = (snap(cx), snap(cz));
             let ok = self.site_ok(kind, gx, gz);
             // Alpha >= 2.0 flags the hologram path in the unit shader.
             let holo = if ok {
@@ -1079,6 +1092,25 @@ impl Game {
                 color: [holo[0], holo[1], holo[2], 0.85],
                 inner: RING,
             });
+            // Validity dots: one per build-grid cell around the cursor,
+            // green where this building could go, red where it can't.
+            const DOTS: i32 = 5; // cells each side of the cursor
+            for dk in -DOTS..=DOTS {
+                for di in -DOTS..=DOTS {
+                    let (px, pz) = (gx + di as f32 * BUILD_GRID, gz + dk as f32 * BUILD_GRID);
+                    let col = if self.site_ok(kind, px, pz) {
+                        [0.30, 1.0, 0.50, 0.55]
+                    } else {
+                        [1.0, 0.28, 0.22, 0.45]
+                    };
+                    rings.push(RingRaw {
+                        center: [px, terrain::height(px, pz), pz],
+                        radius: 0.45,
+                        color: col,
+                        inner: 0.0,
+                    });
+                }
+            }
         }
 
         // Placed holograms: every pending build order keeps a denser ghost on
@@ -1475,6 +1507,9 @@ impl Game {
     /// ghost shows in red (the sim separately enforces clearance on arrival).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn build_selected(&mut self, kind: BuildingKind, wx: f32, wz: f32) {
+        // Placement locks to the build grid (matching the preview ghost), so
+        // structures align into predictable lanes units can path through.
+        let (wx, wz) = (snap(wx), snap(wz));
         if !self.site_ok(kind, wx, wz) {
             return;
         }
