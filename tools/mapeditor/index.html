@@ -2,22 +2,16 @@
 <!--
   Astromancers voxel map editor (dev tool, not part of the game).
 
-  Loads the baked .vxl battlefields from assets/maps, lets you tinker with the
-  terrain (height, material, buildable, liquid) on a top-down view, and exports a
-  .vxl you can drop back into assets/maps and commit. It speaks the same VXL1
-  format as assets/worldgen/voxel.py and apps/client/src/voxel.rs, and uses the
-  browser's native zlib (Compression Streams, "deflate") so there are no deps.
+  Loads the baked .vxl battlefields from assets/maps and edits them. The map is a
+  3D density field (VXL1; see assets/worldgen/voxel.py), so this edits the density
+  directly: a 2D top-down heightfield brush for broad shaping, and a true 3D voxel
+  brush (add / carve spheres) for overhangs, caves and detail. The 3D view is the
+  marching-cubes surface, textured with the world's tiles (triplanar), so it looks
+  like the game. Export writes a .vxl you can drop into assets/maps and commit.
 
-  This is a heightfield + material-strata editor: an edited column is rebuilt as a
-  single-surface column (skin over subsurface), so carved caves/overhangs in
-  columns you paint are flattened. Untouched columns are written back verbatim,
-  so existing 3D features elsewhere are preserved. Author full 3D features in the
-  Python pipeline (assets/worldgen).
-
-  Run it over http so the presets can be fetched, e.g. from the repo root:
-      python3 -m http.server
-  then open  http://localhost:8000/tools/mapeditor/
-  (or just open this file and use "Load .vxl file" to pick a map by hand).
+  No dependencies: WebGL2 for 3D, the browser's native zlib (Compression Streams,
+  "deflate") for the .vxl payload. Serve over http so presets + tiles can be
+  fetched (python3 -m http.server from the repo root), or use "Load .vxl file".
 -->
 <html lang="en">
 <head>
@@ -32,7 +26,7 @@
     background: #0b0e16; color: #c7d3e6; display: flex; height: 100vh;
   }
   #side {
-    width: 280px; flex: 0 0 280px; padding: 12px; overflow-y: auto;
+    width: 290px; flex: 0 0 290px; padding: 12px; overflow-y: auto;
     background: #11151f; border-right: 1px solid #1d2433;
   }
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -41,8 +35,7 @@
   .pane[hidden] { display: none; }
   #pane3d { border-left: 1px solid #1d2433; }
   canvas { image-rendering: pixelated; background: #000; box-shadow: 0 0 0 1px #1d2433; cursor: crosshair; }
-  #cv3 { image-rendering: auto; box-shadow: none; cursor: grab; width: 100%; height: 100%; }
-  #cv3:active { cursor: grabbing; }
+  #cv3 { image-rendering: auto; box-shadow: none; cursor: crosshair; width: 100%; height: 100%; }
   h1 { font-size: 14px; margin: 0 0 2px; color: #e7eefa; letter-spacing: .04em; }
   .sub { color: #6c7d99; margin: 0 0 12px; font-size: 11px; }
   h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #7f93b8; margin: 16px 0 6px; }
@@ -57,6 +50,7 @@
   button.on { background: #2a5a96; border-color: #3a78c8; color: #eaf2ff; }
   .row { display: flex; gap: 6px; flex-wrap: wrap; }
   .row > button { width: auto; flex: 1 1 calc(50% - 3px); }
+  .grid3 > button { width: auto; flex: 1 1 calc(33% - 4px); }
   .mat { display: flex; gap: 6px; flex-wrap: wrap; }
   .mat > button { width: auto; flex: 1 1 calc(33% - 4px); padding: 6px 2px; font-size: 11px; }
   .sw { display: inline-block; width: 9px; height: 9px; margin-right: 4px; vertical-align: middle; border: 1px solid #0006; }
@@ -91,24 +85,25 @@
     <button data-ov="build">Buildable</button>
     <button data-ov="liq">Liquid</button>
   </div>
-  <label>3D height exaggeration <span class="val" id="exv">3.0</span></label>
-  <input id="exag" type="range" min="1" max="8" step="0.5" value="3">
-  <p class="note">3D: left-drag paints with the current tool, right-drag orbits, shift-drag (or middle) pans, wheel zooms. Split paints in 2D and updates 3D live.</p>
+  <p class="note">3D: left-drag = current tool, right-drag orbits, shift/middle-drag pans, wheel zooms.</p>
 
   <h2>Tool</h2>
-  <div class="row" id="tools">
-    <button data-tool="raise" class="on">Raise</button>
+  <div class="row grid3" id="tools">
+    <button data-tool="voxadd" class="on">Voxel +</button>
+    <button data-tool="voxsub">Voxel -</button>
+    <button data-tool="mat">Paint mat</button>
+    <button data-tool="raise">Raise</button>
     <button data-tool="lower">Lower</button>
     <button data-tool="smooth">Smooth</button>
     <button data-tool="flatten">Flatten</button>
-    <button data-tool="mat">Paint mat</button>
     <button data-tool="build">Buildable</button>
     <button data-tool="liquid">Liquid</button>
     <button data-tool="pick">Eyedrop</button>
   </div>
+  <p class="note">Voxel +/- add or carve solid in 3D (overhangs, caves). The others shape the heightfield surface.</p>
 
-  <label>Brush radius <span class="val" id="rv">14</span></label>
-  <input id="radius" type="range" min="1" max="60" value="14">
+  <label>Brush radius <span class="val" id="rv">10</span></label>
+  <input id="radius" type="range" min="1" max="48" value="10">
   <label>Strength <span class="val" id="sv">6</span></label>
   <input id="strength" type="range" min="1" max="40" value="6">
 
@@ -120,21 +115,21 @@
   <input id="lqlevel" type="range" min="-40" max="150" value="0">
   <div class="row">
     <button id="buildon" class="on">Build = on</button>
-    <button id="liqerase">Liquid = erase</button>
+    <button id="liqerase">Liquid = fill</button>
   </div>
 
   <hr>
   <h2>Export</h2>
-  <label>Skin thickness (world units) <span class="val" id="skv">7</span></label>
+  <label>Surface skin (world units) <span class="val" id="skv">7</span></label>
   <input id="skin" type="range" min="0" max="24" value="7">
   <button id="export">Download .vxl</button>
-  <p class="note">Drop the file into <code>assets/maps/</code> (same name) and commit. Edited columns lose caves/overhangs; untouched columns keep theirs.</p>
+  <p class="note">Drop the file into <code>assets/maps/</code> (same name) and commit. Density is edited directly, so caves/overhangs are kept.</p>
   <p class="note warn" id="caps"></p>
 </div>
 
 <div id="main">
   <div id="stage">
-    <div id="pane2d" class="pane"><canvas id="cv" width="256" height="256"></canvas></div>
+    <div id="pane2d" class="pane" hidden><canvas id="cv" width="256" height="256"></canvas></div>
     <div id="pane3d" class="pane"><canvas id="cv3" width="900" height="640"></canvas></div>
   </div>
   <div id="status">load a map to begin</div>
@@ -143,14 +138,22 @@
 <script>
 "use strict";
 
-// ---- map catalog (keys match assets/maps/<key>.vxl, order = lobby order) ----
+// map keys (assets/maps/<key>.vxl), in lobby order
 const MAPS = [
   "moon","ceres","vesta","mars","callisto","ganymede","europa","io","titan",
   "enceladus","triton","rhea","iapetus","dione","titania","oberon","umbriel",
   "ariel","miranda","pluto","chiron","earth",
 ];
-
-// material slots: id -> {name, color for the Material overlay}
+// world key -> texture archetype dir, matching apps/client/src/voxel.rs MAP_ARCHETYPE
+const ARCH = {
+  moon:"regolith_grey", ceres:"regolith_dark", vesta:"regolith_grey", mars:"mars_rust",
+  callisto:"dirty_ice", ganymede:"grooved_ice", europa:"europa_ice", io:"io_sulfur",
+  titan:"titan_haze", enceladus:"bright_ice", triton:"triton_ice", rhea:"dirty_ice",
+  iapetus:"dirty_ice", dione:"dirty_ice", titania:"regolith_grey", oberon:"regolith_grey",
+  umbriel:"regolith_dark", ariel:"grooved_ice", miranda:"grooved_ice", pluto:"pluto_tholin",
+  chiron:"regolith_dark", earth:"earth",
+};
+// material id -> {name, 2D overlay colour}; tile channel order is base/low/high/accent
 const MAT = [
   { id: 0, name: "low",    col: [70, 64, 58] },
   { id: 1, name: "mid",    col: [150, 138, 110] },
@@ -158,93 +161,98 @@ const MAT = [
   { id: 3, name: "accent", col: [222, 210, 188] },
   { id: 4, name: "hazard", col: [236, 120, 44] },
 ];
-
 const ISO = 128;
 
-// ---- zlib via native Compression Streams ("deflate" = RFC1950 zlib) ----
+const ui = {
+  overlay: "hill", tool: "voxadd", radius: 10, strength: 6,
+  mat: 2, lqlevel: 0, buildVal: 1, liqErase: false, skin: 7, layout: "3d",
+};
+let M = null;
+
+// ---- native zlib ("deflate" = RFC1950, matches Python zlib / miniz_oxide) ----
 async function inflate(u8) {
-  const ds = new DecompressionStream("deflate");
-  const s = new Blob([u8]).stream().pipeThrough(ds);
+  const s = new Blob([u8]).stream().pipeThrough(new DecompressionStream("deflate"));
   return new Uint8Array(await new Response(s).arrayBuffer());
 }
 async function deflate(u8) {
-  const cs = new CompressionStream("deflate");
-  const s = new Blob([u8]).stream().pipeThrough(cs);
+  const s = new Blob([u8]).stream().pipeThrough(new CompressionStream("deflate"));
   return new Uint8Array(await new Response(s).arrayBuffer());
 }
 
-// ---- editor state ----
-let M = null; // loaded map model
-const ui = {
-  overlay: "hill", tool: "raise", radius: 14, strength: 6,
-  mat: 2, lqlevel: 0, buildVal: 1, liqErase: false, skin: 7,
-  layout: "3d", exag: 3,
-};
-
 // ---- VXL1 parse ----
 async function parseVxl(buf) {
-  const b = new Uint8Array(buf);
-  const dv = new DataView(buf);
+  const b = new Uint8Array(buf), dv = new DataView(buf);
   if (b[0] !== 86 || b[1] !== 88 || b[2] !== 76 || b[3] !== 49) throw new Error("not a VXL1 file");
   const nx = dv.getUint16(4, false), ny = dv.getUint16(6, false), nz = dv.getUint16(8, false);
   const bounds = [
     dv.getInt16(10, false), dv.getInt16(12, false), dv.getInt16(14, false),
     dv.getInt16(16, false), dv.getInt16(18, false), dv.getInt16(20, false),
   ];
-  const flat = dv.getUint16(22, false);
   const seaRaw = dv.getInt16(24, false);
   const raw = await inflate(b.subarray(26));
   const n = nx * ny * nz, cols = nx * nz;
-  const density = raw.subarray(0, n);
-  const material = raw.subarray(n, 2 * n);
-  const buildable = raw.subarray(2 * n, 2 * n + cols);
   const liquid = raw.length >= 2 * n + 2 * cols
-    ? raw.subarray(2 * n + cols, 2 * n + 2 * cols) : new Uint8Array(cols);
-  return { nx, ny, nz, bounds, flat, sea: seaRaw === -32768 ? null : seaRaw,
-           density, material, buildable: Uint8Array.from(buildable), liquid: Uint8Array.from(liquid) };
+    ? Uint8Array.from(raw.subarray(2 * n + cols, 2 * n + 2 * cols)) : new Uint8Array(cols);
+  return {
+    nx, ny, nz, bounds, sea: seaRaw === -32768 ? null : seaRaw,
+    density: Uint8Array.from(raw.subarray(0, n)),
+    material: Uint8Array.from(raw.subarray(n, 2 * n)),
+    buildable: Uint8Array.from(raw.subarray(2 * n, 2 * n + cols)),
+    liquid,
+  };
 }
 
-const lin = (m, i, j, k) => (j * m.nz + k) * m.nx + i;
-const dyOf = (m) => (m.bounds[3] - m.bounds[2]) / (m.ny - 1);
-const worldY = (m, j) => m.bounds[2] + j * dyOf(m);
+const lin = (i, j, k) => (j * M.nz + k) * M.nx + i;
+const worldY = (j) => M.bounds[2] + j * M.dy;
 
-// Build the working model (heightfield + per-column material/build/liquid)
-// from the raw 3D arrays, keeping the originals for verbatim write-back.
-function buildModel(p) {
-  const { nx, nz, ny } = p;
-  const cols = nx * nz, dy = dyOf(p);
-  const H = new Float32Array(cols);       // surface world-y
-  const surfMat = new Uint8Array(cols);   // material at the surface
-  const subMat = new Uint8Array(cols);    // material a few voxels down (strata)
-  const build = Uint8Array.from(p.buildable);
-  const liq = Uint8Array.from(p.liquid);
-  const dirty = new Uint8Array(cols);
-  for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
-    const c = k * nx + i;
-    let surf = p.bounds[2], topj = 0, found = false;
-    for (let j = ny - 1; j >= 0; j--) {
-      if (p.density[lin(p, i, j, k)] >= ISO) {
-        const here = p.density[lin(p, i, j, k)];
-        if (j + 1 < ny) {
-          const above = p.density[lin(p, i, j + 1, k)];
-          const t = Math.min(1, Math.max(0, (ISO - here) / (above - here || 1)));
-          surf = worldY(p, j) + t * dy;
-        } else surf = worldY(p, j);
-        topj = j; found = true; break;
+// Surface (topmost solid) height + materials for a column, read from density.
+function surfaceOf(i, k) {
+  for (let j = M.ny - 1; j >= 0; j--) {
+    if (M.density[lin(i, j, k)] >= ISO) {
+      const here = M.density[lin(i, j, k)];
+      let y = worldY(j);
+      if (j + 1 < M.ny) {
+        const above = M.density[lin(i, j + 1, k)];
+        y += Math.min(1, Math.max(0, (ISO - here) / (above - here || 1))) * M.dy;
       }
+      return { y, sm: M.material[lin(i, j, k)], bm: M.material[lin(i, Math.max(0, j - 3), k)] };
     }
-    H[c] = surf;
-    surfMat[c] = found ? p.material[lin(p, i, topj, k)] : 1;
-    const dj = Math.max(0, topj - 3);
-    subMat[c] = found ? p.material[lin(p, i, dj, k)] : 2;
   }
-  return { ...p, H, surfMat, subMat, build, liq, dirty,
-           origDensity: p.density, origMaterial: p.material, dy };
+  return { y: M.bounds[2], sm: 1, bm: 2 };
 }
 
-// ---- rendering ----
-const cv = document.getElementById("cv");
-const ctx = cv.getContext("2d");
+function buildModel(p) {
+  M = p;
+  M.dx = (p.bounds[1] - p.bounds[0]) / (p.nx - 1);
+  M.dy = (p.bounds[3] - p.bounds[2]) / (p.ny - 1);
+  M.dz = (p.bounds[5] - p.bounds[4]) / (p.nz - 1);
+  const cols = p.nx * p.nz;
+  M.H = new Float32Array(cols); M.surfMat = new Uint8Array(cols); M.subMat = new Uint8Array(cols);
+  for (let k = 0; k < p.nz; k++) for (let i = 0; i < p.nx; i++) {
+    const s = surfaceOf(i, k), c = k * p.nx + i;
+    M.H[c] = s.y; M.surfMat[c] = s.sm; M.subMat[c] = s.bm;
+  }
+}
+
+// Re-stamp one column's density+material from its heightfield (skin over sub).
+// Used by the surface tools; the voxel brush writes density directly instead.
+function stampColumn(i, k) {
+  const c = k * M.nx + i, h = M.H[c], slope = 120 / M.dy, skin = ui.skin;
+  for (let j = 0; j < M.ny; j++) {
+    const o = lin(i, j, k), depth = h - worldY(j);
+    M.density[o] = Math.max(0, Math.min(255, Math.round(128 + depth * slope)));
+    M.material[o] = depth <= skin ? M.surfMat[c] : M.subMat[c];
+  }
+}
+
+// recompute the H/surfMat caches for a column after a direct density edit
+function recache(i, k) {
+  const s = surfaceOf(i, k), c = k * M.nx + i;
+  M.H[c] = s.y; M.surfMat[c] = s.sm; M.subMat[c] = s.bm;
+}
+
+// ============================ 2D top-down view ============================
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
 let img = null;
 
 function render() {
@@ -253,35 +261,26 @@ function render() {
   if (cv.width !== nx || cv.height !== nz) { cv.width = nx; cv.height = nz; img = ctx.createImageData(nx, nz); }
   let lo = Infinity, hi = -Infinity;
   for (let c = 0; c < M.H.length; c++) { if (M.H[c] < lo) lo = M.H[c]; if (M.H[c] > hi) hi = M.H[c]; }
-  const span = (hi - lo) || 1;
-  const d = img.data;
+  const span = (hi - lo) || 1, d = img.data;
   for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
     const c = k * nx + i;
-    // hillshade from height gradient
-    const hx = M.H[c < c + 1 && i < nx - 1 ? c + 1 : c] - M.H[i > 0 ? c - 1 : c];
+    const hx = M.H[i < nx - 1 ? c + 1 : c] - M.H[i > 0 ? c - 1 : c];
     const hz = M.H[k < nz - 1 ? c + nx : c] - M.H[k > 0 ? c - nx : c];
     const sh = Math.max(0.25, Math.min(1.2, 0.7 + (-hx - hz) * 0.05));
     const t = (M.H[c] - lo) / span;
-    // hypsometric ramp (low blue-grey -> high pale)
     let r = 40 + t * 180, g = 55 + t * 170, b = 70 + t * 150;
-    if (ui.overlay === "mat") {
-      const mc = MAT[Math.min(4, M.surfMat[c])].col; r = mc[0]; g = mc[1]; b = mc[2];
-    }
+    if (ui.overlay === "mat") { const mc = MAT[Math.min(4, M.surfMat[c])].col; r = mc[0]; g = mc[1]; b = mc[2]; }
     r *= sh; g *= sh; b *= sh;
-    if (ui.overlay === "build" && M.build[c]) { r = r * 0.4 + 60; g = g * 0.4 + 160; b = b * 0.4 + 70; }
-    if (ui.overlay === "liq" && M.liq[c]) { r = r * 0.3 + 30; g = g * 0.3 + 90; b = b * 0.3 + 170; }
-    if (ui.overlay !== "liq" && M.liq[c]) { r = r * 0.55 + 25; g = g * 0.55 + 60; b = b * 0.55 + 120; }
-    const o = c * 4;
-    d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    if (ui.overlay === "build" && M.buildable[c]) { r = r * 0.4 + 60; g = g * 0.4 + 160; b = b * 0.4 + 70; }
+    if (M.liquid[c]) { const w = ui.overlay === "liq" ? 0.7 : 0.45; r = r * (1 - w) + 30 * w; g = g * (1 - w) + 80 * w; b = b * (1 - w) + 170 * w; }
+    const o = c * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  // fit canvas to its pane
   const pane = document.getElementById("pane2d");
   const s = Math.max(1, Math.floor(Math.min(pane.clientWidth, pane.clientHeight) / nx));
   cv.style.width = (nx * s) + "px"; cv.style.height = (nz * s) + "px";
 }
 
-// ---- editing ----
 function colAtEvent(e) {
   const r = cv.getBoundingClientRect();
   const i = Math.floor((e.clientX - r.left) / r.width * M.nx);
@@ -289,123 +288,50 @@ function colAtEvent(e) {
   return [Math.max(0, Math.min(M.nx - 1, i)), Math.max(0, Math.min(M.nz - 1, k))];
 }
 
-function applyBrush(ci, ck) {
+// Surface (heightfield) brush at column (ci,ck): raise/lower/smooth/flatten/mat/
+// build/liquid/pick. Edits the height caches and re-stamps the affected columns.
+function surfaceBrush(ci, ck) {
   const rad = ui.radius, str = ui.strength;
-  const r0i = Math.max(0, ci - rad), r1i = Math.min(M.nx - 1, ci + rad);
-  const r0k = Math.max(0, ck - rad), r1k = Math.min(M.nz - 1, ck + rad);
-  let flatTarget = null;
-  if (ui.tool === "flatten") flatTarget = M.H[ck * M.nx + ci];
-  for (let k = r0k; k <= r1k; k++) for (let i = r0i; i <= r1i; i++) {
-    const dd = Math.hypot(i - ci, k - ck) / rad;
-    if (dd > 1) continue;
-    const c = k * M.nx + i;
-    const fall = (1 - dd * dd); // gaussian-ish falloff
-    switch (ui.tool) {
-      case "raise": M.H[c] += str * fall; M.dirty[c] = 1; break;
-      case "lower": M.H[c] -= str * fall; M.dirty[c] = 1; break;
-      case "flatten": M.H[c] += (flatTarget - M.H[c]) * Math.min(1, 0.15 * str * fall); M.dirty[c] = 1; break;
-      case "smooth": {
-        let s = 0, n = 0;
-        for (const [di, dk] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-          const ni = i + di, nk = k + dk;
-          if (ni >= 0 && ni < M.nx && nk >= 0 && nk < M.nz) { s += M.H[nk * M.nx + ni]; n++; }
+  const flatTarget = ui.tool === "flatten" ? M.H[ck * M.nx + ci] : 0;
+  for (let k = Math.max(0, ck - rad); k <= Math.min(M.nz - 1, ck + rad); k++)
+    for (let i = Math.max(0, ci - rad); i <= Math.min(M.nx - 1, ci + rad); i++) {
+      const dd = Math.hypot(i - ci, k - ck) / rad;
+      if (dd > 1) continue;
+      const c = k * M.nx + i, fall = 1 - dd * dd;
+      let touched = true;
+      switch (ui.tool) {
+        case "raise": M.H[c] += str * fall; break;
+        case "lower": M.H[c] -= str * fall; break;
+        case "flatten": M.H[c] += (flatTarget - M.H[c]) * Math.min(1, 0.15 * str * fall); break;
+        case "smooth": {
+          let s = 0, n = 0;
+          for (const [di, dk] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const ni = i + di, nk = k + dk;
+            if (ni >= 0 && ni < M.nx && nk >= 0 && nk < M.nz) { s += M.H[nk * M.nx + ni]; n++; }
+          }
+          if (n) M.H[c] += (s / n - M.H[c]) * Math.min(1, 0.2 * str * fall);
+          break;
         }
-        if (n) { M.H[c] += (s / n - M.H[c]) * Math.min(1, 0.2 * str * fall); M.dirty[c] = 1; }
-        break;
+        case "mat": M.surfMat[c] = ui.mat; break;
+        case "build": M.buildable[c] = ui.buildVal; touched = false; break;
+        case "liquid":
+          if (ui.liqErase) M.liquid[c] = 0;
+          else { M.liquid[c] = Math.max(0, Math.min(M.ny - 1, Math.round((ui.lqlevel - M.bounds[2]) / M.dy))) + 1; M.buildable[c] = 0; }
+          touched = false; break;
+        case "pick":
+          if (dd < 0.001) { ui.lqlevel = Math.round(M.H[c]); syncLqLabel(); setMat(M.surfMat[c]); }
+          touched = false; break;
       }
-      case "mat": M.surfMat[c] = ui.mat; M.dirty[c] = 1; break;
-      case "build": M.build[c] = ui.buildVal; M.dirty[c] = 1; break;
-      case "liquid": {
-        if (ui.liqErase) { M.liq[c] = 0; }
-        else {
-          const j = Math.max(0, Math.min(M.ny - 1, Math.round((ui.lqlevel - M.bounds[2]) / M.dy)));
-          M.liq[c] = j + 1; M.build[c] = 0;
-        }
-        M.dirty[c] = 1; break;
-      }
-      case "pick":
-        if (dd < 0.001) { ui.lqlevel = Math.round(M.H[c]); syncLqLabel(); setMat(M.surfMat[c]); }
-        break;
+      if (touched) stampColumn(i, k);
     }
-  }
-  refresh();
+  refresh2d();
 }
 
-// ---- export ----
-async function exportVxl() {
-  const p = M, { nx, ny, nz } = p, cols = nx * nz, n = nx * ny * nz, dy = p.dy;
-  const slope = 120 / dy, skin = ui.skin;
-  const density = new Uint8Array(n), material = new Uint8Array(n);
-  for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
-    const c = k * nx + i;
-    if (!p.dirty[c]) {
-      for (let j = 0; j < ny; j++) { const o = lin(p, i, j, k); density[o] = p.origDensity[o]; material[o] = p.origMaterial[o]; }
-      continue;
-    }
-    const surf = p.H[c], sm = p.surfMat[c], bm = p.subMat[c];
-    for (let j = 0; j < ny; j++) {
-      const y = worldY(p, j), o = lin(p, i, j, k);
-      density[o] = Math.max(0, Math.min(255, Math.round(128 + (surf - y) * slope)));
-      material[o] = (surf - y) <= skin ? sm : bm;
-    }
-  }
-  // buildable: keep edited mask but force dry-only (matches densitygen)
-  const build = Uint8Array.from(p.build);
-  for (let c = 0; c < cols; c++) if (p.liq[c]) build[c] = 0;
-  let flat = 0; for (let c = 0; c < cols; c++) if (build[c]) flat++;
-  const flatPermil = Math.round(flat / cols * 1000);
-
-  const payload = new Uint8Array(2 * n + 2 * cols);
-  payload.set(density, 0); payload.set(material, n);
-  payload.set(build, 2 * n); payload.set(p.liq, 2 * n + cols);
-  const comp = await deflate(payload);
-
-  const head = new Uint8Array(26); const dv = new DataView(head.buffer);
-  head[0] = 86; head[1] = 88; head[2] = 76; head[3] = 49;
-  dv.setUint16(4, nx, false); dv.setUint16(6, ny, false); dv.setUint16(8, nz, false);
-  for (let q = 0; q < 6; q++) dv.setInt16(10 + q * 2, Math.round(p.bounds[q]), false);
-  dv.setUint16(22, flatPermil, false);
-  dv.setInt16(24, p.sea == null ? -32768 : Math.round(p.sea), false);
-
-  const out = new Uint8Array(head.length + comp.length);
-  out.set(head, 0); out.set(comp, head.length);
-  const blob = new Blob([out], { type: "application/octet-stream" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = (M.key || "map") + ".vxl"; a.click();
-  URL.revokeObjectURL(a.href);
-  status(`exported ${a.download}: ${(out.length / 1024).toFixed(1)} KB, buildable ${(flatPermil / 10).toFixed(1)}%`);
-}
-
-// ---- load ----
-async function loadFromBuffer(buf, key) {
-  const p = await parseVxl(buf);
-  M = buildModel(p); M.key = key || M.key || "map";
-  document.getElementById("dims").textContent =
-    `${M.nx} x ${M.ny} x ${M.nz}  bounds y[${M.bounds[2]},${M.bounds[3]}]  buildable ${(M.flat / 10).toFixed(1)}%`;
-  document.getElementById("lqlevel").min = M.bounds[2];
-  document.getElementById("lqlevel").max = M.bounds[3];
-  applyLayout(ui.layout);
-  status(`loaded ${M.key}`);
-}
-async function loadPreset(key) {
-  try {
-    const res = await fetch(`../../assets/maps/${key}.vxl`);
-    if (!res.ok) throw new Error(res.status);
-    await loadFromBuffer(await res.arrayBuffer(), key);
-  } catch (err) {
-    status(`could not fetch preset (${err}); serve over http, or use "Load .vxl file"`);
-  }
-}
-
-// ---- 3D view (WebGL2): orbit + pan + zoom, and paint on the surface ----
-// An interactive view of the current heightfield, lit and coloured by material.
-// It is a heightfield view (the single-surface model the editor edits/exports,
-// not carved caves). Left-drag paints with the current tool (via a raycast),
-// right-drag orbits, shift/middle-drag pans, wheel zooms. The game draws the
-// real shaded terrain.
+// ============================ 3D view (WebGL2) ============================
 const cv3 = document.getElementById("cv3");
-let gl = null, prog3 = null, vao = null, glbufs = null, idxCount = 0, mesh3my = 0;
-const cam3 = { yaw: 0.9, pitch: 0.85, dist: 1500, tx: 0, tz: 0 };
+let gl = null, prog = null, vao = null, bufs = null, idxCount = 0, tex = [];
+const cam = { yaw: 0.9, pitch: 0.85, dist: 1300, tx: 0, tz: 0 };
+const cyOf = () => (M.bounds[2] + M.bounds[3]) / 2; // vertical centre of the world
 
 const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -417,16 +343,11 @@ function perspective(fov, a, n, f) {
 }
 function lookAt(e, c, u) {
   const z = norm3(sub3(e, c)), x = norm3(cross3(u, z)), y = cross3(z, x);
-  return new Float32Array([
-    x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
-    -dot3(x, e), -dot3(y, e), -dot3(z, e), 1,
-  ]);
+  return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot3(x, e), -dot3(y, e), -dot3(z, e), 1]);
 }
 function mul(a, b) {
   const o = new Float32Array(16);
-  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
-    let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k]; o[i * 4 + j] = s;
-  }
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k]; o[i * 4 + j] = s; }
   return o;
 }
 
@@ -434,133 +355,163 @@ function initGL() {
   gl = cv3.getContext("webgl2", { antialias: true });
   if (!gl) { status("WebGL2 unavailable; the 3D view needs a current browser"); return false; }
   const vs = `#version 300 es
-    in vec3 a_pos; in vec3 a_norm; in vec3 a_col;
-    uniform mat4 u_mvp; out vec3 v_n; out vec3 v_c;
-    void main(){ v_n = a_norm; v_c = a_col; gl_Position = u_mvp * vec4(a_pos, 1.0); }`;
+    in vec3 a_pos; in vec3 a_norm; in vec4 a_w; in float a_haz;
+    uniform mat4 u_mvp; out vec3 v_p; out vec3 v_n; out vec4 v_w; out float v_haz;
+    void main(){ v_p = a_pos; v_n = a_norm; v_w = a_w; v_haz = a_haz; gl_Position = u_mvp * vec4(a_pos, 1.0); }`;
   const fs = `#version 300 es
     precision highp float;
-    in vec3 v_n; in vec3 v_c; uniform vec3 u_light; out vec4 o;
-    void main(){ float d = max(dot(normalize(v_n), normalize(u_light)), 0.0);
-      o = vec4(v_c * (0.35 + 0.75 * d), 1.0); }`;
-  const mk = (t, s) => {
-    const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh);
-    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
-    return sh;
-  };
-  prog3 = gl.createProgram();
-  gl.attachShader(prog3, mk(gl.VERTEX_SHADER, vs));
-  gl.attachShader(prog3, mk(gl.FRAGMENT_SHADER, fs));
-  gl.linkProgram(prog3);
-  gl.enable(gl.DEPTH_TEST);
+    in vec3 v_p; in vec3 v_n; in vec4 v_w; in float v_haz;
+    uniform sampler2D t0; uniform sampler2D t1; uniform sampler2D t2; uniform sampler2D t3;
+    uniform vec3 u_light; out vec4 o;
+    vec3 tri(sampler2D t, vec3 p, vec3 n){
+      vec3 w = pow(abs(n), vec3(4.0)); w /= max(w.x + w.y + w.z, 0.001);
+      float s = 0.06;
+      return texture(t, p.zy*s).rgb*w.x + texture(t, p.xz*s).rgb*w.y + texture(t, p.xy*s).rgb*w.z;
+    }
+    void main(){
+      vec3 n = normalize(v_n);
+      vec3 c = v_w.x*tri(t0,v_p,n) + v_w.y*tri(t1,v_p,n) + v_w.z*tri(t2,v_p,n) + v_w.w*tri(t3,v_p,n);
+      c = mix(c, vec3(0.95,0.42,0.12), clamp(v_haz,0.0,1.0));
+      float d = max(dot(n, normalize(u_light)), 0.0);
+      o = vec4(c * (0.4 + 0.7*d), 1.0);
+    }`;
+  const mk = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  prog = gl.createProgram();
+  gl.attachShader(prog, mk(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(prog); gl.enable(gl.DEPTH_TEST);
   vao = gl.createVertexArray();
-  glbufs = { pos: gl.createBuffer(), norm: gl.createBuffer(), col: gl.createBuffer(), idx: gl.createBuffer() };
+  bufs = { pos: gl.createBuffer(), norm: gl.createBuffer(), w: gl.createBuffer(), haz: gl.createBuffer(), idx: gl.createBuffer() };
+  const mkTex = () => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 128, 255]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    return t; };
+  tex = [mkTex(), mkTex(), mkTex(), mkTex()];
+  gl.useProgram(prog);
+  ["t0", "t1", "t2", "t3"].forEach((u, q) => gl.uniform1i(gl.getUniformLocation(prog, u), q));
   return true;
 }
 
+async function loadTiles(arch) {
+  if (!gl) return;
+  const names = ["base", "low", "high", "accent"];
+  for (let q = 0; q < 4; q++) {
+    try {
+      const res = await fetch(`../../assets/textures/worlds/${arch}/${names[q]}.png`);
+      if (!res.ok) throw new Error(res.status);
+      const bmp = await createImageBitmap(await res.blob());
+      gl.bindTexture(gl.TEXTURE_2D, tex[q]);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bmp);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    } catch (e) { /* keep the grey placeholder */ }
+  }
+  if (paneVisible("3d")) render3d();
+}
+
 function resize3d() {
-  const pane = document.getElementById("pane3d");
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const pane = document.getElementById("pane3d"), dpr = Math.min(2, window.devicePixelRatio || 1);
   cv3.width = Math.max(1, Math.floor(pane.clientWidth * dpr));
   cv3.height = Math.max(1, Math.floor(pane.clientHeight * dpr));
 }
 
-function buildMesh3d() {
-  const { nx, nz } = M, ex = ui.exag, H = M.H;
-  const dx = (M.bounds[1] - M.bounds[0]) / (nx - 1), dz = (M.bounds[5] - M.bounds[4]) / (nz - 1);
-  const x0 = M.bounds[0], z0 = M.bounds[4];
-  let sum = 0; for (let c = 0; c < H.length; c++) sum += H[c];
-  const my = sum / H.length * ex; // centre the terrain vertically
-  mesh3my = my;
-  const V = nx * nz, pos = new Float32Array(V * 3), nor = new Float32Array(V * 3), col = new Float32Array(V * 3);
-  for (let k = 0; k < nz; k++) for (let i = 0; i < nx; i++) {
-    const c = k * nx + i, o = c * 3;
-    pos[o] = x0 + i * dx; pos[o + 1] = H[c] * ex - my; pos[o + 2] = z0 + k * dz;
-    const hl = H[k * nx + Math.max(0, i - 1)], hr = H[k * nx + Math.min(nx - 1, i + 1)];
-    const hu = H[Math.max(0, k - 1) * nx + i], hd = H[Math.min(nz - 1, k + 1) * nx + i];
-    const n = norm3([-(hr - hl) * ex, 2 * dx, -(hd - hu) * ex]);
-    nor[o] = n[0]; nor[o + 1] = n[1]; nor[o + 2] = n[2];
-    const cc = M.liq[c] ? [40, 90, 170] : MAT[Math.min(4, M.surfMat[c])].col;
-    col[o] = cc[0] / 255; col[o + 1] = cc[1] / 255; col[o + 2] = cc[2] / 255;
-  }
-  const idx = new Uint32Array((nx - 1) * (nz - 1) * 6); let p = 0;
-  for (let k = 0; k < nz - 1; k++) for (let i = 0; i < nx - 1; i++) {
-    const a = k * nx + i, b = a + 1, d = a + nx, e = d + 1;
-    idx[p++] = a; idx[p++] = b; idx[p++] = e; idx[p++] = a; idx[p++] = e; idx[p++] = d;
-  }
-  idxCount = idx.length;
-  gl.bindVertexArray(vao);
-  const bind = (buf, data, name) => {
-    const loc = gl.getAttribLocation(prog3, name);
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
-  };
-  bind(glbufs.pos, pos, "a_pos"); bind(glbufs.norm, nor, "a_norm"); bind(glbufs.col, col, "a_col");
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glbufs.idx);
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
-  gl.bindVertexArray(null);
+const dens = (i, j, k) => M.density[lin(
+  i < 0 ? 0 : i >= M.nx ? M.nx - 1 : i,
+  j < 0 ? 0 : j >= M.ny ? M.ny - 1 : j,
+  k < 0 ? 0 : k >= M.nz ? M.nz - 1 : k)];
+
+// gradient normal (toward air) at grid-rounded world point
+function gnormal(wx, wy, wz) {
+  const i = Math.round((wx - M.bounds[0]) / M.dx), j = Math.round((wy - M.bounds[2]) / M.dy), k = Math.round((wz - M.bounds[4]) / M.dz);
+  return norm3([dens(i - 1, j, k) - dens(i + 1, j, k), dens(i, j - 1, k) - dens(i, j + 1, k), dens(i, j, k - 1) - dens(i, j, k + 1)]);
 }
 
-function target3() { return [cam3.tx, 0, cam3.tz]; }
+const C = [[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]];
+const TETS = [[0,1,2,6],[0,2,3,6],[0,3,7,6],[0,7,4,6],[0,4,5,6],[0,5,1,6]];
+
+// Marching cubes (tetrahedral, same scheme as the engine) over the density field
+// -> a textured triangle soup centred on the origin (y centred about the world).
+function buildMesh3d() {
+  const t0 = performance.now();
+  const { nx, ny, nz, dx, dy, dz } = M, x0 = M.bounds[0], y0 = M.bounds[2], z0 = M.bounds[4], cy = cyOf();
+  const pos = [], nor = [], wgt = [], haz = [];
+  const cv8 = new Float32Array(8), cp = [];
+  for (let q = 0; q < 8; q++) cp.push([0, 0, 0]);
+  const interp = (a, va, b, vb) => {
+    const t = Math.abs(vb - va) < 1e-6 ? 0.5 : Math.min(1, Math.max(0, (ISO - va) / (vb - va)));
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  };
+  const emit = (p, w, h) => {
+    const n = gnormal(p[0], p[1], p[2]);
+    pos.push(p[0], p[1] - cy, p[2]); nor.push(n[0], n[1], n[2]);
+    wgt.push(w[0], w[1], w[2], w[3]); haz.push(h);
+  };
+  const D = M.density, sY = nz * nx, sZ = nx;
+  const offs = C.map((c) => c[1] * sY + c[2] * sZ + c[0]); // corner linear offsets
+  for (let k = 0; k < nz - 1; k++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    const base = (j * nz + k) * nx + i;
+    let mn = 255, mx = 0;
+    for (let q = 0; q < 8; q++) { const v = D[base + offs[q]]; cv8[q] = v; if (v < mn) mn = v; if (v > mx) mx = v; }
+    if (mn >= ISO || mx < ISO) continue;
+    for (let q = 0; q < 8; q++) cp[q] = [x0 + (i + C[q][0]) * dx, y0 + (j + C[q][1]) * dy, z0 + (k + C[q][2]) * dz];
+    const m = Math.min(4, M.material[base]);
+    const w = [m === 1 ? 1 : 0, m === 0 ? 1 : 0, m === 2 ? 1 : 0, m === 3 ? 1 : 0], h = m === 4 ? 1 : 0;
+    for (const tet of TETS) {
+      const sol = [], air = [];
+      for (const c of tet) (cv8[c] >= ISO ? sol : air).push(c);
+      if (sol.length === 0 || sol.length === 4) continue;
+      if (sol.length === 1 || sol.length === 3) {
+        const odd = sol.length === 1 ? sol[0] : air[0];
+        const rest = tet.filter((c) => c !== odd);
+        emit(interp(cp[odd], cv8[odd], cp[rest[0]], cv8[rest[0]]), w, h);
+        emit(interp(cp[odd], cv8[odd], cp[rest[1]], cv8[rest[1]]), w, h);
+        emit(interp(cp[odd], cv8[odd], cp[rest[2]], cv8[rest[2]]), w, h);
+      } else {
+        const pa = interp(cp[sol[0]], cv8[sol[0]], cp[air[0]], cv8[air[0]]);
+        const pb = interp(cp[sol[0]], cv8[sol[0]], cp[air[1]], cv8[air[1]]);
+        const pc = interp(cp[sol[1]], cv8[sol[1]], cp[air[1]], cv8[air[1]]);
+        const pd = interp(cp[sol[1]], cv8[sol[1]], cp[air[0]], cv8[air[0]]);
+        emit(pa, w, h); emit(pb, w, h); emit(pc, w, h);
+        emit(pa, w, h); emit(pc, w, h); emit(pd, w, h);
+      }
+    }
+  }
+  idxCount = pos.length / 3;
+  gl.bindVertexArray(vao);
+  const bind = (buf, arr, name, size) => {
+    const loc = gl.getAttribLocation(prog, name);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+  };
+  bind(bufs.pos, pos, "a_pos", 3); bind(bufs.norm, nor, "a_norm", 3);
+  bind(bufs.w, wgt, "a_w", 4); bind(bufs.haz, haz, "a_haz", 1);
+  gl.bindVertexArray(null);
+  return performance.now() - t0;
+}
+
 function eyePos() {
-  const cp = Math.cos(cam3.pitch), sp = Math.sin(cam3.pitch), cy = Math.cos(cam3.yaw), sy = Math.sin(cam3.yaw);
-  return [cam3.tx + cam3.dist * cp * cy, cam3.dist * sp, cam3.tz + cam3.dist * cp * sy];
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch), cyw = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+  return [cam.tx + cam.dist * cp * cyw, cam.dist * sp, cam.tz + cam.dist * cp * sy];
 }
 function render3d() {
   if (!gl || !M) return;
   gl.viewport(0, 0, cv3.width, cv3.height);
   gl.clearColor(0.02, 0.03, 0.06, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  const proj = perspective(Math.PI / 4, cv3.width / cv3.height, 1, 12000);
-  const mvp = mul(proj, lookAt(eyePos(), target3(), [0, 1, 0]));
-  gl.useProgram(prog3);
-  gl.uniformMatrix4fv(gl.getUniformLocation(prog3, "u_mvp"), false, mvp);
-  gl.uniform3f(gl.getUniformLocation(prog3, "u_light"), -0.5, 0.8, 0.4);
-  gl.bindVertexArray(vao);
-  gl.drawElements(gl.TRIANGLES, idxCount, gl.UNSIGNED_INT, 0);
+  const mvp = mul(perspective(Math.PI / 4, cv3.width / cv3.height, 1, 12000), lookAt(eyePos(), [cam.tx, 0, cam.tz], [0, 1, 0]));
+  gl.useProgram(prog);
+  gl.uniformMatrix4fv(gl.getUniformLocation(prog, "u_mvp"), false, mvp);
+  gl.uniform3f(gl.getUniformLocation(prog, "u_light"), -0.5, 0.8, 0.4);
+  for (let q = 0; q < 4; q++) { gl.activeTexture(gl.TEXTURE0 + q); gl.bindTexture(gl.TEXTURE_2D, tex[q]); }
+  gl.bindVertexArray(vao); gl.drawArrays(gl.TRIANGLES, 0, idxCount);
   gl.bindVertexArray(null);
 }
 
-function paneVisible(which) { return ui.layout === "split" || ui.layout === which; }
-
-function applyLayout(mode) {
-  // No WebGL2 -> fall back to 2D rather than show nothing.
-  if ((mode === "split" || mode === "3d") && M && !gl && !initGL()) mode = "2d";
-  ui.layout = mode;
-  setActive("[data-layout]", "data-layout", mode);
-  document.getElementById("pane2d").hidden = !paneVisible("2d");
-  document.getElementById("pane3d").hidden = !paneVisible("3d");
-  if (!M) return;
-  if (paneVisible("2d")) render();
-  if (paneVisible("3d") && gl) { resize3d(); buildMesh3d(); render3d(); }
-}
-
-// Re-render the visible panes after an edit; the 3D rebuild is coalesced to once
-// per frame so painting stays smooth.
-let pend3d = false;
-function schedule3d() {
-  if (pend3d) return; pend3d = true;
-  requestAnimationFrame(() => { pend3d = false; if (M && gl) { buildMesh3d(); render3d(); } });
-}
-function refresh() {
-  if (paneVisible("2d")) render();
-  if (paneVisible("3d")) schedule3d();
-}
-
-function panCam(dx, dy) {
-  const fwd = norm3(sub3(target3(), eyePos()));
-  const right = norm3(cross3(fwd, [0, 1, 0]));
-  const fg = norm3([fwd[0], 0, fwd[2]]); // forward projected onto the ground
-  const s = cam3.dist * 0.0015;
-  cam3.tx += (-dx * right[0] + dy * fg[0]) * s;
-  cam3.tz += (-dx * right[2] + dy * fg[2]) * s;
-}
-
-// Map a cv3 mouse event to a terrain column by marching a camera ray against the
-// heightfield, in the same centred/exaggerated space as the 3D mesh.
-function raycastColumn(e) {
+// Camera ray for a cv3 mouse event, in centred view space.
+function rayOf(e) {
   const r = cv3.getBoundingClientRect();
-  const ndcx = ((e.clientX - r.left) / r.width) * 2 - 1;
-  const ndcy = 1 - ((e.clientY - r.top) / r.height) * 2;
-  const eye = eyePos(), fwd = norm3(sub3(target3(), eye));
+  const ndcx = ((e.clientX - r.left) / r.width) * 2 - 1, ndcy = 1 - ((e.clientY - r.top) / r.height) * 2;
+  const eye = eyePos(), fwd = norm3(sub3([cam.tx, 0, cam.tz], eye));
   const right = norm3(cross3(fwd, [0, 1, 0])), up = cross3(right, fwd);
   const t = Math.tan(Math.PI / 8), asp = cv3.width / cv3.height;
   const dir = norm3([
@@ -568,24 +519,124 @@ function raycastColumn(e) {
     fwd[1] + ndcx * t * asp * right[1] + ndcy * t * up[1],
     fwd[2] + ndcx * t * asp * right[2] + ndcy * t * up[2],
   ]);
-  const ex = ui.exag, x0 = M.bounds[0], z0 = M.bounds[4];
-  const dx = (M.bounds[1] - x0) / (M.nx - 1), dz = (M.bounds[5] - z0) / (M.nz - 1);
-  for (let s = 1; s < 1000; s++) {
-    const L = s * 8;
-    const px = eye[0] + dir[0] * L, py = eye[1] + dir[1] * L, pz = eye[2] + dir[2] * L;
-    const i = Math.round((px - x0) / dx), k = Math.round((pz - z0) / dz);
-    if (i < 0 || i >= M.nx || k < 0 || k >= M.nz) continue;
-    if (py <= M.H[k * M.nx + i] * ex - mesh3my) return [i, k];
+  return { eye, dir };
+}
+// March a ray to the first solid voxel; returns the world hit point + voxel.
+function raycast(e) {
+  const { eye, dir } = rayOf(e), cy = cyOf();
+  const x0 = M.bounds[0], y0 = M.bounds[2], z0 = M.bounds[4];
+  let prev = null;
+  for (let s = 1; s < 1400; s++) {
+    const L = s * 4;
+    const wx = eye[0] + dir[0] * L, wy = eye[1] + dir[1] * L + cy, wz = eye[2] + dir[2] * L;
+    const i = Math.round((wx - x0) / M.dx), j = Math.round((wy - y0) / M.dy), k = Math.round((wz - z0) / M.dz);
+    if (i < 0 || i >= M.nx || j < 0 || j >= M.ny || k < 0 || k >= M.nz) { if (prev) break; continue; }
+    if (M.density[lin(i, j, k)] >= ISO) return { wx, wy, wz, i, j, k, prev };
+    prev = [wx, wy, wz];
   }
   return null;
 }
 
-function paint3d(e) {
-  const hit = raycastColumn(e);
-  if (hit) applyBrush(hit[0], hit[1]);
+// Add (solid) or carve (air) a sphere of voxels in world space; recache columns.
+function voxelSphere(wx, wy, wz, R, add) {
+  const x0 = M.bounds[0], y0 = M.bounds[2], z0 = M.bounds[4];
+  const i0 = Math.max(0, Math.floor((wx - R - x0) / M.dx)), i1 = Math.min(M.nx - 1, Math.ceil((wx + R - x0) / M.dx));
+  const j0 = Math.max(0, Math.floor((wy - R - y0) / M.dy)), j1 = Math.min(M.ny - 1, Math.ceil((wy + R - y0) / M.dy));
+  const k0 = Math.max(0, Math.floor((wz - R - z0) / M.dz)), k1 = Math.min(M.nz - 1, Math.ceil((wz + R - z0) / M.dz));
+  const R2 = R * R;
+  for (let k = k0; k <= k1; k++) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const vx = x0 + i * M.dx, vy = y0 + j * M.dy, vz = z0 + k * M.dz;
+    if ((vx - wx) ** 2 + (vy - wy) ** 2 + (vz - wz) ** 2 > R2) continue;
+    const o = lin(i, j, k);
+    if (add) { M.density[o] = 255; M.material[o] = ui.mat; } else M.density[o] = 0;
+  }
+  for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) recache(i, k);
 }
 
-// ---- ui wiring ----
+// Apply the current tool at a cv3 hit. Voxel tools sculpt density; the rest map
+// the hit to a column and run the surface brush there.
+function tool3d(e) {
+  const hit = raycast(e);
+  if (!hit) return;
+  if (ui.tool === "voxadd" || ui.tool === "voxsub") {
+    voxelSphere(hit.wx, hit.wy, hit.wz, ui.radius * M.dx, ui.tool === "voxadd");
+    if (paneVisible("2d")) render();
+  } else {
+    surfaceBrush(hit.i, hit.k);
+  }
+}
+
+// ============================ layout + refresh ============================
+function paneVisible(which) { return ui.layout === "split" || ui.layout === which; }
+function applyLayout(mode) {
+  if ((mode === "split" || mode === "3d") && M && !gl && !initGL()) mode = "2d";
+  ui.layout = mode;
+  setActive("[data-layout]", "data-layout", mode);
+  document.getElementById("pane2d").hidden = !paneVisible("2d");
+  document.getElementById("pane3d").hidden = !paneVisible("3d");
+  if (!M) return;
+  if (paneVisible("2d")) render();
+  if (paneVisible("3d") && gl) { resize3d(); remesh3d(); }
+}
+// 2D updates live during a stroke (cheap); the 3D mesh rebuild (marching cubes)
+// is deferred to stroke end via remesh3d().
+function refresh2d() { if (paneVisible("2d")) render(); }
+function remesh3d() {
+  if (!gl || !M || !paneVisible("3d")) return;
+  const ms = buildMesh3d(); render3d();
+  status(`${M.key}: ${(idxCount / 3 | 0)} tris, meshed in ${ms | 0} ms`);
+}
+
+function panCam(dx, dy) {
+  const fwd = norm3(sub3([cam.tx, 0, cam.tz], eyePos())), right = norm3(cross3(fwd, [0, 1, 0]));
+  const fg = norm3([fwd[0], 0, fwd[2]]), s = cam.dist * 0.0015;
+  cam.tx += (-dx * right[0] + dy * fg[0]) * s; cam.tz += (-dx * right[2] + dy * fg[2]) * s;
+}
+
+// ============================ export ============================
+async function exportVxl() {
+  const { nx, ny, nz } = M, cols = nx * nz, n = nx * ny * nz;
+  const build = Uint8Array.from(M.buildable);
+  for (let c = 0; c < cols; c++) if (M.liquid[c]) build[c] = 0;
+  let flat = 0; for (let c = 0; c < cols; c++) if (build[c]) flat++;
+  const flatPermil = Math.round(flat / cols * 1000);
+  const payload = new Uint8Array(2 * n + 2 * cols);
+  payload.set(M.density, 0); payload.set(M.material, n); payload.set(build, 2 * n); payload.set(M.liquid, 2 * n + cols);
+  const comp = await deflate(payload);
+  const head = new Uint8Array(26), dv = new DataView(head.buffer);
+  head[0] = 86; head[1] = 88; head[2] = 76; head[3] = 49;
+  dv.setUint16(4, nx, false); dv.setUint16(6, ny, false); dv.setUint16(8, nz, false);
+  for (let q = 0; q < 6; q++) dv.setInt16(10 + q * 2, Math.round(M.bounds[q]), false);
+  dv.setUint16(22, flatPermil, false);
+  dv.setInt16(24, M.sea == null ? -32768 : Math.round(M.sea), false);
+  const out = new Uint8Array(head.length + comp.length); out.set(head, 0); out.set(comp, head.length);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
+  a.download = (M.key || "map") + ".vxl"; a.click(); URL.revokeObjectURL(a.href);
+  status(`exported ${a.download}: ${(out.length / 1024).toFixed(1)} KB, buildable ${(flatPermil / 10).toFixed(1)}%`);
+}
+
+// ============================ load ============================
+async function loadFromBuffer(buf, key) {
+  buildModel(await parseVxl(buf));
+  M.key = key || "map"; M.arch = ARCH[M.key] || "regolith_grey";
+  document.getElementById("dims").textContent =
+    `${M.nx} x ${M.ny} x ${M.nz}  y[${M.bounds[2]},${M.bounds[3]}]  ${M.arch}`;
+  document.getElementById("lqlevel").min = M.bounds[2]; document.getElementById("lqlevel").max = M.bounds[3];
+  cam.tx = 0; cam.tz = 0;
+  applyLayout(ui.layout);
+  if (gl) loadTiles(M.arch);
+  status(`loaded ${M.key}`);
+}
+async function loadPreset(key) {
+  try {
+    const res = await fetch(`../../assets/maps/${key}.vxl`);
+    if (!res.ok) throw new Error(res.status);
+    await loadFromBuffer(await res.arrayBuffer(), key);
+  } catch (err) { status(`could not fetch preset (${err}); serve over http, or use "Load .vxl file"`); }
+}
+
+// ============================ ui wiring ============================
 function status(s) { document.getElementById("status").textContent = s; }
 function setActive(sel, attr, val) {
   document.querySelectorAll(sel).forEach((b) => b.classList.toggle("on", b.getAttribute(attr) === val));
@@ -595,13 +646,11 @@ function syncLqLabel() { document.getElementById("lqv").textContent = ui.lqlevel
 
 function initUi() {
   const presetSel = document.getElementById("preset");
-  presetSel.innerHTML = `<option value="">- choose preset -</option>` +
-    MAPS.map((k) => `<option value="${k}">${k}</option>`).join("");
+  presetSel.innerHTML = `<option value="">- choose preset -</option>` + MAPS.map((k) => `<option value="${k}">${k}</option>`).join("");
   presetSel.onchange = () => presetSel.value && loadPreset(presetSel.value);
   document.getElementById("file").onchange = (e) => {
     const f = e.target.files[0]; if (!f) return;
-    const key = f.name.replace(/\.vxl$/i, "");
-    f.arrayBuffer().then((buf) => loadFromBuffer(buf, key));
+    f.arrayBuffer().then((buf) => loadFromBuffer(buf, f.name.replace(/\.vxl$/i, "")));
   };
   document.querySelectorAll("[data-ov]").forEach((b) => b.onclick = () => {
     ui.overlay = b.getAttribute("data-ov"); setActive("[data-ov]", "data-ov", ui.overlay); render();
@@ -610,84 +659,62 @@ function initUi() {
     ui.tool = b.getAttribute("data-tool"); setActive("[data-tool]", "data-tool", ui.tool);
   });
   const mats = document.getElementById("mats");
-  mats.innerHTML = MAT.map((m) => {
-    const c = `rgb(${m.col[0]},${m.col[1]},${m.col[2]})`;
-    return `<button data-mat="${m.id}"><span class="sw" style="background:${c}"></span>${m.name}</button>`;
-  }).join("");
+  mats.innerHTML = MAT.map((m) => `<button data-mat="${m.id}"><span class="sw" style="background:rgb(${m.col})"></span>${m.name}</button>`).join("");
   mats.querySelectorAll("[data-mat]").forEach((b) => b.onclick = () => setMat(+b.getAttribute("data-mat")));
   setMat(2);
-  const rad = document.getElementById("radius"), str = document.getElementById("strength"),
-        skin = document.getElementById("skin"), lq = document.getElementById("lqlevel");
+  const rad = document.getElementById("radius"), str = document.getElementById("strength"), skin = document.getElementById("skin"), lq = document.getElementById("lqlevel");
   rad.oninput = () => { ui.radius = +rad.value; document.getElementById("rv").textContent = rad.value; };
   str.oninput = () => { ui.strength = +str.value; document.getElementById("sv").textContent = str.value; };
   skin.oninput = () => { ui.skin = +skin.value; document.getElementById("skv").textContent = skin.value; };
   lq.oninput = () => { ui.lqlevel = +lq.value; document.getElementById("lqv").textContent = lq.value; };
   document.getElementById("buildon").onclick = (e) => {
-    ui.buildVal = ui.buildVal ? 0 : 1; e.target.textContent = `Build = ${ui.buildVal ? "on" : "off"}`;
-    e.target.classList.toggle("on", !!ui.buildVal);
+    ui.buildVal = ui.buildVal ? 0 : 1; e.target.textContent = `Build = ${ui.buildVal ? "on" : "off"}`; e.target.classList.toggle("on", !!ui.buildVal);
   };
   document.getElementById("liqerase").onclick = (e) => {
-    ui.liqErase = !ui.liqErase; e.target.textContent = `Liquid = ${ui.liqErase ? "erase" : "fill"}`;
-    e.target.classList.toggle("on", ui.liqErase);
+    ui.liqErase = !ui.liqErase; e.target.textContent = `Liquid = ${ui.liqErase ? "erase" : "fill"}`; e.target.classList.toggle("on", ui.liqErase);
   };
   document.getElementById("export").onclick = () => M ? exportVxl() : status("load a map first");
+  document.querySelectorAll("[data-layout]").forEach((b) => b.onclick = () => applyLayout(b.getAttribute("data-layout")));
 
-  // layout (2D / Split / 3D) + height exaggeration
-  document.querySelectorAll("[data-layout]").forEach((b) =>
-    b.onclick = () => applyLayout(b.getAttribute("data-layout")));
-  const exag = document.getElementById("exag");
-  exag.oninput = () => {
-    ui.exag = +exag.value; document.getElementById("exv").textContent = (+exag.value).toFixed(1);
-    if (paneVisible("3d") && M && gl) { buildMesh3d(); render3d(); }
-  };
-  // 3D pointer: left-drag paints (raycast), right-drag orbits, shift/middle pans.
-  let nav = null, mx = 0, mz = 0;
+  // 2D pointer (heightfield brush)
+  let down = false;
+  cv.addEventListener("mousedown", (e) => { if (M) { down = true; surfaceBrush(...colAtEvent(e)); } });
+  cv.addEventListener("mousemove", (e) => {
+    if (!M) return;
+    const [i, k] = colAtEvent(e);
+    status(`col ${i},${k}  y=${M.H[k * M.nx + i].toFixed(1)}  mat=${MAT[Math.min(4, M.surfMat[k * M.nx + i])].name}${M.liquid[k * M.nx + i] ? "  liquid" : ""}`);
+    if (down) surfaceBrush(i, k);
+  });
+  window.addEventListener("mouseup", () => { if (down) { down = false; remesh3d(); } });
+
+  // 3D pointer: left-drag = current tool, right-drag orbits, shift/middle pans.
+  let nav = null, mx = 0, mz = 0, edited = false;
   cv3.addEventListener("contextmenu", (e) => e.preventDefault());
   cv3.addEventListener("mousedown", (e) => {
-    if (!M) return;
-    e.preventDefault();
-    mx = e.clientX; mz = e.clientY;
+    if (!M) return; e.preventDefault(); mx = e.clientX; mz = e.clientY;
     if (e.button === 2) nav = "orbit";
     else if (e.button === 1 || e.shiftKey) nav = "pan";
-    else { nav = "paint"; paint3d(e); }
+    else { nav = "tool"; edited = true; tool3d(e); }
   });
   window.addEventListener("mousemove", (e) => {
     if (!nav) return;
     const dx = e.clientX - mx, dy = e.clientY - mz; mx = e.clientX; mz = e.clientY;
-    if (nav === "orbit") {
-      cam3.yaw += dx * 0.01;
-      cam3.pitch = Math.max(0.12, Math.min(1.52, cam3.pitch + dy * 0.01));
-      render3d();
-    } else if (nav === "pan") { panCam(dx, dy); render3d(); }
-    else if (nav === "paint") { paint3d(e); }
+    if (nav === "orbit") { cam.yaw += dx * 0.01; cam.pitch = Math.max(0.12, Math.min(1.52, cam.pitch + dy * 0.01)); render3d(); }
+    else if (nav === "pan") { panCam(dx, dy); render3d(); }
+    else if (nav === "tool") tool3d(e);
   });
-  window.addEventListener("mouseup", () => nav = null);
+  window.addEventListener("mouseup", () => { if (nav === "tool" && edited) remesh3d(); nav = null; edited = false; });
   cv3.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    cam3.dist = Math.max(200, Math.min(6000, cam3.dist * Math.exp(e.deltaY * 0.001)));
-    render3d();
+    e.preventDefault(); cam.dist = Math.max(150, Math.min(7000, cam.dist * Math.exp(e.deltaY * 0.001))); render3d();
   }, { passive: false });
 
-  let down = false;
-  cv.addEventListener("mousedown", (e) => { if (!M) return; down = true; applyBrush(...colAtEvent(e)); });
-  window.addEventListener("mouseup", () => down = false);
-  cv.addEventListener("mousemove", (e) => {
-    if (!M) return;
-    const [i, k] = colAtEvent(e);
-    document.getElementById("status").textContent =
-      `col ${i},${k}  y=${M.H[k * M.nx + i].toFixed(1)}  mat=${MAT[Math.min(4, M.surfMat[k * M.nx + i])].name}` +
-      `${M.liq[k * M.nx + i] ? "  liquid" : ""}${M.build[k * M.nx + i] ? "  buildable" : ""}`;
-    if (down) applyBrush(i, k);
-  });
   window.addEventListener("resize", () => {
     if (paneVisible("2d")) render();
     if (paneVisible("3d") && gl) { resize3d(); render3d(); }
   });
 
-  // capability check (Compression Streams)
-  if (typeof CompressionStream === "undefined") {
-    document.getElementById("caps").textContent =
-      "This browser lacks CompressionStream; export is disabled. Use a recent Chrome/Firefox/Safari.";
+  if (typeof CompressionStream === "undefined" || typeof DecompressionStream === "undefined") {
+    document.getElementById("caps").textContent = "This browser lacks Compression Streams; load/export need a recent Chrome/Firefox/Safari.";
   }
 }
 initUi();

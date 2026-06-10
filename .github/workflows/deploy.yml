@@ -42,11 +42,13 @@ jobs:
       # Publish the browser map editor (dev tool) and the raw .vxl presets it
       # loads, alongside the game, at /rts-99-jam/tools/mapeditor/. The maps are
       # also embedded in the wasm; the editor needs them as fetchable files.
-      - name: Bundle the map editor + its .vxl presets
+      - name: Bundle the map editor + its .vxl presets and tiles
         run: |
           mkdir -p apps/client/dist/tools/mapeditor apps/client/dist/assets/maps
+          mkdir -p apps/client/dist/assets/textures/worlds
           cp tools/mapeditor/index.html apps/client/dist/tools/mapeditor/
           cp assets/maps/*.vxl apps/client/dist/assets/maps/
+          cp -r assets/textures/worlds/* apps/client/dist/assets/textures/worlds/
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
