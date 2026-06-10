@@ -179,58 +179,102 @@ def _craters(ht, mat, seed, count):
                     mat[kk][ii] = MAT_ACCENT              # bright ejecta rays
 
 
-# Land bridges across fissures: without them a long linea is a moat (its walls
-# are far steeper than units can walk) and can cut whole regions off the map.
-# Every BRIDGE_EVERY steps along a fissure the cut tapers to nothing, leaving
-# an uncut span of surface crossing the trench at natural ground height.
+# Bridges across fissures: without them a long linea is a moat (its walls are
+# far steeper than units can walk) and can cut whole regions off the map. Every
+# BRIDGE_EVERY steps along a trench, `_fissures` records a crossing site and
+# `_decks` later stamps a genuine 3D voxel bridge over it: a solid slab at bank
+# height with the trench running underneath.
 BRIDGE_EVERY = 56   # steps (~grid cells) between bridge centres
-BRIDGE_RAMP = 5.0   # steps over which the cut eases from full depth to zero
 
 
 def _fissures(ht, mat, seed, n, depth, halfw):
     """Europa-style long, deep, narrow fissures (lineae) carved across the map.
 
     Accumulate a max-depth cut map (so overlapping steps do not stack into a
-    bottomless trench), then apply it once. Periodic land bridges (see
-    BRIDGE_EVERY above) keep the regions on either side connected for ground
-    units.
+    bottomless trench), then apply it once. Returns the bridge sites,
+    `(x, z, dir_x, dir_z)` in grid cells along each trench, that keep the
+    regions on either side connected for ground units.
     """
     rng = Rng(seed * 17 + 1)
     cut = [[0.0] * NXZ for _ in range(NXZ)]
-    bridge_half = halfw + 2.0  # half-span of the fully uncut crossing, in steps
+    bridges = []
     for _ in range(n):
         x, z = rng.uniform(0, NXZ), rng.uniform(0, NXZ)
         ang = rng.uniform(0, 2 * math.pi)
         length = int(NXZ * rng.uniform(0.8, 1.4))
         phase = rng.uniform(0, BRIDGE_EVERY)
+        marked = set()
         for s in range(length):
             x += math.cos(ang)
             z += math.sin(ang)
             ang += (rng.rand() - 0.5) * 0.18
             if not (0 <= x < NXZ and 0 <= z < NXZ):
                 break
-            # Distance (in steps) to the nearest bridge centre along this
-            # fissure; inside `bridge_half` nothing is carved, then the depth
-            # eases back in over BRIDGE_RAMP steps (smoothstep, so the trench
-            # ends ramp instead of dropping off a cliff face).
-            t = (s + phase) % BRIDGE_EVERY
-            t = min(t, BRIDGE_EVERY - t)
-            sc = clamp((t - bridge_half) / BRIDGE_RAMP, 0.0, 1.0)
-            sc = sc * sc * (3.0 - 2.0 * sc)
-            if sc <= 0.0:
-                continue
+            cyc = int((s + phase) // BRIDGE_EVERY)
+            if ((s + phase) % BRIDGE_EVERY < 1.0 and cyc not in marked
+                    and 8 <= x < NXZ - 8 and 8 <= z < NXZ - 8):
+                marked.add(cyc)
+                bridges.append((x, z, math.cos(ang), math.sin(ang)))
             for dk in range(-halfw, halfw + 1):
                 for di in range(-halfw, halfw + 1):
                     ii, kk = int(x + di), int(z + dk)
                     if 0 <= ii < NXZ and 0 <= kk < NXZ:
                         dd = math.hypot(di, dk) / (halfw + 0.5)
                         if dd < 1.0:
-                            cut[kk][ii] = max(cut[kk][ii], sc * depth * (1.0 - dd * dd))
-                            if sc > 0.5:
-                                mat[kk][ii] = MAT_ACCENT
+                            cut[kk][ii] = max(cut[kk][ii], depth * (1.0 - dd * dd))
+                            mat[kk][ii] = MAT_ACCENT
     for k in range(NXZ):
         for i in range(NXZ):
             ht[k][i] -= cut[k][i]
+    return bridges
+
+
+def _decks(grid, ht, bridges, dy):
+    """Stamp a solid bridge deck over each recorded fissure crossing.
+
+    The deck is a slab spanning the trench at bank height (linearly ramped
+    between the two banks), thick enough to read as an arch, with the trench
+    left open underneath. The client walks the topmost solid surface, so
+    units cross on the deck while the linea runs below - a real 3D bridge,
+    not a filled-in gap.
+    """
+    # Width matters for the sim: passability cells are 8 world units, their
+    # centres can sit ~5.7u off the deck centreline, and the slope probe
+    # reaches 4u further - so the slab must extend ~10u (2.5 cells) each side
+    # of the centreline or crossings get flagged too steep.
+    half_len = 5.0   # cells along the crossing (perpendicular to the fissure)
+    half_w = 2.8     # cells along the fissure
+    thick = 5.0      # slab thickness, world units
+    spu = 120.0 / dy
+    for (bx, bz, fx, fz) in bridges:
+        px, pz = -fz, fx  # crossing direction (perpendicular to the trench)
+
+        def bank(sign):
+            ii = int(round(clamp(bx + sign * px * half_len, 0, NXZ - 1)))
+            kk = int(round(clamp(bz + sign * pz * half_len, 0, NXZ - 1)))
+            return ht[kk][ii]
+
+        ha, hb = bank(1.0), bank(-1.0)
+        r = int(half_len) + 2
+        for dk in range(-r, r + 1):
+            for di in range(-r, r + 1):
+                a = di * px + dk * pz   # along the crossing
+                b = di * fx + dk * fz   # along the fissure
+                if abs(a) > half_len or abs(b) > half_w:
+                    continue
+                ii, kk = int(round(bx + di)), int(round(bz + dk))
+                if not (0 <= ii < NXZ and 0 <= kk < NXZ):
+                    continue
+                top = hb + (ha - hb) * (a + half_len) / (2.0 * half_len)
+                bottom = top - thick
+                j0 = max(0, int((bottom - 2.0 - YMIN) / dy))
+                j1 = min(grid.ny - 1, int((top + 2.0 - YMIN) / dy) + 1)
+                for j in range(j0, j1 + 1):
+                    y = YMIN + j * dy
+                    d = 128.0 + min(top - y, y - bottom) * spu
+                    lin = grid.lin(ii, j, kk)
+                    grid.density[lin] = max(grid.density[lin],
+                                            int(clamp(d, 0, 255)))
 
 
 def _canyon(ht, mat, seed, depth, halfw):
@@ -432,10 +476,11 @@ def build(world):
     vents = []
 
     _craters(ht, mat, t["seed"], _crater_count(world))
+    bridges = []
     if key == "europa":
-        _fissures(ht, mat, t["seed"], 7, depth=16.0, halfw=2)
+        bridges += _fissures(ht, mat, t["seed"], 7, depth=16.0, halfw=2)
     if key == "ariel":
-        _fissures(ht, mat, t["seed"], 4, depth=12.0, halfw=2)
+        bridges += _fissures(ht, mat, t["seed"], 4, depth=12.0, halfw=2)
     if key == "mars":
         _canyon(ht, mat, t["seed"], depth=22.0, halfw=NXZ * 0.07)
     if key == "io":
@@ -521,6 +566,11 @@ def build(world):
                 d = 128.0 + (surf - y) * slope_per_unit
                 grid.density[grid.lin(i, j, k)] = int(clamp(d, 0, 255))
                 grid.material[grid.lin(i, j, k)] = skin_m if (surf - y) <= skin else sub_m
+
+    # Genuine 3D voxel bridges over the fissures (after the column fill so the
+    # slabs survive; the trench stays open beneath them).
+    if bridges:
+        _decks(grid, ht, bridges, dy)
 
     # 3D caves/arches into steep, dry, non-buildable ground.
     rng = Rng(t["seed"] * 977 + 3)
