@@ -24,6 +24,23 @@ hand (the preset dropdown needs http to fetch).
 
 Needs a current browser (Chrome / Edge / Firefox / Safari) for `CompressionStream`.
 
+## Meshing pipeline
+
+The 3D view's marching cubes is **chunked** (32x32-cell columns): a brush stroke
+only remeshes the chunks it touched, each into its own GL buffer set. The
+meshing itself runs in a **Web Worker**, and inside the worker it prefers the
+**Rust/WASM mesher** (`tools/mesher`, checked in as `mesher.wasm` next to this
+file); the in-page JS mesher is the fallback when the wasm cannot be fetched
+(file://) or instantiated, and a synchronous path remains if workers are
+unavailable. The status line says which path ran (`wasm` / `worker` / neither).
+
+After changing `tools/mesher`, rebuild and re-commit the binary:
+
+```sh
+cargo build -p mesher --release --target wasm32-unknown-unknown
+cp target/wasm32-unknown-unknown/release/mesher.wasm tools/mapeditor/
+```
+
 ## What you can edit
 
 It edits the map's **3D density field directly** (density is the source of truth),

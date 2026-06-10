@@ -223,6 +223,7 @@ function surfaceOf(i, k) {
 
 function buildModel(p) {
   M = p;
+  resetChunks(); // new map: every chunk is stale
   M.dx = (p.bounds[1] - p.bounds[0]) / (p.nx - 1);
   M.dy = (p.bounds[3] - p.bounds[2]) / (p.ny - 1);
   M.dz = (p.bounds[5] - p.bounds[4]) / (p.nz - 1);
@@ -243,6 +244,7 @@ function stampColumn(i, k) {
     M.density[o] = Math.max(0, Math.min(255, Math.round(128 + depth * slope)));
     M.material[o] = depth <= skin ? M.surfMat[c] : M.subMat[c];
   }
+  markDirty(i, i, k, k);
 }
 
 // recompute the H/surfMat caches for a column after a direct density edit
@@ -329,7 +331,28 @@ function surfaceBrush(ci, ck) {
 
 // ============================ 3D view (WebGL2) ============================
 const cv3 = document.getElementById("cv3");
-let gl = null, prog = null, vao = null, bufs = null, idxCount = 0, tex = [];
+let gl = null, prog = null, tex = [];
+// The mesh is chunked in x/z so a brush stroke only remeshes the chunks it
+// touched. Each chunk owns its own VAO + buffers; render3d draws them all.
+const CHUNK = 32; // cells per chunk side
+let chunks = new Map(); // key (ck * chunkCols + ci) -> { vao, bufs, count }
+let dirty = new Set(), dirtyAll = true;
+function chunkCols() { return Math.max(1, Math.ceil((M.nx - 1) / CHUNK)); }
+function chunkRows() { return Math.max(1, Math.ceil((M.nz - 1) / CHUNK)); }
+// Mark chunks overlapping the written voxel range [i0..i1]x[k0..k1] (inclusive).
+// A write at voxel i affects cells i-1 and i, hence the -1 on the low edge.
+function markDirty(i0, i1, k0, k1) {
+  if (!M) return;
+  const cols = chunkCols(), rows = chunkRows();
+  const ci0 = Math.max(0, Math.floor((i0 - 1) / CHUNK)), ci1 = Math.min(cols - 1, Math.floor(i1 / CHUNK));
+  const ck0 = Math.max(0, Math.floor((k0 - 1) / CHUNK)), ck1 = Math.min(rows - 1, Math.floor(k1 / CHUNK));
+  for (let ck = ck0; ck <= ck1; ck++) for (let ci = ci0; ci <= ci1; ci++) dirty.add(ck * cols + ci);
+}
+function resetChunks() {
+  if (gl) for (const c of chunks.values()) { gl.deleteVertexArray(c.vao); for (const b of Object.values(c.bufs)) gl.deleteBuffer(b); }
+  chunks = new Map(); dirty = new Set(); dirtyAll = true;
+}
+function totalTris() { let t = 0; for (const c of chunks.values()) t += c.count / 3; return t | 0; }
 const cam = { yaw: 0.9, pitch: 0.85, dist: 1300, tx: 0, tz: 0 };
 const cyOf = () => (M.bounds[2] + M.bounds[3]) / 2; // vertical centre of the world
 
@@ -380,8 +403,6 @@ function initGL() {
   prog = gl.createProgram();
   gl.attachShader(prog, mk(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, fs));
   gl.linkProgram(prog); gl.enable(gl.DEPTH_TEST);
-  vao = gl.createVertexArray();
-  bufs = { pos: gl.createBuffer(), norm: gl.createBuffer(), w: gl.createBuffer(), haz: gl.createBuffer(), idx: gl.createBuffer() };
   const mkTex = () => { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 128, 255]));
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
@@ -439,6 +460,8 @@ function meshFromGrid(g) {
   const C = [[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]];
   const TETS = [[0,1,2,6],[0,2,3,6],[0,3,7,6],[0,7,4,6],[0,4,5,6],[0,5,1,6]];
   const { density: D, material: MAT, nx, ny, nz, x0, y0, z0, dx, dy, dz, cy } = g;
+  // Optional cell range (a chunk); defaults to the whole grid.
+  const ci0 = g.i0 ?? 0, ci1 = g.i1 ?? nx - 1, ck0 = g.k0 ?? 0, ck1 = g.k1 ?? nz - 1;
   const clampi = (v, n) => v < 0 ? 0 : v >= n ? n - 1 : v;
   const dens = (i, j, k) => D[(clampi(j, ny) * nz + clampi(k, nz)) * nx + clampi(i, nx)];
   const gnormal = (wx, wy, wz) => {
@@ -461,7 +484,7 @@ function meshFromGrid(g) {
   };
   const sY = nz * nx, sZ = nx;
   const offs = C.map((c) => c[1] * sY + c[2] * sZ + c[0]);
-  for (let k = 0; k < nz - 1; k++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+  for (let k = ck0; k < ck1; k++) for (let j = 0; j < ny - 1; j++) for (let i = ci0; i < ci1; i++) {
     const base = (j * nz + k) * nx + i;
     let mn = 255, mx = 0;
     for (let q = 0; q < 8; q++) { const v = D[base + offs[q]]; cv8[q] = v; if (v < mn) mn = v; if (v > mx) mx = v; }
@@ -498,24 +521,54 @@ function gridSnapshot() {
   return { density: M.density, material: M.material, nx, ny, nz, x0: M.bounds[0], y0: M.bounds[2], z0: M.bounds[4], dx, dy, dz, cy: cyOf() };
 }
 
-// Upload a mesh result (typed arrays) to the GL buffers.
-function uploadMesh(r) {
-  idxCount = r.pos.length / 3;
-  gl.bindVertexArray(vao);
+// The cell range of one chunk job, in the form mesh inputs want.
+function chunkRange(key) {
+  const cols = chunkCols();
+  const ci = key % cols, ck = (key / cols) | 0;
+  return {
+    key,
+    i0: ci * CHUNK, i1: Math.min(M.nx - 1, ci * CHUNK + CHUNK),
+    k0: ck * CHUNK, k1: Math.min(M.nz - 1, ck * CHUNK + CHUNK),
+  };
+}
+// Drain the dirty set into a list of chunk jobs (everything when dirtyAll).
+function chunkJobs() {
+  const jobs = [];
+  if (dirtyAll) {
+    const cols = chunkCols(), rows = chunkRows();
+    for (let key = 0; key < cols * rows; key++) jobs.push(chunkRange(key));
+  } else {
+    for (const key of dirty) jobs.push(chunkRange(key));
+  }
+  dirty.clear(); dirtyAll = false;
+  return jobs;
+}
+
+// Upload one chunk's mesh result (typed arrays) into its own VAO/buffers.
+function uploadChunk(key, r) {
+  let c = chunks.get(key);
+  if (!c) {
+    c = { vao: gl.createVertexArray(), bufs: { pos: gl.createBuffer(), norm: gl.createBuffer(), w: gl.createBuffer(), haz: gl.createBuffer() }, count: 0 };
+    chunks.set(key, c);
+  }
+  c.count = r.pos.length / 3;
+  gl.bindVertexArray(c.vao);
   const bind = (buf, arr, name, size) => {
     const loc = gl.getAttribLocation(prog, name);
     gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
   };
-  bind(bufs.pos, r.pos, "a_pos", 3); bind(bufs.norm, r.nor, "a_norm", 3);
-  bind(bufs.w, r.wgt, "a_w", 4); bind(bufs.haz, r.haz, "a_haz", 1);
+  bind(c.bufs.pos, r.pos, "a_pos", 3); bind(c.bufs.norm, r.nor, "a_norm", 3);
+  bind(c.bufs.w, r.wgt, "a_w", 4); bind(c.bufs.haz, r.haz, "a_haz", 1);
   gl.bindVertexArray(null);
 }
 
-// Synchronous build + upload (fallback when no worker). Returns elapsed ms.
-function buildMesh3d() {
+// Synchronous build + upload of the given chunk jobs (fallback when no worker).
+// Returns elapsed ms.
+function buildMesh3d(jobs) {
   const t0 = performance.now();
-  uploadMesh(meshFromGrid(gridSnapshot()));
+  const g = gridSnapshot();
+  for (const job of jobs) uploadChunk(job.key, meshFromGrid({ ...g, ...job }));
   return performance.now() - t0;
 }
 
@@ -532,7 +585,10 @@ function render3d() {
   gl.uniformMatrix4fv(gl.getUniformLocation(prog, "u_mvp"), false, mvp);
   gl.uniform3f(gl.getUniformLocation(prog, "u_light"), -0.5, 0.8, 0.4);
   for (let q = 0; q < 4; q++) { gl.activeTexture(gl.TEXTURE0 + q); gl.bindTexture(gl.TEXTURE_2D, tex[q]); }
-  gl.bindVertexArray(vao); gl.drawArrays(gl.TRIANGLES, 0, idxCount);
+  for (const c of chunks.values()) {
+    if (!c.count) continue;
+    gl.bindVertexArray(c.vao); gl.drawArrays(gl.TRIANGLES, 0, c.count);
+  }
   gl.bindVertexArray(null);
 }
 
@@ -591,6 +647,7 @@ function voxelSphere(wx, wy, wz, R, add) {
     }
   }
   for (let k = k0; k <= k1; k++) for (let i = i0; i <= i1; i++) recache(i, k);
+  markDirty(i0, i1, k0, k1);
 }
 
 // Apply the current tool at a cv3 hit. Voxel tools sculpt density; the rest map
@@ -635,41 +692,95 @@ function applyLayout(mode) {
 // 2D updates live during a stroke (cheap); the 3D mesh rebuild (marching cubes)
 // is deferred to stroke end via remesh3d().
 function refresh2d() { if (paneVisible("2d")) render(); }
-// Marching cubes runs in a Web Worker so a big rebuild never freezes the UI.
+// Marching cubes runs in a Web Worker so a big rebuild never freezes the UI,
+// and inside the worker it prefers the Rust/WASM mesher (tools/mesher, ~10-20x
+// the JS speed); meshFromGrid is the fallback when the wasm can't be fetched
+// (e.g. opened via file://) or instantiated.
 // `mcWorker` is null (untried), false (unavailable -> synchronous), or a Worker.
-let mcWorker = null, mcBusy = false, mcPending = false, mcT0 = 0;
+let mcWorker = null, mcBusy = false, mcPending = false, mcT0 = 0, mcWasm = null;
+function wasmModule() {
+  // Compile once; resolves to a WebAssembly.Module or false (unavailable).
+  if (mcWasm === null) {
+    mcWasm = (typeof WebAssembly !== "undefined")
+      ? fetch("mesher.wasm")
+          .then((r) => r.ok ? r.arrayBuffer() : Promise.reject(new Error("http " + r.status)))
+          .then((buf) => WebAssembly.compile(buf))
+          .catch(() => false)
+      : Promise.resolve(false);
+  }
+  return mcWasm;
+}
 function ensureWorker() {
   if (mcWorker !== null) return; // already a Worker or known-unavailable (false)
   try {
-    const src = "self.onmessage=function(e){var f=" + meshFromGrid.toString() +
-      ";var r=f(e.data);self.postMessage(r,[r.pos.buffer,r.nor.buffer,r.wgt.buffer,r.haz.buffer]);};";
+    const src = `
+      let inst = null;
+      const jsMesh = ${meshFromGrid.toString()};
+      self.onmessage = (e) => {
+        const d = e.data;
+        if (d.module) { WebAssembly.instantiate(d.module).then((i) => { inst = i; }); return; }
+        // One message = the grids + a list of chunk jobs; mesh each job and
+        // post back all the per-chunk vertex arrays (buffers transferred).
+        const out = [], xfer = [];
+        let wasm = false;
+        if (inst) {
+          wasm = true;
+          const ex = inst.exports, n = d.density.length;
+          ex.set_size(n);
+          new Uint8Array(ex.memory.buffer, ex.density_ptr(), n).set(d.density);
+          new Uint8Array(ex.memory.buffer, ex.material_ptr(), n).set(d.material);
+          for (const job of d.jobs) {
+            const count = ex.mesh(d.nx, d.ny, d.nz, d.x0, d.y0, d.z0, d.dx, d.dy, d.dz, d.cy,
+                                  job.i0, job.i1, job.k0, job.k1);
+            // Views are taken after mesh() (memory may have grown) and sliced
+            // so the buffers can be transferred back.
+            out.push({
+              key: job.key,
+              pos: new Float32Array(ex.memory.buffer, ex.pos_ptr(), count * 3).slice(),
+              nor: new Float32Array(ex.memory.buffer, ex.nor_ptr(), count * 3).slice(),
+              wgt: new Float32Array(ex.memory.buffer, ex.wgt_ptr(), count * 4).slice(),
+              haz: new Float32Array(ex.memory.buffer, ex.haz_ptr(), count).slice(),
+            });
+          }
+        } else {
+          for (const job of d.jobs) out.push({ key: job.key, ...jsMesh({ ...d, ...job }) });
+        }
+        for (const r of out) xfer.push(r.pos.buffer, r.nor.buffer, r.wgt.buffer, r.haz.buffer);
+        self.postMessage({ jobs: out, wasm }, xfer);
+      };`;
     const w = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
     w.onmessage = (e) => {
       const ms = performance.now() - mcT0;
-      uploadMesh(e.data); render3d();
-      status(`${M.key}: ${(idxCount / 3 | 0)} tris, meshed in ${ms | 0} ms (worker)`);
+      for (const r of e.data.jobs) uploadChunk(r.key, r);
+      render3d();
+      status(`${M.key}: ${totalTris()} tris, ${e.data.jobs.length} chunk(s) in ${ms | 0} ms (${e.data.wasm ? "wasm" : "worker"})`);
       mcBusy = false;
       if (mcPending) { mcPending = false; remesh3d(); }
     };
     w.onerror = () => { mcWorker = false; mcBusy = false; }; // give up -> sync path
     mcWorker = w;
+    wasmModule().then((m) => { if (m && mcWorker) mcWorker.postMessage({ module: m }); });
   } catch (_) { mcWorker = false; }
 }
 
 function remesh3d() {
   if (!gl || !M || !paneVisible("3d")) return;
+  if (!dirtyAll && dirty.size === 0) { render3d(); return; } // nothing to rebuild
   ensureWorker();
   if (mcWorker) {
-    // Coalesce: if a build is in flight, just remember to rebuild once it lands.
+    // Coalesce: if a build is in flight, leave the dirty set accumulating and
+    // rebuild once it lands.
     if (mcBusy) { mcPending = true; return; }
     mcBusy = true; mcT0 = performance.now();
     // Send copies of the grids (transferred) so editing can continue meanwhile.
     const g = gridSnapshot();
     g.density = M.density.slice(); g.material = M.material.slice();
+    g.jobs = chunkJobs();
     mcWorker.postMessage(g, [g.density.buffer, g.material.buffer]);
   } else {
-    const ms = buildMesh3d(); render3d();
-    status(`${M.key}: ${(idxCount / 3 | 0)} tris, meshed in ${ms | 0} ms`);
+    const jobs = chunkJobs();
+    const ms = buildMesh3d(jobs); render3d();
+    status(`${M.key}: ${totalTris()} tris, ${jobs.length} chunk(s) in ${ms | 0} ms`);
   }
 }
 
