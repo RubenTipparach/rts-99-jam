@@ -350,7 +350,11 @@ mod web {
         ctx.set_fill_style_str(&shade(1.0));
         ctx.fill();
 
-        let mut s: u64 = idx as u64 * 0x9E37_79B9_7F4A_7C15 + 1;
+        // Wrapping: the splitmix constant overflows u64 for any idx >= 2, which
+        // panics in builds with overflow checks (it nuked the lobby in prod).
+        let mut s: u64 = (idx as u64)
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            .wrapping_add(1);
         let mut rnd = || {
             s = s
                 .wrapping_mul(6364136223846793005)

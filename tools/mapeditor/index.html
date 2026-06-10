@@ -595,10 +595,24 @@ function voxelSphere(wx, wy, wz, R, add) {
 
 // Apply the current tool at a cv3 hit. Voxel tools sculpt density; the rest map
 // the hit to a column and run the surface brush there.
+//
+// Strokes are throttled by time + spacing rather than firing on every mousemove
+// event (which arrives 100+ times/sec): the brush re-applies when it has moved
+// a fraction of its radius, or every STROKE_MS while held in place. This is
+// what keeps a slow drag from dumping dozens of applications into one spot.
+const STROKE_MS = 45;
+let strokeT = 0, strokeX = 0, strokeY = 0, strokeZ = 0, strokeFresh = true;
+function strokeBegin() { strokeFresh = true; }
 function tool3d(e) {
   const hit = raycast(e);
   if (!hit) return;
   if (ui.tool === "voxadd" || ui.tool === "voxsub") {
+    const now = performance.now();
+    const spacing = ui.radius * M.dx * 0.35;
+    const moved = Math.hypot(hit.wx - strokeX, hit.wy - strokeY, hit.wz - strokeZ);
+    if (!strokeFresh && moved < spacing && now - strokeT < STROKE_MS) return;
+    strokeFresh = false; strokeT = now;
+    strokeX = hit.wx; strokeY = hit.wy; strokeZ = hit.wz;
     voxelSphere(hit.wx, hit.wy, hit.wz, ui.radius * M.dx, ui.tool === "voxadd");
     if (paneVisible("2d")) render();
   } else {
@@ -766,7 +780,7 @@ function initUi() {
     if (!M) return; e.preventDefault(); mx = e.clientX; mz = e.clientY;
     if (e.button === 2) nav = "orbit";
     else if (e.button === 1 || e.shiftKey) nav = "pan";
-    else { nav = "tool"; edited = true; tool3d(e); }
+    else { nav = "tool"; edited = true; strokeBegin(); tool3d(e); }
   });
   window.addEventListener("mousemove", (e) => {
     if (!nav) return;
