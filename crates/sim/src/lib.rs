@@ -707,6 +707,70 @@ impl World {
         best.map(|(p, _)| p)
     }
 
+    /// Spread harvesters across a node cluster: the same-kind node near
+    /// `want` with the fewest assigned harvesters wins (ties: closer to
+    /// `want`, then lower index). Keeps a worker pile from grinding a single
+    /// node while its neighbours sit untouched.
+    fn balanced_node(&self, want: u32) -> u32 {
+        let w = want as usize;
+        if !self.arena.alive_at(want) || !is_resource(self.kind[w]) {
+            return want;
+        }
+        let cap = self.arena.capacity();
+        // Harvesters currently assigned per node.
+        let mut load = vec![0u32; cap];
+        for i in 0..cap {
+            if !self.arena.alive[i] {
+                continue;
+            }
+            if let Order::Harvest { node } = self.order[i] {
+                if (node as usize) < cap {
+                    load[node as usize] += 1;
+                }
+            }
+        }
+        let kind = self.kind[w];
+        let wp = self.pos[w];
+        let reach2 = Fx::from_int(900); // same cluster: within 30 of the pick
+        let mut best = want;
+        let mut best_load = u32::MAX;
+        let mut best_d2 = Fx::MAX;
+        for (j, &node_load) in load.iter().enumerate() {
+            if !self.arena.alive[j] || self.kind[j] != kind {
+                continue;
+            }
+            let d2 = dist2(wp, self.pos[j].x, self.pos[j].y);
+            if d2 > reach2 {
+                continue;
+            }
+            if node_load < best_load || (node_load == best_load && d2 < best_d2) {
+                best = j as u32;
+                best_load = node_load;
+                best_d2 = d2;
+            }
+        }
+        best
+    }
+
+    /// Nearest living resource node within range 10 of `(x, y)`, if any
+    /// (used to read a rally point set on a node).
+    fn node_at(&self, x: Fx, y: Fx) -> Option<u32> {
+        let mut best: Option<(u32, Fx)> = None;
+        for j in 0..self.arena.capacity() {
+            if !self.arena.alive[j] || !is_resource(self.kind[j]) {
+                continue;
+            }
+            let d2 = dist2(self.pos[j], x, y);
+            if d2 <= Fx::from_int(100) {
+                match best {
+                    Some((_, bd)) if bd <= d2 => {}
+                    _ => best = Some((j as u32, d2)),
+                }
+            }
+        }
+        best.map(|(j, _)| j)
+    }
+
     /// Nearest living resource node (any kind), for auto-retargeting a worker
     /// whose node ran out.
     fn nearest_node(&self, from: Vec3) -> Option<u32> {
@@ -1004,6 +1068,10 @@ impl World {
                         && self.arena.alive_at(node)
                         && is_resource(self.kind[n])
                     {
+                        // Sending a crowd at one node spreads it across the
+                        // cluster (commands apply in order, so each worker
+                        // sees the loads the previous ones just took).
+                        let node = self.balanced_node(node);
                         self.order[u] = Order::Harvest { node };
                     }
                 }
@@ -1153,7 +1221,18 @@ impl World {
         // Just past the building's obstacle footprint.
         let r = obstacle_radius(self.kind[i]).unwrap_or(Fx::from_int(3)) + Fx::from_int(2);
         let id = self.spawn(kind, owner, p.x + rx * r, p.y + ry * r);
-        self.order[id.index as usize] = Order::Move {
+        // A worker whose rally sits on a resource node goes straight to work
+        // (spread across the cluster); everyone else walks to the rally.
+        let u = id.index as usize;
+        if kind == Kind::Worker {
+            if let Some(n) = self.node_at(rally.x, rally.y) {
+                self.order[u] = Order::Harvest {
+                    node: self.balanced_node(n),
+                };
+                return;
+            }
+        }
+        self.order[u] = Order::Move {
             x: rally.x,
             y: rally.y,
         };
@@ -1836,6 +1915,63 @@ mod tests {
             w.step(&[]);
         }
         assert_eq!(w.alive_count(), 1, "the ordered worker should win");
+    }
+
+    #[test]
+    fn rally_on_a_node_auto_mines_and_spreads() {
+        let mut w = World::new(41);
+        w.step(&[
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Hq,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnResource {
+                kind: ResourceKind::Ore,
+                x: fx(30),
+                y: fx(0),
+            },
+            Command::SpawnResource {
+                kind: ResourceKind::Ore,
+                x: fx(30),
+                y: fx(12),
+            },
+        ]);
+        // Rally the HQ onto the first node, then train two workers.
+        w.step(&[
+            Command::SetRally {
+                building: 0,
+                x: fx(30),
+                y: fx(0),
+            },
+            Command::Train {
+                building: 0,
+                kind: UnitKind::Worker,
+            },
+            Command::Train {
+                building: 0,
+                kind: UnitKind::Worker,
+            },
+        ]);
+        let start = w.ore(0);
+        for _ in 0..2500 {
+            w.step(&[]);
+        }
+        // Both rallied workers mined without any explicit order...
+        assert!(w.ore(0) > start, "rally-mining should bank ore");
+        // ...and the pair spread across the cluster instead of stacking.
+        let snap = w.snapshot();
+        let mined: Vec<bool> = snap
+            .iter()
+            .filter(|s| s.kind == Kind::OreNode)
+            .map(|s| s.resource_frac < Fx::ONE)
+            .collect();
+        assert_eq!(mined.len(), 2);
+        assert!(
+            mined.iter().all(|&m| m),
+            "harvesters should spread over both nodes"
+        );
     }
 
     #[test]

@@ -9,7 +9,7 @@
 //! Pure floats, pure cosmetics: nothing here feeds back into the sim. The
 //! internal RNG is just a frame-local jitter source.
 
-use crate::gfx::{FxLight, InstanceRaw, MAX_LIGHTS, ROT_NONE};
+use crate::gfx::{FxLight, InstanceRaw, ANIM_NONE, MAX_LIGHTS, ROT_NONE};
 
 const MAX_PARTICLES: usize = 4096;
 const GRAVITY: f32 = -22.0;
@@ -196,6 +196,21 @@ impl Fx {
         }
     }
 
+    /// Construction welding: bright sparks fly off a structure being raised,
+    /// with an occasional white-hot flash.
+    pub fn weld(&mut self, pos: [f32; 3], spread: f32) {
+        let (jx, jz) = (self.jitter(), self.jitter());
+        let p = [
+            pos[0] + jx * spread,
+            pos[1] + 1.5 + self.jitter().abs() * 2.0,
+            pos[2] + jz * spread,
+        ];
+        self.burst(p, [1.0, 0.92, 0.70], 2, 7.0, 0.45, 0.16, 1.0);
+        if self.jitter() > 0.45 {
+            self.light(p, 7.0, [1.0, 0.85, 0.50], 0.10);
+        }
+    }
+
     /// A worker chipping at a node: crystal sparks + a soft teal glint.
     pub fn mining(&mut self, pos: [f32; 3], carbon: bool) {
         let p = [pos[0], pos[1] + 1.0, pos[2]];
@@ -229,19 +244,28 @@ impl Fx {
         self.lights.retain(|l| l.life > 0.0);
     }
 
-    /// Emissive instances for the particle draw group.
+    /// Emissive instances for the particle draw group. A particle is born
+    /// near-white hot, settles to its base color, and dies by dithered
+    /// transparency (the shader's screen-door fade, alpha 3+t) - never by
+    /// darkening.
     pub fn instances(&self) -> Vec<InstanceRaw> {
         self.particles
             .iter()
             .map(|q| {
                 let t = (q.life / q.max_life).clamp(0.0, 1.0);
                 let s = q.size * (0.4 + 0.6 * t);
+                let hot = ((t - 0.55) / 0.45).clamp(0.0, 1.0);
+                let col = [
+                    q.color[0] + (1.0 - q.color[0]) * hot,
+                    q.color[1] + (1.0 - q.color[1]) * hot,
+                    q.color[2] + (1.0 - q.color[2]) * hot,
+                ];
                 InstanceRaw {
                     offset: q.pos,
                     scale: [s, s, s],
-                    // Fade toward black as the particle dies (emissive mode).
-                    color: [q.color[0] * t, q.color[1] * t, q.color[2] * t, 3.0],
+                    color: [col[0], col[1], col[2], 3.0 + t],
                     rot: ROT_NONE,
+                    anim: ANIM_NONE,
                 }
             })
             .collect()

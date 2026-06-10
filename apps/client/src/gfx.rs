@@ -14,10 +14,16 @@ pub struct InstanceRaw {
     pub color: [f32; 4],
     /// Yaw about +Y as `(cos, sin)`; `ROT_NONE` leaves the mesh unrotated.
     pub rot: [f32; 2],
+    /// Procedural walk cycle as `(phase, amplitude)`: the vertex shader
+    /// swings geometry near the ground (legs) along the facing axis, the two
+    /// sides in counter-phase. `ANIM_NONE` for buildings and idle units.
+    pub anim: [f32; 2],
 }
 
 /// Identity rotation for [`InstanceRaw::rot`].
 pub const ROT_NONE: [f32; 2] = [1.0, 0.0];
+/// No walk cycle for [`InstanceRaw::anim`].
+pub const ANIM_NONE: [f32; 2] = [0.0, 0.0];
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -25,7 +31,13 @@ pub struct RingRaw {
     pub center: [f32; 3],
     pub radius: f32,
     pub color: [f32; 4],
+    /// Inner radius as a fraction of `radius`: [`RING`] for the standard
+    /// selection annulus, 0.0 for a filled disc (blob contact shadows).
+    pub inner: f32,
 }
+
+/// Standard annulus inner fraction for [`RingRaw::inner`].
+pub const RING: f32 = 0.82;
 
 /// One vertex of a selection-ring ground decal (tessellated each frame so it
 /// follows the terrain height).
@@ -961,13 +973,13 @@ fn heavy_mesh() -> Vec<UnitVertex> {
         [0.9, 0.5, 0.3],
         0.0,
     ); // visor
-       // Shoulder guns.
+       // Shoulder guns, barrels out the face (+z) side.
     for sx in [-1.15_f32, 0.85] {
         push_box(&mut m, [sx, 2.0, -0.3], [sx + 0.3, 2.7, 0.3], dark, 0.0);
         push_box(
             &mut m,
-            [sx + 0.02, 2.2, -1.1],
-            [sx + 0.28, 2.5, -0.2],
+            [sx + 0.02, 2.2, 0.2],
+            [sx + 0.28, 2.5, 1.1],
             gun,
             0.0,
         );
@@ -1036,7 +1048,7 @@ fn ring_decals(rings: &[RingRaw]) -> Vec<RingVertex> {
     let mut out = Vec::new();
     for r in rings.iter().take(MAX_RINGS) {
         let (cx, cz) = (r.center[0], r.center[2]);
-        let (r_in, r_out) = (r.radius * 0.82, r.radius);
+        let (r_in, r_out) = (r.radius * r.inner.clamp(0.0, 0.98), r.radius);
         let color = r.color;
         let pt = |radius: f32, c: f32, s: f32| {
             let (x, z) = (cx + c * radius, cz + s * radius);
@@ -1531,7 +1543,7 @@ impl Gfx {
         let inst = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<InstanceRaw>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4, 6 => Float32x2],
+            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4, 6 => Float32x2, 7 => Float32x2],
         };
         let ring_v = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<RingVertex>() as u64,
@@ -1734,6 +1746,7 @@ impl Gfx {
                 scale: [1.0, 1.0, 1.0],
                 color: [0.0, 0.0, 0.0, 1.0],
                 rot: ROT_NONE,
+                anim: ANIM_NONE,
             }),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );

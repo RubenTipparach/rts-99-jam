@@ -3,7 +3,7 @@
 
 use crate::camera::Camera;
 use crate::fx::Fx as FxSystem;
-use crate::gfx::{FxLight, InstanceRaw, RingRaw, FOW_RES, ROT_NONE};
+use crate::gfx::{FxLight, InstanceRaw, RingRaw, ANIM_NONE, FOW_RES, RING, ROT_NONE};
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
 use protocol::{BuildingKind, Command, UnitKind};
@@ -376,6 +376,30 @@ impl Game {
                 self.fx.hit(pos, organic);
             }
         }
+        // Structures being raised shower welding sparks.
+        let welds: Vec<([f32; 3], f32)> = self
+            .curr
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.kind,
+                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                ) && s.construct_frac < Fx::ONE
+            })
+            .filter(|s| s.owner == 0 || self.cell_visible(f(s.pos.x), f(s.pos.y)))
+            .map(|s| {
+                let r = match s.kind {
+                    Kind::Hq => 6.0,
+                    Kind::Barracks => 5.0,
+                    _ => 2.5,
+                };
+                (at(s), r)
+            })
+            .collect();
+        for (pos, spread) in welds {
+            self.fx.weld(pos, spread);
+        }
+
         // Damaged buildings burn: smoke from light damage, flames and a
         // flickering glow once they're badly hurt.
         let fires: Vec<([f32; 3], f32, f32)> = self
@@ -727,6 +751,7 @@ impl Game {
                     scale: [scl, scl, scl],
                     color: [1.0, 1.0, 1.0, 0.0],
                     rot: ROT_NONE,
+                    anim: ANIM_NONE,
                 };
                 if s.kind == Kind::OreNode {
                     ore_nodes.push(inst);
@@ -757,6 +782,7 @@ impl Game {
                     } else {
                         ROT_NONE
                     },
+                    anim: ANIM_NONE,
                 };
                 let radius = match s.kind {
                     Kind::Turret => 4.0,
@@ -764,6 +790,16 @@ impl Game {
                     Kind::Hq => 9.0,
                     _ => 8.0,
                 };
+                // Faked 90s contact shadow: a soft dark disc decal under the
+                // footprint (the levelled pad keeps it flat). Reads as
+                // grounding for the Hollowmen and as a hover shadow for the
+                // floating Astromancer shells.
+                rings.push(RingRaw {
+                    center: [wx, ground, wz],
+                    radius: radius * 1.08,
+                    color: [0.0, 0.0, 0.0, 0.38 * cf],
+                    inner: 0.0,
+                });
                 match s.kind {
                     Kind::Turret => turrets.push(inst),
                     Kind::Supply => supplies.push(inst),
@@ -788,6 +824,7 @@ impl Game {
                             center: [rx, terrain::height(rx, rz), rz],
                             radius: 1.7,
                             color: [1.0, 0.78, 0.3, 0.9],
+                            inner: RING,
                         });
                     }
                 }
@@ -810,6 +847,8 @@ impl Game {
                             scale: [1.0, 1.0, 1.0],
                             color: tint,
                             rot: rot_of(s),
+                            // Hovers: no legs to swing.
+                            anim: ANIM_NONE,
                         }
                     }
                     Faction::Hollowmen => {
@@ -823,6 +862,11 @@ impl Game {
                             scale: [1.0, 1.0, 1.0],
                             color: tint,
                             rot: rot_of(s),
+                            anim: if s.moving && !s.mining {
+                                [self.time * 9.0 + phase, 0.30]
+                            } else {
+                                ANIM_NONE
+                            },
                         }
                     }
                 };
@@ -835,6 +879,7 @@ impl Game {
                         center: [wx, ground, wz],
                         radius: 2.2,
                         color: [0.4, 1.0, 0.5, 0.95],
+                        inner: RING,
                     });
                 }
             } else {
@@ -854,6 +899,15 @@ impl Game {
                     scale: [scl, scl, scl],
                     color: tint,
                     rot: rot_of(s),
+                    anim: if s.moving {
+                        if heavy {
+                            [self.time * 5.5 + s.index as f32 * 1.3, 0.5]
+                        } else {
+                            [self.time * 9.0 + s.index as f32 * 1.3, 0.32]
+                        }
+                    } else {
+                        ANIM_NONE
+                    },
                 };
                 if heavy {
                     heavies.push(inst);
@@ -865,6 +919,7 @@ impl Game {
                         center: [wx, ground, wz],
                         radius: if heavy { 3.0 } else { 2.2 },
                         color: [0.4, 1.0, 0.5, 0.95],
+                        inner: RING,
                     });
                 }
             }
@@ -885,6 +940,7 @@ impl Game {
                 scale: [1.0, 1.0, 1.0],
                 color: holo,
                 rot: ROT_NONE,
+                anim: ANIM_NONE,
             };
             let radius = match kind {
                 BuildingKind::Hq => 9.0,
@@ -908,6 +964,7 @@ impl Game {
                 center: [gx, ground, gz],
                 radius,
                 color: [holo[0], holo[1], holo[2], 0.85],
+                inner: RING,
             });
         }
 
@@ -921,6 +978,7 @@ impl Game {
                 scale: [1.0, 1.0, 1.0],
                 color: [0.30, 1.0, 0.55, 2.4],
                 rot: ROT_NONE,
+                anim: ANIM_NONE,
             };
             match pb.kind {
                 BuildingKind::Hq => match self.faction_of(0) {
@@ -956,6 +1014,7 @@ impl Game {
                 center: [wx, terrain::height(wx, wz), wz],
                 radius,
                 color,
+                inner: RING,
             });
         }
 
@@ -1429,12 +1488,23 @@ impl Game {
         let Some((b, _)) = self.selected_producer() else {
             return false;
         };
+        // Rally onto a resource node snaps to its center: freshly trained
+        // workers then auto-harvest the cluster (the sim spreads them).
+        let node = self.nearest_node(wx, wz, 10.0);
+        let (rx, rz) = node
+            .and_then(|n| self.curr.iter().find(|s| s.index == n))
+            .map(|s| (f(s.pos.x), f(s.pos.y)))
+            .unwrap_or((wx, wz));
         self.pending.push(Command::SetRally {
             building: b,
-            x: fx(wx),
-            y: fx(wz),
+            x: fx(rx),
+            y: fx(rz),
         });
-        self.ping(Ping::Move, wx, wz, None);
+        if let Some(n) = node {
+            self.ping(Ping::Harvest, rx, rz, Some(n));
+        } else {
+            self.ping(Ping::Move, rx, rz, None);
+        }
         true
     }
 
