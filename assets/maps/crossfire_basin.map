@@ -1,0 +1,166 @@
+# Crossfire Basin - the default skirmish scenario.
+#
+# Human-readable map format, parsed by apps/client/src/map.rs (one entity per
+# line; see docs/maps.md for the full spec):
+#
+#   name <map name>
+#   barracks|turret        <player> <x> <z>
+#   infantry|worker|heavy  <player> <x> <z>
+#   ore|carbon             <x> <z>
+#
+# Coordinates are integer world units on the battlefield (-512..512 on both
+# axes). '#' starts a comment, blank lines are ignored, and resource nodes
+# are always neutral. Player 0 is the human; player 1 is the bot commander.
+#
+# Layout, with StarCraft map design as the guide:
+#
+#   - Every main base has a 6-patch ore line arced BEHIND the base (between
+#     the base and the map edge) so the worker line is defensible ground,
+#     with a carbon geyser capping one flank of the line.
+#   - Each main has a natural expansion cluster one lane out toward the
+#     middle: closer to the fight, cheap to take, harder to hold.
+#   - The center is a rich contested cluster (6 ore + 2 carbon) exposed
+#     from every lane: the "gold expansion" worth fighting over.
+#   - Two side clusters hug the east/west edges at mid-map: third bases
+#     that reward controlling the flanking routes.
+#   - Shared clusters are mirrored left/right and top/bottom, so neither
+#     side has a shorter path to any contested patch.
+#
+#                 NW main             NE main
+#                  (ore+gas)           (ore+gas)
+#                    NW natural   NE natural
+#       west side                          east side
+#       cluster          center            cluster
+#                       (rich)
+#                    SW natural   SE natural
+#                         player main
+#                          (ore+gas)
+
+name Crossfire Basin
+
+# ------------------------------------------------------------ player main (S)
+barracks 0 0 210
+
+infantry 0 -8 180
+infantry 0 -4 180
+infantry 0 0 180
+infantry 0 4 180
+infantry 0 8 180
+
+worker 0 -12 196
+worker 0 0 196
+worker 0 12 196
+
+# Ore line arced behind the barracks; geyser on the east flank.
+ore -23 229
+ore -15 236
+ore -5 240
+ore 5 240
+ore 15 236
+ore 23 229
+carbon 38 218
+
+# ------------------------------------------------------------- enemy main (NW)
+barracks 1 -150 -190
+
+infantry 1 -160 -165
+infantry 1 -156 -165
+infantry 1 -152 -165
+infantry 1 -148 -165
+infantry 1 -144 -165
+infantry 1 -140 -165
+
+worker 1 -156 -178
+worker 1 -144 -178
+
+# Ore line arced behind the base; geyser on the west flank.
+ore -173 -209
+ore -165 -216
+ore -155 -220
+ore -145 -220
+ore -135 -216
+ore -127 -209
+carbon -188 -198
+
+# ------------------------------------------------------------- enemy main (NE)
+barracks 1 150 -190
+
+infantry 1 140 -165
+infantry 1 144 -165
+infantry 1 148 -165
+infantry 1 152 -165
+infantry 1 156 -165
+infantry 1 160 -165
+
+worker 1 144 -178
+worker 1 156 -178
+
+# Ore line arced behind the base; geyser on the east flank.
+ore 127 -209
+ore 135 -216
+ore 145 -220
+ore 155 -220
+ore 165 -216
+ore 173 -209
+carbon 188 -198
+
+# ------------------------------------------------- naturals (4 ore + 1 carbon)
+# One per quadrant, mirrored, a lane out from each main. The player can take
+# either of the southern pair; the bot's mains each sit over a northern one.
+
+# SW natural
+ore -112 128
+ore -104 134
+ore -94 137
+ore -84 133
+carbon -114 110
+
+# SE natural
+ore 112 128
+ore 104 134
+ore 94 137
+ore 84 133
+carbon 114 110
+
+# NW natural
+ore -112 -128
+ore -104 -134
+ore -94 -137
+ore -84 -133
+carbon -114 -110
+
+# NE natural
+ore 112 -128
+ore 104 -134
+ore 94 -137
+ore 84 -133
+carbon 114 -110
+
+# ------------------------------------------- center: rich contested expansion
+# A ring of 6 ore with a geyser on the north and south rim. Open ground in
+# the middle: whoever holds the pit mines double gas.
+ore 18 0
+ore 9 16
+ore -9 16
+ore -18 0
+ore -9 -16
+ore 9 -16
+carbon 0 26
+carbon 0 -26
+
+# --------------------------------------------- side clusters (east/west rim)
+# Third-base clusters on the flanking routes at mid-map.
+
+# West side
+ore -256 -15
+ore -258 -5
+ore -258 5
+ore -256 15
+carbon -246 0
+
+# East side
+ore 256 -15
+ore 258 -5
+ore 258 5
+ore 256 15
+carbon 246 0

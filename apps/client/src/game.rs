@@ -5,7 +5,7 @@ use crate::camera::Camera;
 use crate::gfx::{InstanceRaw, RingRaw, FOW_RES};
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
-use protocol::{BuildingKind, Command, ResourceKind, UnitKind};
+use protocol::{BuildingKind, Command, UnitKind};
 use sim::{Kind, Snap, World};
 use std::collections::HashSet;
 use web_time::Instant;
@@ -16,10 +16,6 @@ const SEED: u64 = 0x5011_D011_0099_0001;
 #[inline]
 fn f(x: Fx) -> f32 {
     x.to_raw() as f32 / (1u64 << FRAC_BITS) as f32
-}
-#[inline]
-fn fxi(i: i32) -> Fx {
-    Fx::from_int(i)
 }
 #[inline]
 fn fx(v: f32) -> Fx {
@@ -101,76 +97,12 @@ impl Default for Game {
 
 impl Game {
     pub fn new() -> Self {
-        let mut setup = Vec::new();
-        // Player base (near the camera start).
-        setup.push(Command::SpawnBuilding {
-            owner: 0,
-            kind: BuildingKind::Barracks,
-            x: fxi(0),
-            y: fxi(210),
-        });
-        for k in 0..5 {
-            setup.push(Command::SpawnUnit {
-                owner: 0,
-                kind: UnitKind::Infantry,
-                x: fxi(-8 + 4 * k),
-                y: fxi(180),
-            });
-        }
-        // A starting trio of workers by the player's base.
-        for k in 0..3 {
-            setup.push(Command::SpawnUnit {
-                owner: 0,
-                kind: UnitKind::Worker,
-                x: fxi(-12 + 12 * k),
-                y: fxi(196),
-            });
-        }
-        // Resource nodes: an ore patch and a carbon geyser near the player base,
-        // plus an ore patch up by each enemy base to fight over.
-        setup.push(Command::SpawnResource {
-            kind: ResourceKind::Ore,
-            x: fxi(-70),
-            y: fxi(170),
-        });
-        setup.push(Command::SpawnResource {
-            kind: ResourceKind::Carbon,
-            x: fxi(70),
-            y: fxi(168),
-        });
-        for &bx in &[-150i32, 150] {
-            setup.push(Command::SpawnResource {
-                kind: ResourceKind::Ore,
-                x: fxi(bx + 60),
-                y: fxi(-150),
-            });
-        }
-        // Two enemy barracks far to the north, each with a guard squad - hidden
-        // by fog until you scout up to them.
-        for &bx in &[-150i32, 150] {
-            setup.push(Command::SpawnBuilding {
-                owner: 1,
-                kind: BuildingKind::Barracks,
-                x: fxi(bx),
-                y: fxi(-190),
-            });
-            for k in 0..6 {
-                setup.push(Command::SpawnUnit {
-                    owner: 1,
-                    kind: UnitKind::Infantry,
-                    x: fxi(bx - 10 + 4 * k),
-                    y: fxi(-165),
-                });
-            }
-            for k in 0..2 {
-                setup.push(Command::SpawnUnit {
-                    owner: 1,
-                    kind: UnitKind::Worker,
-                    x: fxi(bx - 6 + 12 * k),
-                    y: fxi(-178),
-                });
-            }
-        }
+        // The whole starting layout (bases, garrisons, and the resource
+        // clusters) is baked into the human-readable map file; the player's
+        // main sits near the camera start.
+        let map = crate::map::parse(crate::map::SKIRMISH).expect("baked map is invalid");
+        log::info!("loading map: {}", map.name);
+        let setup = map.commands;
 
         let mut g = Game {
             world: World::new(SEED),

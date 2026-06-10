@@ -5,6 +5,7 @@ mod camera;
 mod game;
 mod gfx;
 mod hud;
+mod map;
 mod menu;
 mod terrain;
 mod voxel;
