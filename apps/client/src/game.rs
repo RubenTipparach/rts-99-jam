@@ -43,9 +43,12 @@ pub enum Faction {
 }
 
 /// Per-mesh instance lists + selection rings, in draw order: infantry, the two
-/// faction barracks, the two faction workers, the two resource nodes, heavies,
-/// turrets, then rings. Matches `Gfx::render`'s argument order.
+/// faction barracks, the two faction HQs, the two faction workers, the two
+/// resource nodes, heavies, turrets, then rings. Matches `Gfx::render`'s
+/// argument order.
 pub type RenderData = (
+    Vec<InstanceRaw>,
+    Vec<InstanceRaw>,
     Vec<InstanceRaw>,
     Vec<InstanceRaw>,
     Vec<InstanceRaw>,
@@ -235,7 +238,11 @@ impl Game {
             .filter(|s| s.owner == 0)
             .map(|s| {
                 let (wx, wz) = self.lerped(s);
-                let r = if s.kind == Kind::Barracks { 62.5 } else { 45.0 };
+                let r = if matches!(s.kind, Kind::Hq | Kind::Barracks) {
+                    62.5
+                } else {
+                    45.0
+                };
                 (wx, wz, r)
             })
             .collect();
@@ -345,15 +352,18 @@ impl Game {
     }
 
     /// Instances for each mesh - infantry, the two faction barracks (Astromancer,
-    /// Hollowmen), the two faction workers (Acolyte, Engineer), the two resource
-    /// nodes (ore, carbon) - plus selection rings. Meshes are authored at world
-    /// scale, so instance scale is ~1 (nodes shrink with depletion).
+    /// Hollowmen), the two faction HQs (Spire, Command HQ), the two faction
+    /// workers (Acolyte, Engineer), the two resource nodes (ore, carbon) - plus
+    /// selection rings. Meshes are authored at world scale, so instance scale is
+    /// ~1 (nodes shrink with depletion).
     #[allow(clippy::type_complexity)]
     pub fn render_data(&self) -> RenderData {
         let sel: HashSet<u32> = self.selected.iter().copied().collect();
         let mut infantry = Vec::new();
         let mut barracks_astro = Vec::new();
         let mut barracks_hollow = Vec::new();
+        let mut hq_astro = Vec::new();
+        let mut hq_hollow = Vec::new();
         let mut acolytes = Vec::new();
         let mut engineers = Vec::new();
         let mut ore_nodes = Vec::new();
@@ -381,7 +391,7 @@ impl Game {
                 } else {
                     carbon_nodes.push(inst);
                 }
-            } else if matches!(s.kind, Kind::Barracks | Kind::Turret) {
+            } else if matches!(s.kind, Kind::Hq | Kind::Barracks | Kind::Turret) {
                 // Buildings rise out of the ground as they are constructed
                 // (construct_frac 0 -> 1); a finished one is at full height.
                 let cf = f(s.construct_frac).clamp(0.08, 1.0);
@@ -390,9 +400,17 @@ impl Game {
                     scale: [1.0, cf, 1.0],
                     color: tint,
                 };
-                let radius = if s.kind == Kind::Turret { 4.0 } else { 8.0 };
+                let radius = match s.kind {
+                    Kind::Turret => 4.0,
+                    Kind::Hq => 9.0,
+                    _ => 8.0,
+                };
                 match s.kind {
                     Kind::Turret => turrets.push(inst),
+                    Kind::Hq => match self.faction_of(s.owner) {
+                        Faction::Astromancer => hq_astro.push(inst),
+                        Faction::Hollowmen => hq_hollow.push(inst),
+                    },
                     _ => match self.faction_of(s.owner) {
                         Faction::Astromancer => barracks_astro.push(inst),
                         Faction::Hollowmen => barracks_hollow.push(inst),
@@ -484,6 +502,8 @@ impl Game {
             infantry,
             barracks_astro,
             barracks_hollow,
+            hq_astro,
+            hq_hollow,
             acolytes,
             engineers,
             ore_nodes,
@@ -496,7 +516,7 @@ impl Game {
 
     fn info(&self, s: &Snap) -> UnitInfo {
         let (wx, wz) = self.lerped(s);
-        let barracks = matches!(s.kind, Kind::Barracks | Kind::Turret);
+        let barracks = matches!(s.kind, Kind::Hq | Kind::Barracks | Kind::Turret);
         UnitInfo {
             owner: s.owner,
             barracks,
@@ -554,8 +574,8 @@ impl Game {
             match (s.owner, s.kind) {
                 (0, Kind::Infantry | Kind::Heavy) => c.0 += 1,
                 (_, Kind::Infantry | Kind::Heavy) => c.1 += 1,
-                (0, Kind::Barracks | Kind::Turret) => c.2 += 1,
-                (_, Kind::Barracks | Kind::Turret) => c.3 += 1,
+                (0, Kind::Hq | Kind::Barracks | Kind::Turret) => c.2 += 1,
+                (_, Kind::Hq | Kind::Barracks | Kind::Turret) => c.3 += 1,
                 // Workers and resource nodes are not part of this army tally.
                 (_, Kind::Worker) | (_, Kind::OreNode) | (_, Kind::CarbonNode) => {}
             }
@@ -580,7 +600,11 @@ impl Game {
             if !self.cell_visible(ex, ez) {
                 continue;
             }
-            let pad = if s.kind == Kind::Barracks { 6.0 } else { 0.0 };
+            let pad = match s.kind {
+                Kind::Hq => 7.0,
+                Kind::Barracks => 6.0,
+                _ => 0.0,
+            };
             let d = (ex - wx).hypot(ez - wz) - pad;
             if d <= r && best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((s.index, d));
@@ -616,7 +640,7 @@ impl Game {
         if best.is_none() {
             let bldg_r = (h * 0.06).max(36.0);
             for s in &self.curr {
-                if s.owner != 0 || s.kind != Kind::Barracks {
+                if s.owner != 0 || !matches!(s.kind, Kind::Hq | Kind::Barracks) {
                     continue;
                 }
                 let (wx, wz) = self.lerped(s);
@@ -635,21 +659,38 @@ impl Game {
         }
     }
 
-    /// The selected entity if it is exactly one of the player's buildings.
-    pub fn selected_barracks(&self) -> Option<u32> {
+    /// The selected entity if it is exactly one of the player's production
+    /// buildings (HQ or Barracks), with its kind.
+    fn selected_producer(&self) -> Option<(u32, Kind)> {
         if self.selected.len() != 1 {
             return None;
         }
         let i = self.selected[0];
         self.curr
             .iter()
-            .find(|s| s.index == i && s.owner == 0 && s.kind == Kind::Barracks)
-            .map(|s| s.index)
+            .find(|s| s.index == i && s.owner == 0 && matches!(s.kind, Kind::Hq | Kind::Barracks))
+            .map(|s| (s.index, s.kind))
     }
 
-    /// Queue a unit of `kind` at the selected building.
+    /// The selected entity if it is exactly one of the player's barracks.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn selected_barracks(&self) -> Option<u32> {
+        self.selected_producer()
+            .filter(|&(_, k)| k == Kind::Barracks)
+            .map(|(i, _)| i)
+    }
+
+    /// The selected entity if it is exactly one of the player's HQs.
+    pub fn selected_hq(&self) -> Option<u32> {
+        self.selected_producer()
+            .filter(|&(_, k)| k == Kind::Hq)
+            .map(|(i, _)| i)
+    }
+
+    /// Queue a unit of `kind` at the selected production building (the sim
+    /// validates the building/unit pairing: HQ -> workers, Barracks -> fighters).
     pub fn train_selected(&mut self, kind: UnitKind) {
-        if let Some(b) = self.selected_barracks() {
+        if let Some((b, _)) = self.selected_producer() {
             self.pending.push(Command::Train { building: b, kind });
         }
     }
@@ -691,16 +732,23 @@ impl Game {
         f(self.world.carbon(0))
     }
 
-    /// Ore cost to train one unit (for the HUD).
+    /// Ore cost to train one infantry (for the HUD).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn train_cost(&self) -> f32 {
         sim::TRAIN_COST as f32
     }
 
-    /// (queued, build-progress 0..1) for the selected building, for the HUD.
+    /// Ore cost to train one worker (for the HUD).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn worker_cost(&self) -> f32 {
+        sim::WORKER_COST as f32
+    }
+
+    /// (queued, build-progress 0..1) for the selected production building
+    /// (HQ or Barracks), for the HUD.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     pub fn selected_production(&self) -> Option<(u32, f32)> {
-        let b = self.selected_barracks()?;
+        let (b, _) = self.selected_producer()?;
         self.curr
             .iter()
             .find(|s| s.index == b)

@@ -4,7 +4,7 @@
 # line; see docs/maps.md for the full spec):
 #
 #   name <map name>
-#   barracks|turret        <player> <x> <z>
+#   hq|barracks|turret     <player> <x> <z>
 #   infantry|worker|heavy  <player> <x> <z>
 #   ore|carbon             <x> <z>
 #
@@ -14,6 +14,9 @@
 #
 # Layout, with StarCraft map design as the guide:
 #
+#   - Classic start: every player opens with an HQ (Astromancer Spire /
+#     Hollowmen Command HQ) and four workers on the ore line - production
+#     buildings are constructed in-game by workers, never given for free.
 #   - Every main base has a 6-patch ore line arced BEHIND the base (between
 #     the base and the map edge) so the worker line is defensible ground,
 #     with a carbon geyser capping one flank of the line.
@@ -39,19 +42,15 @@
 name Crossfire Basin
 
 # ------------------------------------------------------------ player main (S)
-barracks 0 0 210
+# StarCraft-style start: the HQ and four workers staged on the ore line.
+hq 0 0 210
 
-infantry 0 -8 180
-infantry 0 -4 180
-infantry 0 0 180
-infantry 0 4 180
-infantry 0 8 180
+worker 0 -9 221
+worker 0 -3 222
+worker 0 3 222
+worker 0 9 221
 
-worker 0 -12 196
-worker 0 0 196
-worker 0 12 196
-
-# Ore line arced behind the barracks; geyser on the east flank.
+# Ore line arced behind the HQ; geyser on the east flank.
 ore -23 229
 ore -15 236
 ore -5 240
@@ -61,17 +60,12 @@ ore 23 229
 carbon 38 218
 
 # ------------------------------------------------------------- enemy main (NW)
-barracks 1 -150 -190
+hq 1 -150 -190
 
-infantry 1 -160 -165
-infantry 1 -156 -165
-infantry 1 -152 -165
-infantry 1 -148 -165
-infantry 1 -144 -165
-infantry 1 -140 -165
-
-worker 1 -156 -178
-worker 1 -144 -178
+worker 1 -159 -201
+worker 1 -153 -202
+worker 1 -147 -202
+worker 1 -141 -201
 
 # Ore line arced behind the base; geyser on the west flank.
 ore -173 -209
@@ -83,17 +77,12 @@ ore -127 -209
 carbon -188 -198
 
 # ------------------------------------------------------------- enemy main (NE)
-barracks 1 150 -190
+hq 1 150 -190
 
-infantry 1 140 -165
-infantry 1 144 -165
-infantry 1 148 -165
-infantry 1 152 -165
-infantry 1 156 -165
-infantry 1 160 -165
-
-worker 1 144 -178
-worker 1 156 -178
+worker 1 141 -201
+worker 1 147 -202
+worker 1 153 -202
+worker 1 159 -201
 
 # Ore line arced behind the base; geyser on the east flank.
 ore 127 -209

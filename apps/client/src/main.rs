@@ -329,7 +329,7 @@ impl App {
     fn render_scene(&mut self) {
         if let Some(gfx) = self.gfx.as_mut() {
             let aspect = gfx.aspect();
-            let (inf, ba, bh, ac, en, ore, carbon, heavies, turrets, rings) =
+            let (inf, ba, bh, hqa, hqh, ac, en, ore, carbon, heavies, turrets, rings) =
                 self.game.render_data();
             let fow = self.game.fow_bytes();
             let vp = self.camera.view_proj(aspect);
@@ -337,6 +337,8 @@ impl App {
                 &inf,
                 &ba,
                 &bh,
+                &hqa,
+                &hqh,
                 &ac,
                 &en,
                 &ore,
@@ -419,16 +421,21 @@ impl App {
         self.apply_cursor_grab();
     }
 
-    /// If a building is selected and the point is on its Train button, queue a
-    /// unit and report that the click was consumed (web HUD only).
+    /// If a production building is selected and the point is on its Train
+    /// button, queue its unit (HQ -> Worker, Barracks -> Infantry) and report
+    /// that the click was consumed (web HUD only).
     #[cfg(target_arch = "wasm32")]
     fn train_button_hit(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
-        if self.game.selected_barracks().is_none() {
+        let kind = if self.game.selected_hq().is_some() {
+            protocol::UnitKind::Worker
+        } else if self.game.selected_barracks().is_some() {
+            protocol::UnitKind::Infantry
+        } else {
             return false;
-        }
+        };
         let (x0, y0, x1, y1) = hud::train_button_rect(w, h);
         if cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1 {
-            self.game.train_selected(protocol::UnitKind::Infantry);
+            self.game.train_selected(kind);
             true
         } else {
             false
@@ -656,18 +663,29 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
                         KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
                         KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
+                        // T trains the selected building's unit: a Worker at the
+                        // HQ, Infantry at a Barracks.
                         KeyCode::KeyT if down => {
-                            self.game.train_selected(protocol::UnitKind::Infantry)
+                            let kind = if self.game.selected_hq().is_some() {
+                                protocol::UnitKind::Worker
+                            } else {
+                                protocol::UnitKind::Infantry
+                            };
+                            self.game.train_selected(kind)
                         }
                         KeyCode::KeyH if down => {
                             self.game.train_selected(protocol::UnitKind::Heavy)
                         }
-                        // Worker build: B = barracks, V = turret -> placement mode.
+                        // Worker build: B = barracks, V = turret, N = a new HQ
+                        // (founds an expansion) -> placement mode.
                         KeyCode::KeyB if down && self.game.has_worker_selected() => {
                             self.build_mode = Some(protocol::BuildingKind::Barracks)
                         }
                         KeyCode::KeyV if down && self.game.has_worker_selected() => {
                             self.build_mode = Some(protocol::BuildingKind::Turret)
+                        }
+                        KeyCode::KeyN if down && self.game.has_worker_selected() => {
+                            self.build_mode = Some(protocol::BuildingKind::Hq)
                         }
                         KeyCode::Digit1 if down => self.game.toggle_fog_unexplored(),
                         KeyCode::Digit2 if down => self.game.toggle_fog_explored(),
@@ -978,6 +996,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // When the pointer is locked the browser hides the OS cursor, so
                 // the HUD draws our own at the tracked position.
                 let build_label = self.build_mode.map(|k| match k {
+                    protocol::BuildingKind::Hq => "HQ",
                     protocol::BuildingKind::Barracks => "BARRACKS",
                     protocol::BuildingKind::Turret => "TURRET",
                 });

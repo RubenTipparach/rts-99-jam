@@ -507,6 +507,134 @@ fn barracks_mesh_hollow() -> Vec<UnitVertex> {
     m
 }
 
+/// Astromancer Spire (HQ): a tapered faceted tower on a hanging grown root,
+/// crowned by a gold spire over a team-tinted core, with small shards orbiting
+/// the base. The tallest structure in the colony (see
+/// docs/building-design-language.md).
+fn hq_mesh_astro() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let shell = [0.86, 0.84, 0.76];
+    let shell2 = [0.74, 0.72, 0.64];
+    let gold = [0.86, 0.75, 0.45];
+    let rot = std::f32::consts::FRAC_PI_8; // flat face toward -z
+                                           // Hanging grown root (visible hover gap).
+    push_frustum(
+        &mut m, 0.0, 0.0, 5.0, 0.7, 2.0, 0.6, shell2, 0.0, 8, rot, false,
+    );
+    // Broad grown base with a gold ceremonial belt.
+    push_frustum(
+        &mut m, 0.0, 0.0, 6.2, 4.6, 0.6, 3.6, shell, 0.0, 8, rot, false,
+    );
+    push_prism(&mut m, 0.0, 0.0, 4.7, 3.6, 4.4, gold, 0.0, 8, rot, false);
+    // Tapering faceted tower, two stages.
+    push_frustum(
+        &mut m, 0.0, 0.0, 4.3, 2.9, 4.4, 9.6, shell2, 0.0, 8, rot, false,
+    );
+    push_frustum(
+        &mut m, 0.0, 0.0, 2.9, 1.9, 9.6, 13.2, shell, 0.0, 8, rot, false,
+    );
+    // Gold crown ring + crowning spire.
+    push_prism(&mut m, 0.0, 0.0, 2.2, 13.2, 14.0, gold, 0.0, 8, rot, false);
+    push_pyramid(&mut m, 0.0, 0.0, 1.6, 14.0, 17.4, gold, 0.0, 8, rot);
+    // Team-tinted energy core running up the middle of the tower.
+    push_prism(
+        &mut m,
+        0.0,
+        0.0,
+        1.0,
+        1.6,
+        14.8,
+        [0.5, 0.5, 0.5],
+        1.0,
+        6,
+        rot,
+        true,
+    );
+    // Orbiting shards around the base, at uneven heights.
+    for (sx, sz, y0) in [(-4.8_f32, 2.6, 2.6), (5.0, 1.6, 3.4), (0.8, -5.4, 2.1)] {
+        push_prism(
+            &mut m,
+            sx,
+            sz,
+            0.55,
+            y0,
+            y0 + 1.6,
+            shell,
+            0.0,
+            6,
+            0.0,
+            false,
+        );
+        push_pyramid(
+            &mut m,
+            sx,
+            sz,
+            0.55,
+            y0 + 1.6,
+            y0 + 2.5,
+            [0.5, 0.5, 0.5],
+            1.0,
+            6,
+            0.0,
+        );
+    }
+    m
+}
+
+/// Hollowmen Command HQ: a broad armored block with angled corner armor, a
+/// raised control tower with a team-tinted window band, a roof turret (the
+/// built-in gun), an antenna mast, a hazard skirt, and a blast door (see
+/// docs/building-design-language.md).
+fn hq_mesh_hollow() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let steel = [0.46, 0.49, 0.53];
+    let steel2 = [0.58, 0.61, 0.65];
+    let dark = [0.24, 0.26, 0.30];
+    let haz = [0.80, 0.58, 0.20];
+    let gun = [0.17, 0.19, 0.22];
+    // Foundation slab + broad armored body + hazard skirt.
+    push_box(&mut m, [-6.4, 0.0, -5.4], [6.4, 0.5, 5.4], dark, 0.0);
+    push_box(&mut m, [-6.0, 0.5, -5.0], [6.0, 4.6, 5.0], steel, 0.0);
+    push_box(&mut m, [-6.0, 0.5, -5.0], [6.0, 1.0, 5.0], haz, 0.0);
+    // Angled corner armor (frustum wedges at the four corners).
+    for (sx, sz) in [(-4.9_f32, -3.9_f32), (4.9, -3.9), (-4.9, 3.9), (4.9, 3.9)] {
+        push_frustum(
+            &mut m,
+            sx,
+            sz,
+            1.7,
+            1.1,
+            0.5,
+            5.0,
+            steel2,
+            0.0,
+            4,
+            std::f32::consts::FRAC_PI_4,
+            true,
+        );
+    }
+    // Raised control tower with the team-tinted window band all around.
+    push_box(&mut m, [-2.6, 4.6, -2.2], [2.6, 7.6, 2.2], steel2, 0.0);
+    push_box(
+        &mut m,
+        [-2.7, 6.2, -2.3],
+        [2.7, 7.0, 2.3],
+        [0.5, 0.5, 0.5],
+        1.0,
+    );
+    push_box(&mut m, [-2.8, 7.6, -2.4], [2.8, 8.0, 2.4], dark, 0.0);
+    // Roof turret with a barrel (the built-in gun) on the deck.
+    push_box(&mut m, [3.2, 4.6, -1.4], [5.0, 5.8, 0.4], gun, 0.0);
+    push_box(&mut m, [3.7, 5.0, 0.3], [4.5, 5.5, 3.6], gun, 0.0);
+    // Antenna mast with a dish plate.
+    push_prism(&mut m, -4.4, -3.2, 0.22, 4.6, 10.4, dark, 0.0, 6, 0.0, true);
+    push_box(&mut m, [-5.0, 9.2, -3.5], [-3.8, 9.5, -2.9], steel2, 0.0);
+    // Blast door + hazard frame on the +z face.
+    push_box(&mut m, [-2.0, 0.0, 4.95], [2.0, 3.2, 5.15], gun, 0.0);
+    push_box(&mut m, [-2.2, 0.2, 5.0], [2.2, 0.7, 5.2], haz, 0.0);
+    m
+}
+
 // Placeholder faction workers (see assets/concepts/units_resources.png). ~2.7
 // tall, facing -z. Team tint rides the Astromancer focus-core and the Hollowmen
 // visor/shoulder. The Acolyte is authored to sit just above y=0 and is lifted
@@ -921,6 +1049,10 @@ pub struct Gfx {
     barracks_astro_len: u32,
     barracks_hollow_buf: wgpu::Buffer,
     barracks_hollow_len: u32,
+    hq_astro_buf: wgpu::Buffer,
+    hq_astro_len: u32,
+    hq_hollow_buf: wgpu::Buffer,
+    hq_hollow_len: u32,
     acolyte_buf: wgpu::Buffer,
     acolyte_len: u32,
     engineer_buf: wgpu::Buffer,
@@ -1416,6 +1548,18 @@ impl Gfx {
             bytemuck::cast_slice(&barracks_hollow),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let hq_astro = hq_mesh_astro();
+        let hq_astro_buf = mkbuf(
+            "hq-astro",
+            bytemuck::cast_slice(&hq_astro),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let hq_hollow = hq_mesh_hollow();
+        let hq_hollow_buf = mkbuf(
+            "hq-hollow",
+            bytemuck::cast_slice(&hq_hollow),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let acolyte = acolyte_mesh();
         let acolyte_buf = mkbuf(
             "acolyte",
@@ -1505,6 +1649,10 @@ impl Gfx {
             barracks_astro_len: barracks_astro.len() as u32,
             barracks_hollow_buf,
             barracks_hollow_len: barracks_hollow.len() as u32,
+            hq_astro_buf,
+            hq_astro_len: hq_astro.len() as u32,
+            hq_hollow_buf,
+            hq_hollow_len: hq_hollow.len() as u32,
             acolyte_buf,
             acolyte_len: acolyte.len() as u32,
             engineer_buf,
@@ -1677,6 +1825,8 @@ impl Gfx {
         infantry: &[InstanceRaw],
         barracks_astro: &[InstanceRaw],
         barracks_hollow: &[InstanceRaw],
+        hq_astro: &[InstanceRaw],
+        hq_hollow: &[InstanceRaw],
         acolytes: &[InstanceRaw],
         engineers: &[InstanceRaw],
         ore_nodes: &[InstanceRaw],
@@ -1690,12 +1840,14 @@ impl Gfx {
         time: f32,
     ) {
         // All meshes share one instance buffer, packed in order: infantry,
-        // Astromancer buildings, Hollowmen buildings, Acolytes, Engineers, ore
+        // the faction barracks, the faction HQs, Acolytes, Engineers, ore
         // nodes, carbon nodes, heavies, turrets. Each mesh draws its own range.
         let groups = [
             infantry.len(),
             barracks_astro.len(),
             barracks_hollow.len(),
+            hq_astro.len(),
+            hq_hollow.len(),
             acolytes.len(),
             engineers.len(),
             ore_nodes.len(),
@@ -1704,13 +1856,13 @@ impl Gfx {
             turrets.len(),
         ];
         // Clamp each group's count so the running total never exceeds the buffer.
-        let mut counts = [0usize; 9];
+        let mut counts = [0usize; 11];
         let mut used = 0usize;
         for (c, &g) in counts.iter_mut().zip(groups.iter()) {
             *c = g.min(MAX_INSTANCES - used);
             used += *c;
         }
-        let [ni, na, nh, nac, nen, nor, ncar, nhv, ntr] = counts;
+        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr] = counts;
         let ring_verts = ring_decals(rings);
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
         self.queue.write_buffer(
@@ -1749,6 +1901,8 @@ impl Gfx {
             &infantry[..ni],
             &barracks_astro[..na],
             &barracks_hollow[..nh],
+            &hq_astro[..nqa],
+            &hq_hollow[..nqh],
             &acolytes[..nac],
             &engineers[..nen],
             &ore_nodes[..nor],
@@ -1847,6 +2001,8 @@ impl Gfx {
                     (&self.infantry_buf, self.infantry_len, ni),
                     (&self.barracks_astro_buf, self.barracks_astro_len, na),
                     (&self.barracks_hollow_buf, self.barracks_hollow_len, nh),
+                    (&self.hq_astro_buf, self.hq_astro_len, nqa),
+                    (&self.hq_hollow_buf, self.hq_hollow_len, nqh),
                     (&self.acolyte_buf, self.acolyte_len, nac),
                     (&self.engineer_buf, self.engineer_len, nen),
                     (&self.ore_node_buf, self.ore_node_len, nor),
@@ -1925,6 +2081,8 @@ mod tests {
         check_mesh(&infantry_mesh(), "infantry");
         check_mesh(&barracks_mesh_astro(), "barracks-astro");
         check_mesh(&barracks_mesh_hollow(), "barracks-hollow");
+        check_mesh(&hq_mesh_astro(), "hq-astro");
+        check_mesh(&hq_mesh_hollow(), "hq-hollow");
         check_mesh(&acolyte_mesh(), "acolyte");
         check_mesh(&engineer_mesh(), "engineer");
         check_mesh(&ore_node_mesh(), "ore-node");

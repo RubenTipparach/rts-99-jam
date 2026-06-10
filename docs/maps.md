@@ -17,7 +17,7 @@ lines are ignored, and tokens are separated by whitespace.
 
 ```text
 name <map name>                      # required, once
-barracks|turret        <player> <x> <z>
+hq|barracks|turret     <player> <x> <z>
 infantry|worker|heavy  <player> <x> <z>
 ore|carbon             <x> <z>
 ```
@@ -50,6 +50,11 @@ baked map against them:
 
 Crossfire Basin follows classic StarCraft ladder-map structure:
 
+- **Classic starts.** Every player opens with exactly an **HQ and four
+  workers** staged on the ore line (the Astromancer Spire or the Hollowmen
+  Command HQ, per `docs/factions.md`). The HQ trains workers and is their
+  deposit point; production buildings are constructed in-game by workers,
+  never given for free.
 - **Main bases.** Each main has a 6-patch **ore line arced behind the base**,
   between the base and the map edge, so the worker line sits in the most
   defensible pocket of the base; a single **carbon geyser caps one flank** of

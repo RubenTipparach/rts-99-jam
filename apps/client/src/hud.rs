@@ -422,14 +422,30 @@ pub fn draw(
         44.0,
     );
 
-    // Production command card when one of your buildings is selected.
+    // Production command card when one of your production buildings is
+    // selected: the HQ trains workers, a Barracks trains fighters.
     if let Some((queued, frac)) = game.selected_production() {
+        let hq = game.selected_hq().is_some();
         let (bx, by, bw, bh) = train_btn_css(h);
-        let cost = game.train_cost() as i64;
-        let afford = game.player_ore() >= game.train_cost();
+        let cost = if hq {
+            game.worker_cost()
+        } else {
+            game.train_cost()
+        };
+        let afford = game.player_ore() >= cost;
+        let name = if hq {
+            // The HQ carries its faction's name (see docs/factions.md).
+            match game.faction_of(0) {
+                crate::game::Faction::Astromancer => "SPIRE (HQ)",
+                crate::game::Faction::Hollowmen => "COMMAND HQ",
+            }
+        } else {
+            "BARRACKS"
+        };
+        let unit = if hq { "Worker" } else { "Infantry" };
         ctx.set_fill_style_str("#cfe0ff");
         ctx.set_font("12px monospace");
-        let _ = ctx.fill_text(&format!("BARRACKS - queue {queued}/6"), bx, by - 6.0);
+        let _ = ctx.fill_text(&format!("{name} - queue {queued}/6"), bx, by - 6.0);
         ctx.set_fill_style_str(if afford {
             "rgba(40,80,140,0.95)"
         } else {
@@ -442,7 +458,7 @@ pub fn draw(
         ctx.set_fill_style_str(if afford { "#eaf2ff" } else { "#8a93a4" });
         ctx.set_font("bold 14px monospace");
         let _ = ctx.fill_text(
-            &format!("Train Infantry [T] - {cost}"),
+            &format!("Train {unit} [T] - {}", cost as i64),
             bx + 10.0,
             by + 22.0,
         );
@@ -450,9 +466,11 @@ pub fn draw(
             ctx.set_fill_style_str("rgba(255,211,107,0.95)");
             ctx.fill_rect(bx, by + bh - 3.0, bw * frac.clamp(0.0, 1.0) as f64, 3.0);
         }
-        ctx.set_fill_style_str("#9fb6da");
-        ctx.set_font("12px monospace");
-        let _ = ctx.fill_text("[H] Heavy  120 ore + 60 carbon", bx, by + bh + 16.0);
+        if !hq {
+            ctx.set_fill_style_str("#9fb6da");
+            ctx.set_font("12px monospace");
+            let _ = ctx.fill_text("[H] Heavy  120 ore + 60 carbon", bx, by + bh + 16.0);
+        }
     }
 
     // Worker command card: build hotkeys when one of your workers is selected.
@@ -464,7 +482,11 @@ pub fn draw(
         let _ = ctx.fill_text("WORKER", bx, by);
         ctx.set_fill_style_str("#9fb6da");
         ctx.set_font("12px monospace");
-        let _ = ctx.fill_text("[B] Barracks 150 ore   [V] Turret 90+50", bx, by + 16.0);
+        let _ = ctx.fill_text(
+            "[B] Barracks 150 ore   [V] Turret 90+50   [N] HQ 400 ore",
+            bx,
+            by + 16.0,
+        );
     }
 
     // Build placement banner: the next click drops the building.

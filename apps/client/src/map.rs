@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! name <map name>
-//! barracks|turret        <player> <x> <z>
+//! hq|barracks|turret     <player> <x> <z>
 //! infantry|worker|heavy  <player> <x> <z>
 //! ore|carbon             <x> <z>
 //! ```
@@ -69,13 +69,19 @@ pub fn parse(src: &str) -> Result<MapFile, String> {
                 }
                 name = Some(args.join(" "));
             }
-            "barracks" | "turret" | "infantry" | "worker" | "heavy" => {
+            "hq" | "barracks" | "turret" | "infantry" | "worker" | "heavy" => {
                 let [p, x, z] = args[..] else {
                     return Err(format!("line {line}: expected '{word} <player> <x> <z>'"));
                 };
                 let owner = player(p, line)?;
                 let (x, y) = (coord(x, line)?, coord(z, line)?);
                 commands.push(match word {
+                    "hq" => Command::SpawnBuilding {
+                        owner,
+                        kind: BuildingKind::Hq,
+                        x,
+                        y,
+                    },
                     "barracks" => Command::SpawnBuilding {
                         owner,
                         kind: BuildingKind::Barracks,
@@ -156,22 +162,35 @@ mod tests {
         assert_eq!(map.name, "Crossfire Basin");
         let mut ore = 0;
         let mut carbon = 0;
-        let mut barracks = 0;
+        let mut hqs = 0;
+        let mut workers = 0;
+        let mut other = 0;
         for c in &map.commands {
             match c {
                 Command::SpawnResource { kind, .. } => match kind {
                     ResourceKind::Ore => ore += 1,
                     ResourceKind::Carbon => carbon += 1,
                 },
-                Command::SpawnBuilding { .. } => barracks += 1,
-                _ => {}
+                Command::SpawnBuilding {
+                    kind: BuildingKind::Hq,
+                    ..
+                } => hqs += 1,
+                Command::SpawnUnit {
+                    kind: UnitKind::Worker,
+                    ..
+                } => workers += 1,
+                _ => other += 1,
             }
         }
         // Three mains (6 ore + 1 carbon each), four naturals (4 + 1), a rich
         // center (6 + 2), and two side clusters (4 + 1).
         assert_eq!(ore, 6 * 3 + 4 * 4 + 6 + 4 * 2);
         assert_eq!(carbon, 3 + 4 + 2 + 2);
-        assert_eq!(barracks, 3);
+        // StarCraft-style starts: each main is exactly an HQ + 4 workers;
+        // nothing else (no free production or army) is on the map.
+        assert_eq!(hqs, 3);
+        assert_eq!(workers, 3 * 4);
+        assert_eq!(other, 0);
     }
 
     #[test]
