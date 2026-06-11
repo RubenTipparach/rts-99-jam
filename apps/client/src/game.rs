@@ -261,19 +261,28 @@ pub struct Game {
 
 impl Default for Game {
     fn default() -> Self {
-        Self::new()
+        Self::new(1)
     }
 }
 
 impl Game {
-    pub fn new() -> Self {
+    /// Start a match against `bots` bot commanders (1-3). Standard maps
+    /// carry four spawns; only the active players' entities spawn.
+    pub fn new(bots: u8) -> Self {
         // The whole starting layout (bases, garrisons, and the resource
         // clusters) is baked into the active battlefield's map file: each
         // voxel world carries the skirmish template fitted onto its own
         // viable ground, so construct the Game AFTER the lobby picks a map.
         let map = crate::map::parse(crate::map::active_scenario()).expect("baked map is invalid");
         log::info!("loading map: {}", map.name);
-        let setup = map.commands;
+        let bots = bots.clamp(1, 3) as u16;
+        let mut setup = map.commands;
+        setup.retain(|c| match c {
+            Command::SpawnUnit { owner, .. } | Command::SpawnBuilding { owner, .. } => {
+                *owner <= bots
+            }
+            _ => true,
+        });
 
         let mut g = Game {
             world: World::new(SEED),
@@ -297,8 +306,11 @@ impl Game {
             yaw: HashMap::new(),
             yaw_time: 0.0,
         };
-        // The enemy is driven by the in-sim bot commander (mines, builds, trains).
-        g.world.set_bot(1, true);
+        // Every enemy is driven by an in-sim bot commander (mines, builds,
+        // trains), one per spawned bot player.
+        for b in 1..=bots {
+            g.world.set_bot(b, true);
+        }
         g.apply_terrain();
         g.step_now();
         g.prev = g.curr.clone();

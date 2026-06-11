@@ -10,7 +10,10 @@
 #
 # Coordinates are integer world units on the battlefield (-512..512 on both
 # axes). '#' starts a comment, blank lines are ignored, and resource nodes
-# are always neutral. Player 0 is the human; player 1 is the bot commander.
+# are always neutral. Player 0 is the human; players 1-3 are bot commanders.
+# A standard map carries FOUR spawns (one per corner); the match spawns only
+# the entities whose owner is actually playing (1 human + the lobby's bot
+# count), so a 1v1 uses the SW/NE diagonal and 3-4 players fill the corners.
 #
 # Layout, with StarCraft map design as the guide:
 #
@@ -26,48 +29,64 @@
 #     from every lane: the "gold expansion" worth fighting over.
 #   - Two side clusters hug the east/west edges at mid-map: third bases
 #     that reward controlling the flanking routes.
-#   - Shared clusters are mirrored left/right and top/bottom, so neither
-#     side has a shorter path to any contested patch.
+#   - Shared clusters are mirrored left/right and top/bottom, so no
+#     spawn has a shorter path to any contested patch.
 #
-#                 NW main             NE main
+#               NW main (P2)        NE main (P1)
 #                  (ore+gas)           (ore+gas)
 #                    NW natural   NE natural
 #       west side                          east side
 #       cluster          center            cluster
 #                       (rich)
 #                    SW natural   SE natural
-#                         player main
-#                          (ore+gas)
+#               SW main (P0)        SE main (P3)
+#                  (ore+gas)           (ore+gas)
 
 name Crossfire Basin
 
-# ------------------------------------------------------------ player main (S)
-# StarCraft-style start: the HQ and four workers staged on the ore line.
-hq 0 0 210
+# ----------------------------------------------------------- player main (SW)
+# StarCraft-style start: the HQ and four workers staged on the ore line,
+# which arcs behind the base toward the south edge; geyser on the west flank.
+hq 0 -150 190
 
-worker 0 -9 221
-worker 0 -3 222
-worker 0 3 222
-worker 0 9 221
+worker 0 -159 201
+worker 0 -153 202
+worker 0 -147 202
+worker 0 -141 201
 
-# Ore line arced behind the HQ; geyser on the east flank.
-ore -23 229
-ore -15 236
-ore -5 240
-ore 5 240
-ore 15 236
-ore 23 229
-carbon 38 218
+ore -173 209
+ore -165 216
+ore -155 220
+ore -145 220
+ore -135 216
+ore -127 209
+carbon -188 198
 
-# ------------------------------------------------------------- enemy main (NW)
-hq 1 -150 -190
+# -------------------------------------------------------------- bot main (NE)
+# The 1v1 opponent, diagonal from the player.
+hq 1 150 -190
 
-worker 1 -159 -201
-worker 1 -153 -202
-worker 1 -147 -202
-worker 1 -141 -201
+worker 1 141 -201
+worker 1 147 -202
+worker 1 153 -202
+worker 1 159 -201
 
-# Ore line arced behind the base; geyser on the west flank.
+ore 127 -209
+ore 135 -216
+ore 145 -220
+ore 155 -220
+ore 165 -216
+ore 173 -209
+carbon 188 -198
+
+# -------------------------------------------------------------- bot main (NW)
+hq 2 -150 -190
+
+worker 2 -159 -201
+worker 2 -153 -202
+worker 2 -147 -202
+worker 2 -141 -201
+
 ore -173 -209
 ore -165 -216
 ore -155 -220
@@ -76,22 +95,21 @@ ore -135 -216
 ore -127 -209
 carbon -188 -198
 
-# ------------------------------------------------------------- enemy main (NE)
-hq 1 150 -190
+# -------------------------------------------------------------- bot main (SE)
+hq 3 150 190
 
-worker 1 141 -201
-worker 1 147 -202
-worker 1 153 -202
-worker 1 159 -201
+worker 3 141 201
+worker 3 147 202
+worker 3 153 202
+worker 3 159 201
 
-# Ore line arced behind the base; geyser on the east flank.
-ore 127 -209
-ore 135 -216
-ore 145 -220
-ore 155 -220
-ore 165 -216
-ore 173 -209
-carbon 188 -198
+ore 127 209
+ore 135 216
+ore 145 220
+ore 155 220
+ore 165 216
+ore 173 209
+carbon 188 198
 
 # ------------------------------------------------- naturals (4 ore + 1 carbon)
 # One per quadrant, mirrored, a lane out from each main. The player can take

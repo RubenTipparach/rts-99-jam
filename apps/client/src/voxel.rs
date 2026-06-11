@@ -555,6 +555,25 @@ pub fn active_index() -> Option<usize> {
     SELECTED.with(|s| s.get())
 }
 
+/// The parsed grid of any map (cached on first use). The lobby uses this to
+/// read live surface heights for the preview's spawn markers.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // web lobby only
+pub fn grid(idx: usize) -> Option<&'static VoxelGrid> {
+    if idx >= MAP_COUNT {
+        return None;
+    }
+    CACHE.with(|c| {
+        let mut v = c.borrow_mut();
+        if v.is_empty() {
+            v.resize(MAP_COUNT, None);
+        }
+        if v[idx].is_none() {
+            v[idx] = Some(Box::leak(Box::new(VoxelGrid::parse(MAPS[idx]))));
+        }
+        v[idx]
+    })
+}
+
 /// The active voxel map, if one is selected (parsed + cached on first use).
 pub fn active() -> Option<&'static VoxelGrid> {
     let i = SELECTED.with(|s| s.get())?;
@@ -568,6 +587,34 @@ pub fn active() -> Option<&'static VoxelGrid> {
         }
         v[i]
     })
+}
+
+/// The lobby preview camera (must match the offline preview renderer).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // web lobby only
+pub const PREVIEW_YAW: f32 = std::f32::consts::FRAC_PI_4;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // web lobby only
+pub const PREVIEW_PITCH: f32 = 0.95;
+
+/// The orthographic fit of world `idx`'s pre-rendered preview image:
+/// `[u0, u1, v0, v1, img_w, img_h]`, from the sidecar the preview renderer
+/// writes next to the PNGs. With [`PREVIEW_YAW`]/[`PREVIEW_PITCH`] this
+/// projects any LIVE world position onto the image exactly, so the lobby's
+/// spawn markers come from the real map data, never baked pixels.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // web lobby only
+pub fn preview_fit(idx: usize) -> Option<[f32; 6]> {
+    let key = MAP_KEYS.get(idx)?;
+    for line in include_str!("../../../assets/previews/maps/projection.txt").lines() {
+        let mut tok = line.split_whitespace();
+        if tok.next() != Some(key) {
+            continue;
+        }
+        let mut fit = [0.0f32; 6];
+        for v in &mut fit {
+            *v = tok.next()?.parse().ok()?;
+        }
+        return Some(fit);
+    }
+    None
 }
 
 // --- per-world texture sets + liquid, for the renderer -----------------------
@@ -724,7 +771,7 @@ mod tests {
         [[96.0, 132.0, 72.0], [74.0, 112.0, 58.0], [120.0, 112.0, 96.0], [236.0, 240.0, 244.0]],   // earth
     ];
 
-    fn preview(g: &VoxelGrid, idx: usize, w: u32) -> image::RgbaImage {
+    fn preview(g: &VoxelGrid, idx: usize, w: u32) -> (image::RgbaImage, [f32; 6]) {
         let (yaw, pitch) = (std::f32::consts::FRAC_PI_4, 0.95_f32);
         let eye = [
             yaw.cos() * pitch.cos(),
@@ -860,7 +907,13 @@ mod tests {
         for t in liquid.chunks_exact(3) {
             tri([t[0], t[1], t[2]], liq_col);
         }
-        img
+        // The orthographic fit of this image: [u0, u1, v0, v1, w, h]. The
+        // lobby uses it (via `preview_fit`) to project LIVE world positions
+        // (the fitted scenario's spawns) onto the image exactly: markers are
+        // never baked into the PNG, so the data shown always comes from the
+        // same map files the match loads.
+        let fit = [u0, u1, v0, v1, w as f32, h as f32];
+        (img, fit)
     }
 
     /// Renders every battlefield's 3D lobby preview to `target/previews/maps/`.
@@ -870,10 +923,20 @@ mod tests {
     #[ignore = "writes preview PNGs to target/previews/maps; run on demand"]
     fn render_map_previews() {
         std::fs::create_dir_all("target/previews/maps").unwrap();
+        let mut proj = String::from(
+            "# Orthographic fit of each pre-rendered lobby preview, written by\n\
+             # `cargo test -p client render_map_previews -- --ignored` alongside\n\
+             # the PNGs: key u0 u1 v0 v1 img_w img_h (see voxel::preview_fit).\n",
+        );
         for (i, key) in MAP_KEYS.iter().enumerate() {
             let g = VoxelGrid::parse(MAPS[i]);
-            let img = preview(&g, i, 384);
+            let (img, fit) = preview(&g, i, 384);
             img.save(format!("target/previews/maps/{key}.png")).unwrap();
+            proj.push_str(&format!(
+                "{key} {:.6} {:.6} {:.6} {:.6} {} {}\n",
+                fit[0], fit[1], fit[2], fit[3], fit[4], fit[5]
+            ));
         }
+        std::fs::write("target/previews/maps/projection.txt", proj).unwrap();
     }
 }

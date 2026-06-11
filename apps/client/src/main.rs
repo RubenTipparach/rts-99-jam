@@ -372,7 +372,7 @@ impl App {
         App {
             window: None,
             gfx: None,
-            game: Game::new(),
+            game: Game::new(1),
             camera: Camera::default(),
             input: Input::default(),
             last_frame: Instant::now(),
@@ -689,7 +689,7 @@ impl App {
                 if let Some(g) = self.gfx.as_mut() {
                     g.set_world();
                 }
-                self.game = Game::new();
+                self.game = Game::new(self.lobby.bots);
                 self.game.set_player_faction(self.lobby.faction);
                 self.game.apply_terrain();
                 if let Some((hx, hz)) = self.game.player_hq() {
@@ -731,7 +731,7 @@ impl App {
     fn end_match_to_menu(&mut self) {
         self.outcome = None;
         self.build_mode = None;
-        self.game = Game::new();
+        self.game = Game::new(1);
         self.game.apply_terrain();
         self.set_paused(false);
         #[cfg(target_arch = "wasm32")]
