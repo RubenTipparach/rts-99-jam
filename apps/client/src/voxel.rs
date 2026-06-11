@@ -705,6 +705,25 @@ mod tests {
     /// iso camera (yaw 45, pitch 0.95) and shader-style lambert lighting.
     /// CPU-only; per-vertex color comes from the world swatch blended by the
     /// material weights, so the preview matches the in-game palette.
+    /// The archetype palettes the world tile textures are painted from
+    /// (assets/worldgen/worlds.py ARCHETYPES): [low, mid, high, accent]
+    /// per kit, in [`ARCH_TILES`] order, sRGB 0-255.
+    #[rustfmt::skip]
+    const ARCH_PALETTE: [[[f32; 3]; 4]; 12] = [
+        [[60.0, 58.0, 56.0], [124.0, 119.0, 112.0], [180.0, 174.0, 164.0], [208.0, 203.0, 195.0]], // regolith_grey
+        [[30.0, 29.0, 30.0], [62.0, 60.0, 60.0], [100.0, 97.0, 94.0], [198.0, 203.0, 209.0]],      // regolith_dark
+        [[78.0, 68.0, 58.0], [130.0, 126.0, 124.0], [188.0, 196.0, 204.0], [216.0, 224.0, 234.0]], // dirty_ice
+        [[78.0, 80.0, 90.0], [126.0, 132.0, 144.0], [190.0, 200.0, 214.0], [214.0, 226.0, 240.0]], // grooved_ice
+        [[150.0, 170.0, 186.0], [208.0, 217.0, 225.0], [238.0, 244.0, 249.0], [120.0, 165.0, 198.0]], // bright_ice
+        [[150.0, 150.0, 162.0], [212.0, 206.0, 196.0], [238.0, 233.0, 224.0], [156.0, 98.0, 70.0]],   // europa_ice
+        [[92.0, 52.0, 36.0], [162.0, 98.0, 64.0], [202.0, 150.0, 110.0], [224.0, 224.0, 230.0]],   // mars_rust
+        [[150.0, 122.0, 50.0], [212.0, 188.0, 86.0], [232.0, 220.0, 168.0], [214.0, 96.0, 40.0]],  // io_sulfur
+        [[84.0, 54.0, 30.0], [168.0, 116.0, 64.0], [198.0, 158.0, 104.0], [40.0, 42.0, 54.0]],     // titan_haze
+        [[150.0, 122.0, 122.0], [206.0, 180.0, 170.0], [230.0, 214.0, 206.0], [84.0, 66.0, 70.0]], // triton_ice
+        [[110.0, 78.0, 60.0], [172.0, 132.0, 100.0], [226.0, 208.0, 180.0], [134.0, 76.0, 54.0]],  // pluto_tholin
+        [[96.0, 132.0, 72.0], [74.0, 112.0, 58.0], [120.0, 112.0, 96.0], [236.0, 240.0, 244.0]],   // earth
+    ];
+
     fn preview(g: &VoxelGrid, idx: usize, w: u32) -> image::RgbaImage {
         let (yaw, pitch) = (std::f32::consts::FRAC_PI_4, 0.95_f32);
         let eye = [
@@ -742,28 +761,31 @@ mod tests {
             )
         };
 
-        // Per-world palette: the swatch split into the four tile slots, plus
-        // lava for the hazard channel. The world tint is a linear-light
-        // multiplier in the shader; fold it into these sRGB-ish tones via
-        // the gamma so the preview brightness matches the battlefield.
-        let sw = MAP_SWATCH[idx];
+        // Per-world palette: the SAME archetype palette the tile textures
+        // are painted from (assets/worldgen/worlds.py ARCHETYPES), so the
+        // thumbnail's terrain colors match the battlefield. Each tile slot
+        // approximates its texture's average tone; the world tint (a
+        // linear-light multiplier in the shader) folds in via the gamma.
+        let [plo, pmid, phigh, pacc] = ARCH_PALETTE[MAP_ARCHETYPE[idx]];
         let t = world_tint(idx);
-        let swf = [
-            sw[0] as f32 / 255.0 * t[0].powf(1.0 / 2.2),
-            sw[1] as f32 / 255.0 * t[1].powf(1.0 / 2.2),
-            sw[2] as f32 / 255.0 * t[2].powf(1.0 / 2.2),
-        ];
-        let tone = |m: f32, g: f32| {
+        let tinted = |c: [f32; 3]| {
             [
-                (swf[0] * m + g).min(1.0),
-                (swf[1] * m + g).min(1.0),
-                (swf[2] * m + g).min(1.0),
+                (c[0] / 255.0 * t[0].powf(1.0 / 2.2)).min(1.0),
+                (c[1] / 255.0 * t[1].powf(1.0 / 2.2)).min(1.0),
+                (c[2] / 255.0 * t[2].powf(1.0 / 2.2)).min(1.0),
             ]
         };
-        let base = tone(1.0, 0.0);
-        let low = tone(0.72, 0.0);
-        let high = tone(1.18, 0.06);
-        let accent = tone(0.85, 0.08);
+        let mix = |a: [f32; 3], b: [f32; 3], k: f32| {
+            [
+                a[0] + (b[0] - a[0]) * k,
+                a[1] + (b[1] - a[1]) * k,
+                a[2] + (b[2] - a[2]) * k,
+            ]
+        };
+        let base = tinted(pmid);
+        let low = tinted(mix(plo, pmid, 0.3));
+        let high = tinted(mix(pmid, phigh, 0.7));
+        let accent = tinted(pacc);
         let lava = [0.95, 0.42, 0.12];
         // Liquid color (matches `active_liquid`): Titan methane, Earth ocean.
         let liq_col = match idx {
