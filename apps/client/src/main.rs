@@ -644,11 +644,13 @@ impl App {
             self.set_paused(false);
         } else if hitr(hud::fullscreen_button_rect(w, h)) {
             toggle_fullscreen();
+        } else if hitr(hud::quit_button_rect(w, h)) {
+            self.end_match_to_menu();
         }
     }
 
-    /// Leave a finished match: fresh game, back to the front-end (web) or a
-    /// fresh sandbox (native).
+    /// Leave the match (finished, or abandoned from the pause menu): fresh
+    /// game, back to the front-end (web) or a fresh sandbox (native).
     fn end_match_to_menu(&mut self) {
         self.outcome = None;
         self.build_mode = None;
