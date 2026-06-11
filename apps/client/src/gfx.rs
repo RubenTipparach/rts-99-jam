@@ -807,9 +807,14 @@ fn ore_node_mesh() -> Vec<UnitVertex> {
     let rock = [0.28, 0.32, 0.38];
     let rock_dk = [0.17, 0.20, 0.25];
     push_frustum(
-        &mut m, 0.0, 0.0, 3.4, 2.6, 0.0, 1.0, rock_dk, 0.0, 7, 0.0, false,
+        &mut m, 0.0, 0.0, 3.4, 2.6, 0.0, 1.0, rock_dk, 0.0, 7, 0.0, true,
     );
-    push_prism(&mut m, 0.0, 0.0, 2.6, 0.0, 0.45, rock, 0.0, 7, 0.0, true);
+    // Solid rocky heart filling the bowl: the shards erupt from rock, and a
+    // sightline through a translucent shard lands on stone instead of
+    // passing through a hollow mound to the terrain behind it.
+    push_frustum(
+        &mut m, 0.0, 0.0, 2.4, 1.4, 1.0, 1.5, rock, 0.0, 7, 0.0, true,
+    );
     m
 }
 
@@ -849,8 +854,10 @@ fn carbon_node_mesh() -> Vec<UnitVertex> {
     push_frustum(
         &mut m, 0.0, 0.0, 4.0, 3.0, 0.0, 1.6, vent_dk, 0.0, 8, 0.0, false,
     );
+    // Capped: the translucent gas pool sits right on this rim, so the
+    // throat must read as solid rock through it, not a hollow shell.
     push_frustum(
-        &mut m, 0.0, 0.0, 3.0, 2.2, 1.6, 3.0, vent, 0.0, 8, 0.0, false,
+        &mut m, 0.0, 0.0, 3.0, 2.2, 1.6, 3.0, vent, 0.0, 8, 0.0, true,
     );
     // Crooked vent rocks around the rim.
     for (cx, cz) in [(2.2, 0.8), (-1.4, 2.0), (-2.0, -1.4), (1.2, -2.0)] {
@@ -2408,20 +2415,9 @@ impl Gfx {
             // tail of the shared buffer (slot 1 is still bound).
             if noc + ncp > 0 {
                 pass.set_pipeline(&self.crystal_pipeline);
-                let opaque: u32 = (ni
-                    + na
-                    + nh
-                    + nqa
-                    + nqh
-                    + nac
-                    + nen
-                    + nor
-                    + ncar
-                    + nhv
-                    + ntr
-                    + nsp
-                    + nbr
-                    + npt) as u32;
+                // Everything before the two blended groups, derived from the
+                // packed total so adding an opaque group can't desync it.
+                let opaque: u32 = (used - noc - ncp) as u32;
                 if noc > 0 {
                     pass.set_vertex_buffer(0, self.ore_crystal_buf.slice(..));
                     pass.draw(0..self.ore_crystal_len, opaque..opaque + noc as u32);

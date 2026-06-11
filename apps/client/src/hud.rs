@@ -1052,9 +1052,10 @@ pub fn draw(
         24.0,
     );
 
-    // Supply: a depot glyph (box + roof); the count turns red when capped.
+    // Supply: a depot glyph (box + roof) grouped with ore and carbon at the
+    // top right; the count turns red when capped.
     let (sup_used, sup_cap) = game.player_supply();
-    let sx = 196.0_f64;
+    let sx = wf - 104.0;
     ctx.set_fill_style_str("#9fb6da");
     ctx.fill_rect(sx + 1.0, icon_y - 1.0, 10.0, 8.0);
     ctx.begin_path();
