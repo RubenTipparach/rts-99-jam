@@ -17,8 +17,9 @@ pub enum Screen {
 }
 
 /// Skirmish setup chosen in the lobby. `faction` and `map` (an index into the
-/// voxel battlefields, `crate::voxel`) are applied to the match on Start; `bots`
-/// is UI flavor for now. `map_open`/`map_scroll` drive the map-select modal.
+/// voxel battlefields, `crate::voxel`) are applied to the match on Start;
+/// `bots` (1-3) is how many bot commanders spawn (standard maps carry four
+/// spawn sites). `map_open`/`map_scroll` drive the map-select modal.
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub struct Lobby {
@@ -413,8 +414,11 @@ mod web {
 
     /// The pre-rendered 3D battlefield preview (the actual voxel terrain
     /// rasterized at the game camera angle), drawn centred at `(cx, cy)` and
-    /// fitted inside the `2a x 2b` box (CSS pixels). Player (blue) and enemy
-    /// (red) start markers overlay the terrain at the real spawn points.
+    /// fitted inside the `2a x 2b` box (CSS pixels). Spawn markers (player
+    /// blue, bot sites red) are drawn LIVE from the fitted scenario's HQ
+    /// positions and the map's real surface heights, projected through the
+    /// image's exact orthographic fit - the markers always show the same
+    /// data the match will load, never approximations or baked pixels.
     fn draw_map_preview(ctx: &Ctx, cx: f64, cy: f64, a: f64, b: f64, idx: usize) {
         use std::f64::consts::TAU;
         let Some(src) = preview_canvas(idx) else {
@@ -434,30 +438,49 @@ mod web {
         let (iw, ih) = (src.width() as f64, src.height() as f64);
         let scale = (2.0 * a / iw).min(2.0 * b / ih);
         let (tw, th) = (iw * scale, ih * scale);
-        let _ = ctx.draw_image_with_html_canvas_element_and_dw_and_dh(
-            &src,
-            cx - tw / 2.0,
-            cy - th / 2.0,
-            tw,
-            th,
-        );
-        // Start markers at this world's actual fitted spawns (every
-        // battlefield re-fits the template onto its own viable ground, so
-        // the positions differ per world).
-        let (half_w, half_h) = (tw / 2.0, th / 2.0);
-        let iso = |u: f64, t: f64| (cx + (u - t) * half_w, cy + (u + t - 1.0) * half_h * 0.92);
-        let dot = |u: f64, t: f64, col: &str| {
-            let (px, py) = iso(u, t);
-            ctx.set_fill_style_str(col);
-            ctx.begin_path();
-            let _ = ctx.ellipse(px, py, half_w * 0.035, half_w * 0.021, 0.0, 0.0, TAU);
-            ctx.fill();
+        let (ox, oy) = (cx - tw / 2.0, cy - th / 2.0);
+        let _ = ctx.draw_image_with_html_canvas_element_and_dw_and_dh(&src, ox, oy, tw, th);
+
+        // Spawn markers: live scenario data through the image's exact fit.
+        let (Some(fit), Some(grid)) = (crate::voxel::preview_fit(idx), crate::voxel::grid(idx))
+        else {
+            return;
         };
-        let span = 2.0 * crate::terrain::HALF as f64;
-        for (owner, x, z) in crate::map::world_spawns(idx) {
-            let u = (x as f64 + crate::terrain::HALF as f64) / span;
-            let t = (z as f64 + crate::terrain::HALF as f64) / span;
-            dot(u, t, if owner == 0 { "#4aa3ff" } else { "#ff5a4a" });
+        let [u0, u1, v0, v1, pw, ph] = fit.map(|v| v as f64);
+        let (yaw, pitch) = (
+            crate::voxel::PREVIEW_YAW as f64,
+            crate::voxel::PREVIEW_PITCH as f64,
+        );
+        let right = [-yaw.sin(), 0.0, yaw.cos()];
+        let upv = {
+            let eye = [
+                yaw.cos() * pitch.cos(),
+                pitch.sin(),
+                yaw.sin() * pitch.cos(),
+            ];
+            [
+                right[1] * eye[2] - right[2] * eye[1],
+                right[2] * eye[0] - right[0] * eye[2],
+                right[0] * eye[1] - right[1] * eye[0],
+            ]
+        };
+        // Same fit-to-image mapping as the preview renderer (8px margins).
+        let s = ((pw - 8.0) / (u1 - u0)).min((ph - 8.0) / (v1 - v0));
+        for (owner, sx, sz) in crate::map::world_spawns(idx) {
+            let p = [sx as f64, grid.surface_height(sx, sz) as f64, sz as f64];
+            let u = p[0] * right[0] + p[1] * right[1] + p[2] * right[2];
+            let v = p[0] * upv[0] + p[1] * upv[1] + p[2] * upv[2];
+            let px = (u - u0) * s + (pw - (u1 - u0) * s) * 0.5;
+            let py = (v1 - v) * s + (ph - (v1 - v0) * s) * 0.5;
+            let (mx, my) = (ox + px * (tw / pw), oy + py * (th / ph));
+            let r = (tw * 0.018).max(3.0);
+            ctx.set_fill_style_str(if owner == 0 { "#4aa3ff" } else { "#ff5a4a" });
+            ctx.set_stroke_style_str("rgba(5,8,14,0.9)");
+            ctx.set_line_width(1.5);
+            ctx.begin_path();
+            let _ = ctx.ellipse(mx, my, r, r, 0.0, 0.0, TAU);
+            ctx.fill();
+            ctx.stroke();
         }
     }
 

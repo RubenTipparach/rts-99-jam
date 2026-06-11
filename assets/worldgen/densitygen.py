@@ -192,8 +192,8 @@ def _fissures(ht, mat, seed, n, depth, halfw):
 
     Accumulate a max-depth cut map (so overlapping steps do not stack into a
     bottomless trench), then apply it once. Returns the bridge sites,
-    `(x, z, dir_x, dir_z)` in grid cells along each trench, that keep the
-    regions on either side connected for ground units.
+    `(x, z, dir_x, dir_z, half_len)` in grid cells along each trench, that
+    keep the regions on either side connected for ground units.
     """
     rng = Rng(seed * 17 + 1)
     cut = [[0.0] * NXZ for _ in range(NXZ)]
@@ -214,7 +214,7 @@ def _fissures(ht, mat, seed, n, depth, halfw):
             if ((s + phase) % BRIDGE_EVERY < 1.0 and cyc not in marked
                     and 8 <= x < NXZ - 8 and 8 <= z < NXZ - 8):
                 marked.add(cyc)
-                bridges.append((x, z, math.cos(ang), math.sin(ang)))
+                bridges.append((x, z, math.cos(ang), math.sin(ang), 5.0))
             for dk in range(-halfw, halfw + 1):
                 for di in range(-halfw, halfw + 1):
                     ii, kk = int(x + di), int(z + dk)
@@ -230,23 +230,25 @@ def _fissures(ht, mat, seed, n, depth, halfw):
 
 
 def _decks(grid, ht, bridges, dy):
-    """Stamp a solid bridge deck over each recorded fissure crossing.
+    """Stamp a solid bridge deck over each recorded trench crossing.
 
     The deck is a slab spanning the trench at bank height (linearly ramped
     between the two banks), thick enough to read as an arch, with the trench
     left open underneath. The client walks the topmost solid surface, so
-    units cross on the deck while the linea runs below - a real 3D bridge,
-    not a filled-in gap.
+    units cross on the deck while the trench runs below - a real 3D bridge,
+    not a filled-in gap. Each site carries its own half-length, so the same
+    deck spans a 2-cell linea or the Mars canyon. Deck voxels take the
+    world's base (mid) material, so the crossing reads as a bright strip
+    over the dark trench instead of vanishing into it.
     """
     # Width matters for the sim: passability cells are 8 world units, their
     # centres can sit ~5.7u off the deck centreline, and the slope probe
     # reaches 4u further - so the slab must extend ~10u (2.5 cells) each side
     # of the centreline or crossings get flagged too steep.
-    half_len = 5.0   # cells along the crossing (perpendicular to the fissure)
     half_w = 2.8     # cells along the fissure
     thick = 5.0      # slab thickness, world units
     spu = 120.0 / dy
-    for (bx, bz, fx, fz) in bridges:
+    for (bx, bz, fx, fz, half_len) in bridges:
         px, pz = -fz, fx  # crossing direction (perpendicular to the trench)
 
         def bank(sign):
@@ -273,21 +275,44 @@ def _decks(grid, ht, bridges, dy):
                     y = YMIN + j * dy
                     d = 128.0 + min(top - y, y - bottom) * spu
                     lin = grid.lin(ii, j, kk)
-                    grid.density[lin] = max(grid.density[lin],
-                                            int(clamp(d, 0, 255)))
+                    d8 = int(clamp(d, 0, 255))
+                    grid.density[lin] = max(grid.density[lin], d8)
+                    if d8 > 110:
+                        grid.material[lin] = MAT_MID
 
 
 def _canyon(ht, mat, seed, depth, halfw):
-    """One big meandering canyon across the middle (Mars: Valles Marineris)."""
+    """One big meandering canyon across the middle (Mars: Valles Marineris).
+
+    Returns bridge sites every BRIDGE_EVERY columns along the rim (same
+    record as `_fissures`, with a span wide enough to clear both rims), so
+    `_decks` can keep the two sides connected: the canyon walls are far too
+    steep to walk, and without crossings it cuts the map in half.
+    """
+    rng = Rng(seed * 23 + 5)
+    phase = rng.uniform(0, BRIDGE_EVERY)
+    cz_at = [0.0] * NXZ
     for ii in range(NXZ):
         u = ii / (NXZ - 1)
         cz = NXZ * 0.5 + math.sin(u * math.pi * 1.6) * NXZ * 0.06 \
             + (fbm(u * 3.0, 0.5, seed + 4, 2) - 0.5) * NXZ * 0.14
+        cz_at[ii] = cz
         for kk in range(NXZ):
             dd = abs(kk - cz) / halfw
             if dd < 1.0:
                 ht[kk][ii] -= depth * (1.0 - dd * dd)
                 mat[kk][ii] = MAT_HIGH if dd > 0.6 else MAT_LOW
+    bridges = []
+    span = halfw * 1.15 + 3.0
+    for ii in range(10, NXZ - 10):
+        if (ii + phase) % BRIDGE_EVERY < 1.0:
+            cz = cz_at[ii]
+            if span < cz < NXZ - span:
+                # Crossing direction follows the local canyon tangent.
+                dz = (cz_at[min(ii + 3, NXZ - 1)] - cz_at[max(ii - 3, 0)]) / 6.0
+                ln = math.hypot(1.0, dz)
+                bridges.append((float(ii), cz, 1.0 / ln, dz / ln, span))
+    return bridges
 
 
 def _cones(ht, mat, seed, n, height, base_r, kind, region=None):
@@ -773,7 +798,7 @@ def build(world):
     if key == "ariel":
         bridges += _fissures(ht, mat, t["seed"], 4, depth=12.0, halfw=2)
     if key == "mars":
-        _canyon(ht, mat, t["seed"], depth=22.0, halfw=NXZ * 0.07)
+        bridges += _canyon(ht, mat, t["seed"], depth=22.0, halfw=NXZ * 0.07)
     if key == "io":
         vents += _cones(ht, mat, t["seed"], 4, height=66.0, base_r=NXZ * 0.18, kind="volcano")
     if key == "enceladus":

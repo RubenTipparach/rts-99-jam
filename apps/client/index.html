@@ -47,10 +47,21 @@
       }
       #mobile button:active { background: rgba(40, 70, 120, 0.85); }
       #mobile #rc-toggle.on { background: #c8553a; color: #fff; border-color: #ffd9a0; }
-      #pan-up    { left: 76px;  bottom: 152px; }
-      #pan-down  { left: 76px;  bottom: 24px;  }
-      #pan-left  { left: 14px;  bottom: 88px;  }
-      #pan-right { left: 138px; bottom: 88px;  }
+      /* The pan stick: a fixed circular base; Rust drags the knob and reads
+         the analog deflection. */
+      #stick {
+        position: absolute; left: 18px; bottom: 24px; width: 132px; height: 132px;
+        border-radius: 50%; border: 1px solid rgba(150, 180, 220, 0.4);
+        background: rgba(12, 20, 38, 0.45);
+        pointer-events: auto; touch-action: none; user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #stick-knob {
+        position: absolute; left: 50%; top: 50%; width: 56px; height: 56px;
+        margin: -28px 0 0 -28px; border-radius: 50%;
+        border: 1px solid rgba(170, 200, 240, 0.6); background: rgba(40, 70, 120, 0.8);
+        pointer-events: none;
+      }
       #zoom-in   { right: 18px; bottom: 152px; }
       #zoom-out  { right: 18px; bottom: 88px;  }
       #rc-toggle { right: 86px; bottom: 88px; width: 64px; font-size: 15px; }
@@ -75,10 +86,7 @@
   <body>
     <canvas id="hud"></canvas>
     <div id="mobile">
-      <button id="pan-up" aria-label="pan up">▲</button>
-      <button id="pan-left" aria-label="pan left">◀</button>
-      <button id="pan-right" aria-label="pan right">▶</button>
-      <button id="pan-down" aria-label="pan down">▼</button>
+      <div id="stick" aria-label="pan stick"><div id="stick-knob"></div></div>
       <button id="zoom-in" aria-label="zoom in">＋</button>
       <button id="zoom-out" aria-label="zoom out">－</button>
       <button id="rc-toggle" aria-label="right-click mode">RMB</button>

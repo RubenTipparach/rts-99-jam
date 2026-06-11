@@ -357,8 +357,8 @@ fn resume_btn_css(w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
     let bw = 200.0_f64;
     let bh = 48.0_f64;
     let bx = (w_css as f64 - bw) / 2.0;
-    // Sits so the title + two buttons + hint stack reads centered in the
-    // pause panel (panel top is h/2 - 155).
+    // Sits so the title + three buttons + hint stack reads centered in the
+    // pause panel (panel top is h/2 - 185).
     let by = h_css as f64 / 2.0 - 40.0;
     (bx, by, bw, bh)
 }
@@ -367,6 +367,13 @@ fn resume_btn_css(w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
 #[cfg(target_arch = "wasm32")]
 fn fullscreen_btn_css(w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
     let (bx, by, bw, bh) = resume_btn_css(w_css, h_css);
+    (bx, by + bh + 14.0, bw, bh)
+}
+
+/// Quit-to-menu button rect in CSS pixels, directly under Fullscreen.
+#[cfg(target_arch = "wasm32")]
+fn quit_btn_css(w_css: f32, h_css: f32) -> (f64, f64, f64, f64) {
+    let (bx, by, bw, bh) = fullscreen_btn_css(w_css, h_css);
     (bx, by + bh + 14.0, bw, bh)
 }
 
@@ -393,6 +400,13 @@ pub fn resume_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
 pub fn fullscreen_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
     let d = dpr();
     css_to_phys(fullscreen_btn_css(w_phys / d, h_phys / d), d)
+}
+
+/// Quit-to-menu button rect in physical pixels, for the pause-menu hit-test.
+#[cfg(target_arch = "wasm32")]
+pub fn quit_button_rect(w_phys: f32, h_phys: f32) -> (f32, f32, f32, f32) {
+    let d = dpr();
+    css_to_phys(quit_btn_css(w_phys / d, h_phys / d), d)
 }
 
 /// Draw the context cursor at `(x, y)` in CSS pixels: an arrowhead for
@@ -535,7 +549,8 @@ fn draw_cursor_arrow(ctx: &web_sys::CanvasRenderingContext2d, x: f64, y: f64) {
     ctx.restore();
 }
 
-/// The pause overlay: a dimmed screen, a centred panel, and a Resume button.
+/// The pause overlay: a dimmed screen, a centred panel, and the Resume /
+/// Fullscreen / Quit to Menu buttons.
 #[cfg(target_arch = "wasm32")]
 fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32, cursor: (f64, f64)) {
     let (wf, hf) = (w as f64, h as f64);
@@ -543,9 +558,9 @@ fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32, cursor: (
     // Dim the whole scene.
     ctx.set_fill_style_str("rgba(4,8,16,0.72)");
     ctx.fill_rect(0.0, 0.0, wf, hf);
-    // Panel (tall enough for both buttons + hint).
+    // Panel (tall enough for all three buttons + hint).
     let pw = 360.0_f64;
-    let ph = 270.0_f64;
+    let ph = 350.0_f64;
     let px = (wf - pw) / 2.0;
     let py = hf / 2.0 - ph / 2.0 - 10.0;
     ctx.set_fill_style_str("rgba(10,16,30,0.96)");
@@ -581,11 +596,33 @@ fn draw_pause(ctx: &web_sys::CanvasRenderingContext2d, w: f32, h: f32, cursor: (
     };
     button(resume_btn_css(w, h), "Resume");
     button(fullscreen_btn_css(w, h), "Fullscreen");
+    // Quit to Menu: same slot stack, warm "danger" tones so abandoning the
+    // match never reads like just another option.
+    {
+        let (bx, by, bw, bh) = quit_btn_css(w, h);
+        let hover = cursor.0 >= bx && cursor.0 <= bx + bw && cursor.1 >= by && cursor.1 <= by + bh;
+        ctx.set_fill_style_str(if hover {
+            "rgba(168,62,52,0.97)"
+        } else {
+            "rgba(120,44,38,0.95)"
+        });
+        ctx.fill_rect(bx, by, bw, bh);
+        ctx.set_stroke_style_str(if hover {
+            "rgba(255,210,200,1.0)"
+        } else {
+            "rgba(235,150,135,0.95)"
+        });
+        ctx.set_line_width(if hover { 2.5 } else { 1.5 });
+        ctx.stroke_rect(bx, by, bw, bh);
+        ctx.set_fill_style_str("#ffe9e4");
+        ctx.set_font("bold 18px monospace");
+        let _ = ctx.fill_text("Quit to Menu", bx + bw / 2.0, by + 31.0);
+    }
     // Hint.
-    let (_, fy, _, fh) = fullscreen_btn_css(w, h);
+    let (_, qy, _, qh) = quit_btn_css(w, h);
     ctx.set_fill_style_str("#8aa3cc");
     ctx.set_font("13px monospace");
-    let _ = ctx.fill_text("Press Esc to resume", wf / 2.0, fy + fh + 28.0);
+    let _ = ctx.fill_text("Press Esc to resume", wf / 2.0, qy + qh + 28.0);
     ctx.restore();
 }
 

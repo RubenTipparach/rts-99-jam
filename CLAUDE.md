@@ -151,11 +151,12 @@ Rust/WASM** - the wgpu scene plus the Rust-driven HUD canvas (`hud.rs`). Do
 **not** add HTML/DOM widgets (buttons, menus, panels, overlays) for gameplay.
 
 The **only** DOM controls allowed are **mobile test controls**, so a developer on
-a phone can exercise desktop interactions: a **pan** d-pad, **zoom** in/out, and a
-**right-click** toggle - *nothing else*. They live in `apps/client/index.html` as
-bare elements; all their behavior is wired from Rust (the `mobile` module in
-`main.rs`), and they're shown only on touch devices via `@media (pointer:
-coarse)`. The game itself is not meant to be played on mobile.
+a phone can exercise desktop interactions: a **pan** stick (virtual analog
+stick), **zoom** in/out, and a **right-click** toggle - *nothing else*. They live
+in `apps/client/index.html` as bare elements; all their behavior is wired from
+Rust (the `mobile` module in `main.rs`), and they're shown only on touch devices
+via `@media (pointer: coarse)`. The game itself is not meant to be played on
+mobile.
 
 (The pre-WASM `#loading` overlay is exempt: it must be DOM because it shows
 before the WASM module has loaded.)
