@@ -15,9 +15,14 @@ Conventions the engine relies on (loader: `apps/client/src/model.rs`):
   infantry faces -z; the workers (acolyte, engineer) and the heavy face
   +z (visor side); building doors face +z. The acolyte is authored
   resting just above y = 0 and is lifted into its hover by the engine.
-- Walking units (infantry, engineer, heavy): the vertex shader swings
-  geometry below y of about 1.3 fore-aft by the sign of x, so keep each
-  leg entirely on its own side of x = 0.
+- Walk cycles are static keyframe assets: `<unit>-walk-0.obj` through
+  `-7.obj` next to the idle base model (infantry, engineer, heavy), all
+  sharing the base model's `.mtl`. Each frame is a whole-mesh snapshot you
+  can edit in Blender; at runtime instances snap to the nearest frame (no
+  interpolation, deliberately chunky). `cargo run -p modelgen` scaffolds a
+  cycle from the idle pose by swinging geometry below y of about 1.3 by
+  the sign of x, so keep each leg on its own side of x = 0 if you want a
+  re-scaffold to stay coherent.
 - The MTL `Kd` is the material color, freely editable. The material NAME
   carries engine flags that Blender round-trips untouched:
   - `_t1` - team-tint channel: the faction color replaces the material

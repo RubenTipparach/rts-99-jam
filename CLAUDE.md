@@ -45,6 +45,11 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
   NAME carries the engine flags (`_t1` team tint, `_d0/_d1/_d2`
   surface-detail channel) - see `assets/models/README.md`. Scaffold a new
   model with `cargo run -p modelgen`.
+- Animations are static assets too: walk cycles are OBJ keyframe
+  sequences (`assets/models/<unit>-walk-<k>.obj`, idle + 8 frames) the
+  renderer plays back by frame bucket; edit individual frames in Blender.
+  Pure positioning motion (hover bob, eased facing rotation, construction
+  rise, fx particles) is engine behavior, not an asset.
 - Engine geometry that is parametric to the running map (the water rim
   walls), bare fx primitives (the particle cube), and runtime-generated
   state (the fog-of-war field) are not content assets and stay in code.

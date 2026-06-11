@@ -1981,6 +1981,32 @@ fn supply_mesh_astro() -> Vec<UnitVertex> {
     push_gem(&mut m, 0.0, 0.0, 0.45, 4.55, 4.9, 5.5, team, 1.0, 6);
     m
 }
+/// Walk-cycle frames baked per walking unit (one full gait cycle).
+const WALK_FRAMES: usize = 8;
+
+/// Bake one walk frame by applying the gait pose to the idle mesh: geometry
+/// near the ground (below y of about 1.3) swings fore-aft along z, the two
+/// sides (sign of x) in counter-phase, with a small lift on the stepping
+/// foot. Normals stay as authored, like the rest of the flat-shaded look.
+fn bake_walk_frame(mesh: &[UnitVertex], frame: usize, amp: f32) -> Vec<UnitVertex> {
+    let phase = std::f32::consts::TAU * frame as f32 / WALK_FRAMES as f32;
+    mesh.iter()
+        .map(|v| {
+            let side = if v.pos[0] >= 0.0 {
+                0.0
+            } else {
+                std::f32::consts::PI
+            };
+            let foot = (1.0 - v.pos[1] / 1.3).clamp(0.0, 1.0);
+            let swing = (phase + side).sin();
+            let mut p = v.pos;
+            p[2] += swing * amp * foot;
+            p[1] += swing.max(0.0) * amp * 0.45 * foot;
+            UnitVertex { pos: p, ..*v }
+        })
+        .collect()
+}
+
 /// Stable material name carrying the engine flags: `_t1` marks the team
 /// tint channel, `_d0/_d1/_d2` the surface-detail channel. The loader reads
 /// flags from the NAME (so they survive Blender) and the color from `Kd`.
@@ -1992,9 +2018,10 @@ fn mat_name(c: [f32; 4], detail: f32) -> String {
     format!("m{r:02x}{g:02x}{bl:02x}_t{t}_d{d}")
 }
 
-/// Write one mesh as `<name>.obj` + `<name>.mtl`, deduplicating positions
-/// and normals and preserving triangle order (faces switch `usemtl` inline).
-fn write_model(dir: &Path, name: &str, mesh: &[UnitVertex]) {
+/// Write one mesh as `<name>.obj` (+ `<name>.mtl` unless `mtllib` points at
+/// a shared material file, as walk frames do), deduplicating positions and
+/// normals and preserving triangle order (faces switch `usemtl` inline).
+fn write_model(dir: &Path, name: &str, mtllib: &str, mesh: &[UnitVertex]) {
     let mut obj = String::new();
     let mut mtl = String::new();
     let _ = writeln!(
@@ -2009,7 +2036,7 @@ fn write_model(dir: &Path, name: &str, mesh: &[UnitVertex]) {
         obj,
         "# Material names carry engine flags: _t1 team tint, _d0/_d1/_d2 detail channel."
     );
-    let _ = writeln!(obj, "mtllib {name}.mtl");
+    let _ = writeln!(obj, "mtllib {mtllib}.mtl");
     let _ = writeln!(obj, "o {name}");
     let bits = |p: [f32; 3]| [p[0].to_bits(), p[1].to_bits(), p[2].to_bits()];
     let mut vmap: HashMap<[u32; 3], usize> = HashMap::new();
@@ -2062,17 +2089,19 @@ fn write_model(dir: &Path, name: &str, mesh: &[UnitVertex]) {
             ni[2] + 1
         );
     }
-    let _ = writeln!(
-        mtl,
-        "# {name}.mtl - colors are editable; KEEP the material names,"
-    );
-    let _ = writeln!(mtl, "# the engine reads the _t/_d flags from them.");
-    for (n, c) in &mats {
-        let _ = writeln!(mtl, "newmtl {n}");
-        let _ = writeln!(mtl, "Kd {:.4} {:.4} {:.4}", c[0], c[1], c[2]);
-    }
     fs::write(dir.join(format!("{name}.obj")), obj).expect("write obj");
-    fs::write(dir.join(format!("{name}.mtl")), mtl).expect("write mtl");
+    if name == mtllib {
+        let _ = writeln!(
+            mtl,
+            "# {name}.mtl - colors are editable; KEEP the material names,"
+        );
+        let _ = writeln!(mtl, "# the engine reads the _t/_d flags from them.");
+        for (n, c) in &mats {
+            let _ = writeln!(mtl, "newmtl {n}");
+            let _ = writeln!(mtl, "Kd {:.4} {:.4} {:.4}", c[0], c[1], c[2]);
+        }
+        fs::write(dir.join(format!("{name}.mtl")), mtl).expect("write mtl");
+    }
 }
 
 fn main() {
@@ -2097,9 +2126,23 @@ fn main() {
         ("carbon-pool", carbon_pool_mesh()),
         ("barrel", barrel_mesh()),
     ];
-    let n = jobs.len();
-    for (name, mesh) in jobs {
-        write_model(&dir, name, &mesh);
+    let mut n = jobs.len();
+    for (name, mesh) in &jobs {
+        write_model(&dir, name, name, mesh);
+    }
+    // Walk-cycle keyframes for the walking units, sharing the base MTL.
+    // (name, gait amplitude) - the heavy stomps wider and slower.
+    for (name, amp) in [("infantry", 0.32_f32), ("engineer", 0.30), ("heavy", 0.5)] {
+        let base = &jobs.iter().find(|(j, _)| *j == name).expect("walk base").1;
+        for f in 0..WALK_FRAMES {
+            write_model(
+                &dir,
+                &format!("{name}-walk-{f}"),
+                name,
+                &bake_walk_frame(base, f, amp),
+            );
+            n += 1;
+        }
     }
     println!("wrote {n} models to {}", dir.display());
 }

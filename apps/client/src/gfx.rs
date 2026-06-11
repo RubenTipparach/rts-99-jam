@@ -14,16 +14,17 @@ pub struct InstanceRaw {
     pub color: [f32; 4],
     /// Yaw about +Y as `(cos, sin)`; `ROT_NONE` leaves the mesh unrotated.
     pub rot: [f32; 2],
-    /// Procedural walk cycle as `(phase, amplitude)`: the vertex shader
-    /// swings geometry near the ground (legs) along the facing axis, the two
-    /// sides in counter-phase. `ANIM_NONE` for buildings and idle units.
-    pub anim: [f32; 2],
 }
 
 /// Identity rotation for [`InstanceRaw::rot`].
 pub const ROT_NONE: [f32; 2] = [1.0, 0.0];
-/// No walk cycle for [`InstanceRaw::anim`].
-pub const ANIM_NONE: [f32; 2] = [0.0, 0.0];
+
+/// Baked walk-cycle keyframes per walking unit: static OBJ assets
+/// (`assets/models/<unit>-walk-<k>.obj`) covering one full gait cycle.
+pub const WALK_FRAMES: usize = 8;
+/// Instance buckets per walking kind: the idle base model plus each
+/// walk keyframe. Instances snap to the nearest frame (no interpolation).
+pub const WALK_BUCKETS: usize = WALK_FRAMES + 1;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -152,11 +153,53 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// Load a static model asset (baked into the binary for the web build).
 macro_rules! model {
-    ($name:literal) => {
+    ($name:expr) => {
         crate::model::load(
             include_str!(concat!("../../../assets/models/", $name, ".obj")),
             include_str!(concat!("../../../assets/models/", $name, ".mtl")),
         )
+    };
+}
+
+/// Load a walking unit's animation set: the idle base model followed by its
+/// baked walk keyframes (all sharing the base model's MTL).
+macro_rules! walk_models {
+    ($name:literal) => {
+        vec![
+            model!($name),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-0.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-1.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-2.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-3.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-4.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-5.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-6.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-7.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+        ]
     };
 }
 
@@ -399,6 +442,24 @@ fn ring_decals(rings: &[RingRaw]) -> Vec<RingVertex> {
     out
 }
 
+/// Expand one walking kind into its per-frame sub-draws: each bucket's
+/// vertex buffer with that bucket's instance count, clamped so the running
+/// total never exceeds the kind's (possibly clamped) instance total.
+fn frame_draws<'b>(
+    bufs: &'b [(wgpu::Buffer, u32)],
+    counts: &[u32; WALK_BUCKETS],
+    total: usize,
+) -> Vec<(&'b wgpu::Buffer, u32, usize)> {
+    let mut left = total as u32;
+    let mut out = Vec::with_capacity(WALK_BUCKETS);
+    for (k, (buf, vlen)) in bufs.iter().enumerate() {
+        let c = counts.get(k).copied().unwrap_or(0).min(left);
+        left -= c;
+        out.push((buf, *vlen, c as usize));
+    }
+    out
+}
+
 fn make_depth(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
     device
         .create_texture(&wgpu::TextureDescriptor {
@@ -480,8 +541,8 @@ pub struct Gfx {
     terrain_indices: u32,
     water_buf: wgpu::Buffer,
     water_len: u32,
-    infantry_buf: wgpu::Buffer,
-    infantry_len: u32,
+    /// Idle base + walk keyframe vertex buffers (and counts) per walking kind.
+    infantry_bufs: Vec<(wgpu::Buffer, u32)>,
     barracks_astro_buf: wgpu::Buffer,
     barracks_astro_len: u32,
     barracks_hollow_buf: wgpu::Buffer,
@@ -492,8 +553,7 @@ pub struct Gfx {
     hq_hollow_len: u32,
     acolyte_buf: wgpu::Buffer,
     acolyte_len: u32,
-    engineer_buf: wgpu::Buffer,
-    engineer_len: u32,
+    engineer_bufs: Vec<(wgpu::Buffer, u32)>,
     ore_node_buf: wgpu::Buffer,
     ore_node_len: u32,
     carbon_node_buf: wgpu::Buffer,
@@ -514,8 +574,7 @@ pub struct Gfx {
     supply_astro_len: u32,
     particle_buf: wgpu::Buffer,
     particle_len: u32,
-    heavy_buf: wgpu::Buffer,
-    heavy_len: u32,
+    heavy_bufs: Vec<(wgpu::Buffer, u32)>,
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
@@ -924,7 +983,7 @@ impl Gfx {
         let inst = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<InstanceRaw>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4, 6 => Float32x2, 7 => Float32x2],
+            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4, 6 => Float32x2],
         };
         let ring_v = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<RingVertex>() as u64,
@@ -1059,12 +1118,27 @@ impl Gfx {
             bytemuck::cast_slice(&water),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let infantry = model!("infantry");
-        let infantry_buf = mkbuf(
-            "infantry",
-            bytemuck::cast_slice(&infantry),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
+        // Walking units load idle + their baked walk keyframes; each bucket
+        // gets its own vertex buffer and instances are grouped per frame.
+        let mkframes = |name: &str, frames: Vec<Vec<UnitVertex>>| -> Vec<(wgpu::Buffer, u32)> {
+            frames
+                .iter()
+                .enumerate()
+                .map(|(k, m)| {
+                    (
+                        mkbuf(
+                            &format!("{name}-{k}"),
+                            bytemuck::cast_slice(m),
+                            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        ),
+                        m.len() as u32,
+                    )
+                })
+                .collect()
+        };
+        let infantry_bufs = mkframes("infantry", walk_models!("infantry"));
+        let engineer_bufs = mkframes("engineer", walk_models!("engineer"));
+        let heavy_bufs = mkframes("heavy", walk_models!("heavy"));
         let barracks_astro = model!("barracks-astro");
         let barracks_astro_buf = mkbuf(
             "barracks-astro",
@@ -1093,12 +1167,6 @@ impl Gfx {
         let acolyte_buf = mkbuf(
             "acolyte",
             bytemuck::cast_slice(&acolyte),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
-        let engineer = model!("engineer");
-        let engineer_buf = mkbuf(
-            "engineer",
-            bytemuck::cast_slice(&engineer),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
         let ore_node = model!("ore-node");
@@ -1161,12 +1229,6 @@ impl Gfx {
             bytemuck::cast_slice(&particle),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let heavy = model!("heavy");
-        let heavy_buf = mkbuf(
-            "heavy",
-            bytemuck::cast_slice(&heavy),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
         let walls = water_walls();
         let walls_buf = mkbuf(
             "walls",
@@ -1180,7 +1242,6 @@ impl Gfx {
                 scale: [1.0, 1.0, 1.0],
                 color: [0.0, 0.0, 0.0, 1.0],
                 rot: ROT_NONE,
-                anim: ANIM_NONE,
             }),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
@@ -1218,8 +1279,7 @@ impl Gfx {
             terrain_indices: ti.len() as u32,
             water_buf,
             water_len: water.len() as u32,
-            infantry_buf,
-            infantry_len: infantry.len() as u32,
+            infantry_bufs,
             barracks_astro_buf,
             barracks_astro_len: barracks_astro.len() as u32,
             barracks_hollow_buf,
@@ -1230,8 +1290,7 @@ impl Gfx {
             hq_hollow_len: hq_hollow.len() as u32,
             acolyte_buf,
             acolyte_len: acolyte.len() as u32,
-            engineer_buf,
-            engineer_len: engineer.len() as u32,
+            engineer_bufs,
             ore_node_buf,
             ore_node_len: ore_node.len() as u32,
             carbon_node_buf,
@@ -1252,8 +1311,7 @@ impl Gfx {
             supply_astro_len: supply_astro.len() as u32,
             particle_buf,
             particle_len: particle.len() as u32,
-            heavy_buf,
-            heavy_len: heavy.len() as u32,
+            heavy_bufs,
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
@@ -1423,15 +1481,18 @@ impl Gfx {
     pub fn render(
         &mut self,
         infantry: &[InstanceRaw],
+        infantry_frames: &[u32; WALK_BUCKETS],
         barracks_astro: &[InstanceRaw],
         barracks_hollow: &[InstanceRaw],
         hq_astro: &[InstanceRaw],
         hq_hollow: &[InstanceRaw],
         acolytes: &[InstanceRaw],
         engineers: &[InstanceRaw],
+        engineer_frames: &[u32; WALK_BUCKETS],
         ore_nodes: &[InstanceRaw],
         carbon_nodes: &[InstanceRaw],
         heavies: &[InstanceRaw],
+        heavy_frames: &[u32; WALK_BUCKETS],
         turrets: &[InstanceRaw],
         supplies: &[InstanceRaw],
         wards_astro: &[InstanceRaw],
@@ -1634,24 +1695,34 @@ impl Gfx {
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                 // (mesh vertex buffer, mesh vertex count, instance count) per group,
                 // drawn over consecutive instance ranges matching the packing above.
-                let meshes = [
-                    (&self.infantry_buf, self.infantry_len, ni),
-                    (&self.barracks_astro_buf, self.barracks_astro_len, na),
-                    (&self.barracks_hollow_buf, self.barracks_hollow_len, nh),
-                    (&self.hq_astro_buf, self.hq_astro_len, nqa),
-                    (&self.hq_hollow_buf, self.hq_hollow_len, nqh),
-                    (&self.acolyte_buf, self.acolyte_len, nac),
-                    (&self.engineer_buf, self.engineer_len, nen),
-                    (&self.ore_node_buf, self.ore_node_len, nor),
-                    (&self.carbon_node_buf, self.carbon_node_len, ncar),
-                    (&self.heavy_buf, self.heavy_len, nhv),
-                    (&self.turret_buf, self.turret_len, ntr),
-                    (&self.supply_buf, self.supply_len, nsp),
-                    (&self.ward_astro_buf, self.ward_astro_len, nwa),
-                    (&self.supply_astro_buf, self.supply_astro_len, nsa),
-                    (&self.barrel_buf, self.barrel_len, nbr),
-                    (&self.particle_buf, self.particle_len, npt),
-                ];
+                // Walking kinds expand into one sub-draw per animation frame
+                // bucket (their instances are packed idle first, then frame
+                // 0..N, with `*_frames` carrying the per-bucket counts).
+                let mut meshes: Vec<(&wgpu::Buffer, u32, usize)> = Vec::new();
+                meshes.extend(frame_draws(
+                    self.infantry_bufs.as_slice(),
+                    infantry_frames,
+                    ni,
+                ));
+                meshes.push((&self.barracks_astro_buf, self.barracks_astro_len, na));
+                meshes.push((&self.barracks_hollow_buf, self.barracks_hollow_len, nh));
+                meshes.push((&self.hq_astro_buf, self.hq_astro_len, nqa));
+                meshes.push((&self.hq_hollow_buf, self.hq_hollow_len, nqh));
+                meshes.push((&self.acolyte_buf, self.acolyte_len, nac));
+                meshes.extend(frame_draws(
+                    self.engineer_bufs.as_slice(),
+                    engineer_frames,
+                    nen,
+                ));
+                meshes.push((&self.ore_node_buf, self.ore_node_len, nor));
+                meshes.push((&self.carbon_node_buf, self.carbon_node_len, ncar));
+                meshes.extend(frame_draws(self.heavy_bufs.as_slice(), heavy_frames, nhv));
+                meshes.push((&self.turret_buf, self.turret_len, ntr));
+                meshes.push((&self.supply_buf, self.supply_len, nsp));
+                meshes.push((&self.ward_astro_buf, self.ward_astro_len, nwa));
+                meshes.push((&self.supply_astro_buf, self.supply_astro_len, nsa));
+                meshes.push((&self.barrel_buf, self.barrel_len, nbr));
+                meshes.push((&self.particle_buf, self.particle_len, npt));
                 let mut base = 0u32;
                 for (buf, vlen, count) in meshes {
                     let count = count as u32;
@@ -1772,6 +1843,41 @@ mod tests {
         check_mesh(&model!("supply-astro"), "supply-astro");
         check_mesh(&particle_mesh(), "particle");
         check_mesh(&model!("heavy"), "heavy");
+        // The walk-cycle keyframe assets: idle + every baked frame.
+        for (name, frames) in [
+            ("infantry", walk_models!("infantry")),
+            ("engineer", walk_models!("engineer")),
+            ("heavy", walk_models!("heavy")),
+        ] {
+            assert_eq!(frames.len(), WALK_BUCKETS, "{name} walk set size");
+            for (k, m) in frames.iter().enumerate() {
+                check_mesh(m, &format!("{name}-frame-{k}"));
+            }
+        }
+    }
+
+    /// Renders the infantry walk-cycle keyframes side by side to
+    /// `target/previews/infantry-walk.png`. A dev tool: run on demand with
+    /// `cargo test -p client render_walk_strip -- --ignored`.
+    #[test]
+    #[ignore = "writes the walk strip to target/previews; run on demand"]
+    fn render_walk_strip() {
+        let team = [0.25, 0.55, 1.0];
+        let frames = walk_models!("infantry");
+        let (fw, fh) = (170u32, 320u32);
+        let w = 12 + frames.len() as u32 * (fw + 12);
+        let mut sheet = image::RgbaImage::from_pixel(w, fh + 24, image::Rgba([10, 14, 24, 255]));
+        for (k, mesh) in frames.iter().enumerate() {
+            let img = rasterize(mesh, team, fw, fh);
+            let x0 = 12 + k as u32 * (fw + 12);
+            for (px, py, p) in img.enumerate_pixels() {
+                if x0 + px < w {
+                    sheet.put_pixel(x0 + px, 12 + py, *p);
+                }
+            }
+        }
+        std::fs::create_dir_all("target/previews").unwrap();
+        sheet.save("target/previews/infantry-walk.png").unwrap();
     }
 
     /// Offline mesh preview: rasterizes a mesh with the game's iso camera
