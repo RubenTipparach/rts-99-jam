@@ -1443,11 +1443,12 @@ fn ore_node_mesh() -> Vec<UnitVertex> {
     let rock_dk = [0.17, 0.20, 0.25];
     let rock_lt = [0.36, 0.41, 0.48];
     // Two-stage pedestal with an uneven scree of boulders around the rim.
+    // Both stages share the same n-gon orientation so the join is sealed.
     push_frustum(
         &mut m, 0.0, 0.0, 3.4, 2.6, 0.0, 1.0, rock_dk, 0.0, 9, 0.0, false,
     );
     push_frustum(
-        &mut m, 0.0, 0.0, 2.6, 2.1, 1.0, 1.35, rock, 0.0, 9, 0.2, true,
+        &mut m, 0.0, 0.0, 2.6, 2.1, 1.0, 1.35, rock, 0.0, 9, 0.0, true,
     );
     push_prism(&mut m, 0.0, 0.0, 2.9, 0.0, 0.45, rock, 0.0, 9, 0.0, true);
     for (k, &(bx, bz)) in [
@@ -1539,17 +1540,19 @@ fn carbon_node_mesh() -> Vec<UnitVertex> {
     let vent_lt = [0.28, 0.33, 0.30];
     let stain = [0.33, 0.45, 0.32];
     // Three-stage mound with a sulfurous stain band below the crater lip.
+    // All stages share the same n-gon orientation and exact join radii so
+    // the stack is watertight; the stain band sits proud of the slope.
     push_frustum(
         &mut m, 0.0, 0.0, 4.0, 3.4, 0.0, 0.9, vent_dk, 0.0, 10, 0.0, false,
     );
     push_frustum(
-        &mut m, 0.0, 0.0, 3.4, 3.0, 0.9, 1.6, vent, 0.0, 10, 0.3, false,
+        &mut m, 0.0, 0.0, 3.4, 3.0, 0.9, 1.6, vent, 0.0, 10, 0.0, false,
     );
     push_frustum(
         &mut m, 0.0, 0.0, 3.0, 2.2, 1.6, 3.0, vent, 0.0, 10, 0.0, false,
     );
     push_frustum(
-        &mut m, 0.0, 0.0, 2.62, 2.42, 2.30, 2.62, stain, 0.0, 10, 0.0, false,
+        &mut m, 0.0, 0.0, 2.74, 2.55, 2.30, 2.62, stain, 0.0, 10, 0.0, true,
     );
     push_prism(
         &mut m, 0.0, 0.0, 2.3, 2.95, 3.12, vent_dk, 0.0, 10, 0.0, false,
