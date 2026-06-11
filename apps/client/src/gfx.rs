@@ -2525,6 +2525,58 @@ mod tests {
         }
     }
 
+    /// Renders the Astromancer concept lineup (Spire, Sanctum, Ward,
+    /// Acolyte side by side over the faction palette) to
+    /// `target/previews/astromancers-concept.png`. A dev tool for
+    /// `docs/factions/astromancers.md`; run on demand with
+    /// `cargo test -p client render_astromancer_concept -- --ignored`.
+    #[test]
+    #[ignore = "writes the concept sheet to target/previews; run on demand"]
+    fn render_astromancer_concept() {
+        let team = [0.25, 0.55, 1.0];
+        let jobs: [(Vec<UnitVertex>, u32); 4] = [
+            (hq_mesh_astro(), 360),
+            (barracks_mesh_astro(), 330),
+            (turret_mesh(), 250),
+            (acolyte_mesh(), 210),
+        ];
+        let (w, h) = (1280u32, 580u32);
+        let mut sheet = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 14, 24, 255]));
+        let mut x = 24u32;
+        for (mesh, size) in jobs {
+            let img = rasterize(&mesh, team, size, 440);
+            for (px, py, p) in img.enumerate_pixels() {
+                if p[3] > 0 && x + px < w {
+                    sheet.put_pixel(x + px, 30 + py, *p);
+                }
+            }
+            x += size + 24;
+        }
+        // The faction palette: porcelain shell, indigo shadow, aether cyan,
+        // auric gold, team accent.
+        let swatches = [
+            [233u8, 229, 222],
+            [26, 32, 54],
+            [140, 230, 255],
+            [196, 160, 84],
+            [64, 140, 255],
+        ];
+        for (i, c) in swatches.iter().enumerate() {
+            for yy in 0..48u32 {
+                for xx in 0..110u32 {
+                    let sx = 24 + i as u32 * 122 + xx;
+                    if sx < w {
+                        sheet.put_pixel(sx, h - 72 + yy, image::Rgba([c[0], c[1], c[2], 255]));
+                    }
+                }
+            }
+        }
+        std::fs::create_dir_all("target/previews").unwrap();
+        sheet
+            .save("target/previews/astromancers-concept.png")
+            .unwrap();
+    }
+
     /// Renders a small icon PNG of every unit and building mesh to
     /// `target/previews/icons/`. A dev tool, not a check: run on demand with
     /// `cargo test -p client render_unit_icons -- --ignored` and copy the
