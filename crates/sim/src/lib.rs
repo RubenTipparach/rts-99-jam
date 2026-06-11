@@ -113,6 +113,11 @@ enum Order {
         x: Fx,
         y: Fx,
     },
+    /// Worker: walk to a damaged friendly building and weld it back up
+    /// (drains ore per hit point restored; stops when full or broke).
+    Repair {
+        target: u32,
+    },
 }
 
 struct Stats {
@@ -210,6 +215,11 @@ const MINE_RATE: Fx = Fx::from_ratio(1, 5); // resource per tick while mining
 const MINE_RANGE2: Fx = Fx::from_int(36); // mine within range 6 of a node
 const DEPOSIT_RANGE2: Fx = Fx::from_int(100); // deposit within range 10 of a building
 
+// Worker repair tuning: hit points welded back per tick, and the ore drained
+// per tick of work (so a full top-up costs a fraction of the build price).
+const REPAIR_RATE: Fx = Fx::from_ratio(3, 10);
+const REPAIR_ORE: Fx = Fx::from_ratio(1, 10);
+
 const PROD_TICKS: i32 = 55;
 const MAX_QUEUE: u32 = 6;
 
@@ -300,6 +310,8 @@ pub struct Snap {
     pub moving: bool,
     /// Workers only, display-only: actively mining a node this tick.
     pub mining: bool,
+    /// Workers only, display-only: actively welding a building this tick.
+    pub repairing: bool,
     /// Workers only, display-only: what the worker is hauling
     /// (0 = nothing, 1 = ore, 2 = carbon), so the client can show the load.
     pub carry: u8,
@@ -390,6 +402,8 @@ pub struct World {
     carry_kind: Vec<u8>,
     /// Workers only, display-only: actively mining a node this tick.
     mining: Vec<bool>,
+    /// Workers only, display-only: actively repairing this tick.
+    repairing: Vec<bool>,
     /// Buildings only: ticks of construction remaining (0 = functional).
     construct: Vec<Fx>,
     /// Producers only: which unit kind the building is currently producing
@@ -446,6 +460,7 @@ impl World {
             carried: Vec::new(),
             carry_kind: Vec::new(),
             mining: Vec::new(),
+            repairing: Vec::new(),
             construct: Vec::new(),
             prod_kind: Vec::new(),
             bot: Vec::new(),
@@ -661,6 +676,7 @@ impl World {
             self.carried.push(Fx::ZERO);
             self.carry_kind.push(0);
             self.mining.push(false);
+            self.repairing.push(false);
             self.construct.push(Fx::ZERO);
             self.prod_kind.push(0);
             // Face "north" (toward -y) until the first move/attack.
@@ -685,6 +701,7 @@ impl World {
         self.carried[i] = Fx::ZERO;
         self.carry_kind[i] = 0;
         self.mining[i] = false;
+        self.repairing[i] = false;
         // Scenario / production spawns are instant; the Build path overrides this
         // to ramp construction up over CONSTRUCT_TICKS.
         self.construct[i] = Fx::ZERO;
@@ -1166,6 +1183,17 @@ impl World {
                         self.order[u] = Order::Harvest { node };
                     }
                 }
+                Command::Repair { unit, target } => {
+                    let (u, t) = (unit as usize, target as usize);
+                    if self.arena.alive_at(unit)
+                        && self.kind[u] == Kind::Worker
+                        && self.arena.alive_at(target)
+                        && is_building(self.kind[t])
+                        && self.owner[t] == self.owner[u]
+                    {
+                        self.order[u] = Order::Repair { target };
+                    }
+                }
                 Command::Build { unit, kind, x, y } => {
                     if self.arena.alive_at(unit) && self.kind[unit as usize] == Kind::Worker {
                         self.order[unit as usize] = Order::Build { kind, x, y };
@@ -1378,6 +1406,7 @@ impl World {
             let inf = stats(self.kind[i]);
             let me = self.pos[i];
             self.mining[i] = false;
+            self.repairing[i] = false;
 
             // Harvest is a self-contained cycle (mine the node, then return to
             // the nearest base and deposit), handled before the combat orders.
@@ -1440,6 +1469,48 @@ impl World {
                 continue;
             }
 
+            // Repair: walk to the damaged friendly building's edge and weld
+            // hit points back, draining ore per tick of work. Stops when the
+            // structure is whole, the stockpile runs dry, or the target dies.
+            if let Order::Repair { target } = self.order[i] {
+                let t = target as usize;
+                let max_hp = if self.arena.alive_at(target) {
+                    stats(self.kind[t]).max_hp
+                } else {
+                    Fx::ZERO
+                };
+                let valid = self.arena.alive_at(target)
+                    && is_building(self.kind[t])
+                    && self.owner[t] == self.owner[i]
+                    && self.hp[t] < max_hp;
+                if !valid {
+                    self.order[i] = Order::Idle;
+                } else {
+                    let tp = self.pos[t];
+                    // Edge-relative reach, like attacks: big footprints are
+                    // welded from outside the wall.
+                    let reach = Fx::from_int(6) + obstacle_radius(self.kind[t]).unwrap_or(Fx::ZERO);
+                    if dist2(me, tp.x, tp.y) <= reach * reach {
+                        self.face(i, tp.x, tp.y);
+                        let owner = self.owner[i];
+                        if self.ore(owner) >= REPAIR_ORE {
+                            *self.ore_mut(owner) -= REPAIR_ORE;
+                            self.hp[t] = (self.hp[t] + REPAIR_RATE).min(max_hp);
+                            self.repairing[i] = true;
+                            if self.hp[t] >= max_hp {
+                                self.order[i] = Order::Idle;
+                            }
+                        } else {
+                            self.order[i] = Order::Idle; // broke: down tools
+                        }
+                    } else {
+                        self.step_toward(i, tp.x, tp.y, inf.speed);
+                    }
+                }
+                self.cooldown[i] = (self.cooldown[i] - Fx::ONE).max(Fx::ZERO);
+                continue;
+            }
+
             // Build is also self-contained: walk to the site, then raise the
             // building if the owner can afford it (ore + carbon) and the spot is
             // clear. The new structure then ticks up over CONSTRUCT_TICKS.
@@ -1478,6 +1549,7 @@ impl World {
                 Order::Idle => {}
                 Order::Harvest { .. } => {} // handled above
                 Order::Build { .. } => {}   // handled above
+                Order::Repair { .. } => {}  // handled above
                 Order::Move { x, y } => {
                     let d2t = dist2(me, x, y);
                     // Arrived - or near enough while the spot is already
@@ -1751,6 +1823,7 @@ impl World {
                 max_hp: stats(self.kind[i]).max_hp,
                 moving: !matches!(self.order[i], Order::Idle),
                 mining: self.mining[i],
+                repairing: self.repairing[i],
                 carry: if self.carried[i] > Fx::ZERO {
                     if self.carry_kind[i] == 1 {
                         2
@@ -1814,6 +1887,7 @@ impl World {
                 Order::Attack { target } => (3, target as i64, 0),
                 Order::Harvest { node } => (4, node as i64, 0),
                 Order::Build { x, y, .. } => (5, x.to_raw(), y.to_raw()),
+                Order::Repair { target } => (6, target as i64, 0),
             };
             h.write_u64(tag);
             h.write_i64(a);

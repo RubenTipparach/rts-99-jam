@@ -385,6 +385,8 @@ impl App {
                 &rd.heavies,
                 &rd.turrets,
                 &rd.supplies,
+                &rd.wards_astro,
+                &rd.supplies_astro,
                 &rd.barrels,
                 &particles,
                 &rd.ore_crystals,
@@ -1209,6 +1211,11 @@ impl ApplicationHandler<UserEvent> for App {
                         match self.camera.ground_pick(cx, cy, w, h) {
                             Some((wx, wz)) if units && self.game.hover_enemy(wx, wz) => {
                                 hud::CursorKind::Attack
+                            }
+                            Some((wx, wz))
+                                if workers && self.game.hover_damaged_friendly(wx, wz) =>
+                            {
+                                hud::CursorKind::Build
                             }
                             Some((wx, wz)) if workers && self.game.hover_node(wx, wz) => {
                                 hud::CursorKind::Harvest

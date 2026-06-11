@@ -15,16 +15,19 @@ whose science happens to be spellcraft. **SCIENTIA EST MAGIA.**
 
 ## Design pillars
 
-1. **Grown, not built.** Nothing is welded and nothing is bolted. Structures
-   are *cultivated* - an Acolyte tends a site and the building rises like a
-   shoot, sheathed in a smooth ceramic shell. Where the Hollowmen show seams,
-   rivets, and scaffolds, Astromancer surfaces are seamless, curved, and
-   slightly asymmetric, the way grown things are.
-2. **Everything floats.** Buildings hover a hand's width off their pads; the
-   Acolyte's limbs orbit its body without joints; capital structures uproot
-   and fly. Contact with the ground is a choice, not a necessity. (In-game:
-   hover bob on workers, floating-joint rigs, and the Flying Fortress /
-   Sky-Bastion late tier.)
+1. **Summoned, not built.** Nothing is welded and nothing is bolted.
+   Astromancer structures are grown elsewhere - in the orbital
+   shell-gardens - and *summoned through a gate*: an Acolyte opens an
+   aether portal on the pad and the finished structure descends through it,
+   half-real until it touches down. (In-game: the portal ring + descending
+   ghost during construction, aether motes instead of weld sparks.) Where
+   the Hollowmen show seams, rivets, and scaffolds, Astromancer surfaces
+   are seamless carved stone and ceramic.
+2. **Everything floats.** Several structures are simply levitating rock:
+   carved concrete monoliths hovering a clear gap above a small grounded
+   anchor pad (the Ward and Depot in-game). The Acolyte's limbs orbit its
+   body without joints; capital structures uproot and fly. Contact with the
+   ground is a choice, not a necessity.
 3. **Few, precious, shielded.** Every unit is an educated citizen of a small
    nation; none are disposable. High cost, high power, regenerating shields,
    and the player feel of *guarding* an army rather than spending one. Losing
