@@ -618,6 +618,229 @@ def flak_tower():
     return m
 
 
+# ----------------------------------------------- tech tree buildings, astro
+
+
+def crucible():
+    m = []
+    yb = 0.4  # hovers
+    # grown forge: a wide bowl of living stone over a molten heart.
+    frustum(m, 0, 0, 1.3, 1.9, yb, yb + 0.55, A_SHELL2, n=8, top=False)
+    frustum(m, 0, 0, 1.9, 1.5, yb + 0.55, yb + 1.15, A_SHELL, n=8, top=False)
+    prism(m, 0, 0, 1.42, yb + 1.0, yb + 1.1, A_SHELL2, n=8)  # bowl lip
+    prism(m, 0, 0, 1.05, yb + 1.02, yb + 1.14, EMBER, n=8, emissive=True)  # melt pool
+    prism(m, 0, 0, 0.55, yb + 1.04, yb + 1.22, FIRE_CORE, n=8, emissive=True)
+    prism(m, 0, 0, 1.92, yb + 0.5, yb + 0.62, A_GOLD, n=8)  # ceremonial band
+    # three horn spires around the rim, channeling the heat.
+    for px, _, pz in ring(3, 0, 0, 1.75, 0, rot=math.pi / 6):
+        crystal(m, px, pz, 0.24, yb + 0.9, yb + 1.9, yb + 2.5, A_SHELL2, EMBER, n=5)
+    # embers rising off the melt.
+    for i, t in enumerate((0.0, 0.45, 0.9)):
+        mote(m, 0.3 - 0.25 * t, yb + 1.3 + 0.65 * t, -0.2 + 0.3 * t, 0.06, FLAME)
+    return m
+
+
+def conservatory():
+    m = []
+    yb = 0.4  # hovers
+    # tiered scroll-dome: stacked discs with glowing seams, crowned in crystal.
+    frustum(m, 0, 0, 1.5, 1.8, yb, yb + 0.4, A_SHELL2, n=8, top=False)
+    for k, (r, h) in enumerate(((1.5, 0.5), (1.15, 0.45), (0.8, 0.4))):
+        y0 = yb + 0.4 + sum((0.5, 0.45, 0.4)[:k]) + 0.12 * k
+        prism(m, 0, 0, r, y0, y0 + h, A_SHELL, n=8)
+        prism(m, 0, 0, r * 0.86, y0 + h, y0 + h + 0.12, A_TEAL, n=8, emissive=True)
+    crystal(m, 0, 0, 0.3, yb + 2.1, yb + 2.7, yb + 3.3, A_VIO, A_COREV, n=6)
+    # two flanking lectern pylons with orbiting runes.
+    for sx in (-1, 1):
+        prism(m, sx * 1.55, 0.0, 0.2, yb, yb + 1.5, A_SHELL2, n=6)
+        pyramid(m, sx * 1.55, 0.0, 0.2, yb + 1.5, yb + 1.95, A_GOLD, n=6)
+        mote(m, sx * 1.55, yb + 2.2, 0.0, 0.08, A_COREV)
+    return m
+
+
+def aerie():
+    m = []
+    yb = 0.4  # hovers
+    # a roost spire with two cantilevered perch discs.
+    frustum(m, 0, 0, 1.3, 0.9, yb, yb + 0.5, A_SHELL2, n=8)
+    frustum(m, 0, 0, 0.65, 0.3, yb + 0.5, yb + 3.2, A_SHELL, n=6)
+    pyramid(m, 0, 0, 0.34, yb + 3.2, yb + 3.9, A_GOLD, n=6)
+    mote(m, 0, yb + 3.95, 0, 0.08, A_CORET)  # roost beacon
+    for sx, py in ((-1, 1.1), (1, 2.2)):
+        cx = sx * 1.25
+        box(m, (min(0.0, cx), yb + py - 0.14, -0.18), (max(0.0, cx), yb + py, 0.18), A_SHELL2)
+        prism(m, cx, 0.0, 0.55, yb + py - 0.1, yb + py + 0.04, A_SHELL, n=8)
+        prism(m, cx, 0.0, 0.42, yb + py + 0.04, yb + py + 0.1, A_TEAL, n=8, emissive=True)
+    # a hover-craft on approach above the high perch.
+    hx, hy = 1.45, yb + 3.3
+    prism(m, hx, 0.0, 0.3, hy, hy + 0.26, A_SHELL2, n=6)
+    box(m, (hx - 0.62, hy + 0.08, -0.12), (hx + 0.62, hy + 0.18, 0.12), A_SHELL)
+    mote(m, hx, hy - 0.14, 0.0, 0.06, A_CORET)
+    return m
+
+
+def ley_nexus():
+    m = []
+    yb = 0.35  # hovers
+    # terraced mana well: stacked rings around a font, a great crystal above.
+    frustum(m, 0, 0, 2.2, 1.8, yb, yb + 0.4, A_SHELL2, n=8)
+    frustum(m, 0, 0, 1.6, 1.25, yb + 0.4, yb + 0.8, A_SHELL, n=8)
+    prism(m, 0, 0, 1.05, yb + 0.8, yb + 0.94, A_TEAL, n=8, emissive=True)  # ley pool
+    frustum(m, 0, 0, 0.5, 0.3, yb + 0.94, yb + 1.7, A_SHELL2, n=6)  # font column
+    # the beam feeding the suspended heart-crystal.
+    box(m, (-0.07, yb + 1.7, -0.07), (0.07, yb + 2.5, 0.07), A_CORET, emissive=True)
+    crystal(m, 0, 0, 0.42, yb + 2.5, yb + 3.2, yb + 3.9, A_VIO, A_COREV, n=6)
+    prism(m, 0, 0, 0.2, yb + 2.6, yb + 3.3, A_COREV, n=6, emissive=True)
+    # gold votive stones and drifting mana on the terrace.
+    for k, (px, py, pz) in enumerate(ring(5, 0, 0, 1.45, yb + 0.94)):
+        box(m, (px - 0.1, py, pz - 0.1), (px + 0.1, py + 0.3 + 0.08 * (k % 2), pz + 0.1), A_GOLD)
+    for i, t in enumerate((0.0, 0.5, 1.0)):
+        mote(m, 1.0 - 0.3 * t, yb + 1.3 + 0.8 * t, -0.9 + 0.45 * t, 0.06, A_COREV)
+    return m
+
+
+# -------------------------------------------- tech tree buildings, hollowmen
+
+
+def machine_shop():
+    m = []
+    # the factory add-on: a gabled annex with a crane and a spare gear.
+    box(m, (-1.1, 0.0, -0.8), (0.7, 1.0, 0.8), H_STEEL)
+    gable_y = 1.0
+    box(m, (-1.15, gable_y, -0.85), (0.75, 1.12, 0.85), H_DARK)
+    box(m, (-0.9, 1.12, -0.5), (0.1, 1.5, 0.5), H_STEEL2)  # roof house
+    box(m, (-0.45, 0.0, 0.8), (0.35, 0.85, 0.86), H_DARK)  # shutter door
+    box(m, (-0.38, 0.06, 0.86), (0.28, 0.75, 0.88), H_AMBER, emissive=True)
+    box(m, (-1.1, 0.55, 0.8), (0.7, 0.7, 0.84), H_HAZ)
+    # crane arm out over the yard.
+    box(m, (0.7, 0.0, -0.2), (0.9, 1.7, 0.0), H_GUN)
+    box(m, (0.6, 1.7, -0.18), (1.6, 1.85, -0.02), H_HAZ)
+    box(m, (1.42, 1.1, -0.14), (1.5, 1.7, -0.06), H_GUN)  # hook cable
+    # the spare gear leaned on the wall: a toothed disc.
+    prism(m, 1.2, 0.55, 0.42, 0.0, 0.18, H_STEEL2, n=8)
+    for px, _, pz in ring(8, 1.2, 0.55, 0.5, 0.0):
+        box(m, (px - 0.06, 0.0, pz - 0.06), (px + 0.06, 0.16, pz + 0.06), H_STEEL2)
+    prism(m, 1.2, 0.55, 0.12, 0.0, 0.2, H_DARK, n=8)
+    return m
+
+
+def radar_array():
+    m = []
+    # ops hut plus a lattice mast carrying the main dish.
+    box(m, (-1.3, 0.0, -0.7), (-0.1, 0.8, 0.7), H_STEEL)
+    box(m, (-1.3, 0.3, 0.7), (-0.1, 0.45, 0.74), H_HAZ)
+    box(m, (-1.0, 0.8, -0.4), (-0.4, 1.0, 0.4), H_STEEL2)
+    box(m, (-0.95, 0.25, 0.7), (-0.45, 0.6, 0.73), H_CYAN, emissive=True)  # ops window
+    # the mast, narrowing in stages.
+    box(m, (0.35, 0.0, -0.45), (1.15, 0.3, 0.45), CONCRETE2)
+    box(m, (0.5, 0.3, -0.3), (1.0, 1.5, 0.3), H_DARK)
+    box(m, (0.58, 1.5, -0.22), (0.92, 2.4, 0.22), H_GUN)
+    # main dish opening skyward, glowing feed at its heart.
+    frustum(m, 0.75, 0.0, 0.18, 0.85, 2.4, 2.85, H_STEEL2, n=8, top=False)
+    prism(m, 0.75, 0.0, 0.1, 2.4, 3.0, H_CYAN, n=6, emissive=True)
+    mote(m, 0.75, 3.1, 0.0, 0.06, H_CYAN)
+    # small spotter dish on the hut roof.
+    frustum(m, -0.7, 0.0, 0.06, 0.3, 1.0, 1.18, H_STEEL2, n=8, top=False)
+    mote(m, -0.7, 1.26, 0.0, 0.045, H_RED)
+    return m
+
+
+def starport():
+    m = []
+    # apron slab with lit landing strips, tower at the corner, fuel farm behind.
+    box(m, (-1.7, 0.0, -1.4), (1.5, 0.3, 1.4), CONCRETE2)
+    box(m, (-1.0, 0.3, -1.0), (1.2, 0.38, 1.1), H_DARK)  # pad
+    for sz in (-0.55, 0.05, 0.65):
+        box(m, (-0.7, 0.38, sz), (0.9, 0.42, sz + 0.1), H_CYAN, emissive=True)
+    # control tower.
+    box(m, (-1.6, 0.3, -1.3), (-1.0, 1.9, -0.7), H_STEEL)
+    box(m, (-1.7, 1.9, -1.4), (-0.9, 2.3, -0.6), H_STEEL2)
+    box(m, (-1.66, 2.0, -0.62), (-0.94, 2.2, -0.58), H_CYAN, emissive=True)
+    mote(m, -1.3, 2.42, -1.0, 0.05, H_RED)
+    # fuel tanks on the back lot.
+    for k, (tx, tz) in enumerate(((1.2, -1.0), (0.7, -1.15))):
+        prism(m, tx, tz, 0.26, 0.3, 0.95 - 0.15 * k, H_STEEL2, n=8)
+        prism(m, tx, tz, 0.27, 0.55, 0.64, H_HAZ, n=8)
+    # a gunship flaring to land, running lights on.
+    gx, gy = 0.15, 1.6
+    box(m, (gx - 0.3, gy, -0.45), (gx + 0.3, gy + 0.34, 0.5), H_STEEL)
+    box(m, (gx - 0.2, gy + 0.06, 0.5), (gx + 0.2, gy + 0.3, 0.72), H_CYAN, emissive=True)
+    for sx in (-1, 1):
+        box(m, (gx + sx * 0.3, gy + 0.2, -0.2), (gx + sx * 0.75, gy + 0.3, 0.15), H_STEEL2)
+        mote(m, gx + sx * 0.72, gy + 0.1, 0.0, 0.05, H_AMBER)
+    return m
+
+
+def fusion_reactor():
+    m = []
+    # containment dome flanked by waisted cooling towers, all piped together.
+    frustum(m, 0, 0, 1.35, 1.1, 0.0, 0.5, CONCRETE2, n=8)
+    frustum(m, 0, 0, 1.1, 0.75, 0.5, 1.3, H_STEEL, n=8)
+    frustum(m, 0, 0, 0.75, 0.3, 1.3, 1.8, H_STEEL2, n=8)
+    prism(m, 0, 0, 1.12, 0.95, 1.12, H_CYAN, n=8, emissive=True)  # core seam
+    prism(m, 0, 0, 0.16, 1.8, 2.1, H_CYAN, n=6, emissive=True)  # vent flare
+    box(m, (-1.15, 0.2, -0.1), (1.15, 0.45, 0.1), H_GUN)  # main coolant trunk
+    # the two cooling towers, narrow at the waist, steaming.
+    for sx in (-1, 1):
+        cx = sx * 1.55
+        frustum(m, cx, 0.0, 0.62, 0.38, 0.0, 1.1, CONCRETE, n=8, top=False)
+        frustum(m, cx, 0.0, 0.38, 0.52, 1.1, 1.9, CONCRETE, n=8, top=False)
+        prism(m, cx, 0.0, 0.4, 1.9, 2.0, CONCRETE2, n=8)
+        cloud(m, cx, 0.0, 2.25, scale=0.7)
+        box(m, (min(cx, 0.0) + 0.2, 0.2, -0.08), (max(cx, 0.0) - 0.2, 0.4, 0.08), H_GUN)
+    box(m, (-0.9, 0.0, 0.95), (-0.2, 0.55, 1.45), H_STEEL)  # switch house
+    box(m, (-0.82, 0.1, 1.45), (-0.28, 0.42, 1.47), H_AMBER, emissive=True)
+    return m
+
+
+def drydock():
+    m = []
+    # gantry frame straddling a capital hull mid-assembly.
+    for sz in (-1, 1):
+        for sx in (-1, 1):
+            box(m, (sx * 1.5 - 0.18, 0.0, sz * 1.0 - 0.18),
+                (sx * 1.5 + 0.18, 2.3, sz * 1.0 + 0.18), H_DARK)
+        box(m, (-1.68, 2.3, sz * 1.0 - 0.14), (1.68, 2.55, sz * 1.0 + 0.14), H_HAZ)
+    box(m, (-0.4, 2.55, -1.1), (0.4, 2.8, 1.1), H_GUN)  # traveling crane
+    box(m, (-0.06, 1.6, -0.3), (0.06, 2.55, -0.22), H_GUN)  # cable
+    # the hull on blocks: plated aft, bare frames forward.
+    for bx in (-0.9, 0.0, 0.9):
+        box(m, (bx - 0.15, 0.0, -0.3), (bx + 0.15, 0.5, 0.3), CONCRETE2)
+    box(m, (-1.3, 0.5, -0.55), (0.5, 1.3, 0.55), H_STEEL)
+    box(m, (0.5, 0.55, -0.45), (1.0, 1.2, 0.45), H_DARK)  # unplated bow frames
+    box(m, (1.0, 0.6, -0.3), (1.35, 1.1, 0.3), H_DARK)
+    box(m, (-1.3, 0.85, 0.55), (-0.2, 1.0, 0.59), H_CYAN, emissive=True)  # lit ports
+    # welding sparks where the plating ends.
+    mote(m, 0.5, 1.25, 0.2, 0.07, (255, 246, 210))
+    mote(m, 0.62, 1.05, -0.25, 0.05, H_AMBER)
+    return m
+
+
+def missile_silo():
+    m = []
+    # hardened apron, doors swung open, the nuke standing ready.
+    box(m, (-1.4, 0.0, -1.4), (1.4, 0.5, 1.4), CONCRETE2)
+    box(m, (-1.4, 0.18, 1.4), (1.4, 0.32, 1.44), H_HAZ)
+    prism(m, 0, 0, 0.95, 0.5, 0.7, CONCRETE, n=8)  # silo collar
+    prism(m, 0, 0, 0.72, 0.5, 0.72, H_GUN, n=8)  # the shaft mouth
+    # blast doors laid open either side.
+    for sx in (-1, 1):
+        box(m, (sx * 1.0, 0.5, -0.75), (sx * 1.9, 0.66, 0.75), H_STEEL2)
+        box(m, (sx * 1.0, 0.66, -0.75), (sx * 1.9, 0.7, -0.55), H_HAZ)
+    # the missile, nosing out of the shaft.
+    prism(m, 0, 0, 0.34, 0.6, 1.9, H_STEEL2, n=8)
+    frustum(m, 0, 0, 0.34, 0.16, 1.9, 2.5, H_STEEL, n=8)
+    pyramid(m, 0, 0, 0.17, 2.5, 3.0, H_RED, n=8)
+    box(m, (-0.36, 1.0, -0.05), (0.36, 1.2, 0.05), H_HAZ)  # body band
+    # klaxon lights around the collar.
+    for px, _, pz in ring(4, 0, 0, 1.05, 0, rot=math.pi / 4):
+        mote(m, px, 0.78, pz, 0.05, H_RED)
+    # ops bunker in the corner.
+    box(m, (0.7, 0.5, -1.3), (1.35, 0.95, -0.75), H_STEEL)
+    box(m, (0.78, 0.58, -0.75), (1.27, 0.82, -0.73), H_CYAN, emissive=True)
+    return m
+
+
 # ------------------------------------------------------------------- sheets
 
 
@@ -727,6 +950,29 @@ def main():
         "HOLLOWMEN  -  ROSTER EXPANSION CONCEPTS",
         "DESIGN DRAFT  -  ROUGH MASSING / SILHOUETTE INTENT, NOT FINAL ART",
         hollow_rows,
+    )
+
+    building_rows = [
+        ("ASTROMANCER TECH  -  GROWN PRODUCTION", vio, A_VIO,
+         [("CRUCIBLE - HEAVY GROUND", crucible, BUILDING),
+          ("CONSERVATORY - RESEARCH", conservatory, BUILDING),
+          ("AERIE - AIR ROOST", aerie, dict(BUILDING, fit=0.74))]),
+        ("ASTROMANCER ENDGAME", vio, A_COREV,
+         [("LEY NEXUS - SUPERWEAPON", ley_nexus, BUILDING)]),
+        ("HOLLOWMEN TECH", amber, H_HAZ,
+         [("MACHINE SHOP - ADD-ON", machine_shop, BUILDING),
+          ("RADAR ARRAY - DETECTION", radar_array, BUILDING),
+          ("STARPORT - AIR", starport, BUILDING)]),
+        ("HOLLOWMEN ENDGAME", amber, H_RED,
+         [("FUSION REACTOR - POWER", fusion_reactor, BUILDING),
+          ("DRYDOCK - CAPITAL YARD", drydock, BUILDING),
+          ("MISSILE SILO - NUKE", missile_silo, BUILDING)]),
+    ]
+    render_sheet(
+        os.path.join(OUT_DIR, "roster_buildings.png"),
+        "TECH TREE BUILDINGS  -  CONCEPT DRAFT",
+        "COMPLETES BUILDINGS.PNG  -  ROUGH MASSING, NOT FINAL ART",
+        building_rows,
     )
 
 
