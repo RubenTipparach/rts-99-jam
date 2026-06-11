@@ -1108,11 +1108,13 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.input.cursor_in && !self.pointer_is_touch && !self.input.middle_down {
                     let (sw, sh) = self.dims();
                     let (cx, cy) = self.input.cursor;
-                    // Never edge-pan from over the in-game UI (command bar,
-                    // its buttons, the minimap) or while scrubbing the minimap.
+                    // Don't pan while scrubbing the minimap. The in-game UI
+                    // needs no gate of its own: the 2-pixel trigger zone is
+                    // already past every button, and the screen border must
+                    // keep panning even where the HUD strip reaches it (the
+                    // bottom edge always pans south).
                     #[cfg(target_arch = "wasm32")]
-                    let blocked =
-                        self.input.minimap_drag || hud::over_ui(&self.game, cx, cy, sw, sh);
+                    let blocked = self.input.minimap_drag;
                     #[cfg(not(target_arch = "wasm32"))]
                     let blocked = false;
                     // A hair-trigger zone: panning only from the outermost
@@ -1194,7 +1196,9 @@ impl ApplicationHandler<UserEvent> for App {
                         && (cx <= EDGE || cy <= EDGE || cx >= w - EDGE || cy >= h - EDGE);
                     if self.build_mode.is_some() {
                         hud::CursorKind::Build
-                    } else if self.input.middle_down || (at_edge && !on_ui) {
+                    } else if self.input.middle_down || at_edge {
+                        // The edge wins even over the HUD: the bottom border
+                        // pans south through the console strip.
                         hud::CursorKind::Pan
                     } else if self.input.shift {
                         hud::CursorKind::AddSelect
