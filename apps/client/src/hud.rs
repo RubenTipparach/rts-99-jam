@@ -631,6 +631,58 @@ fn draw_match_end(
     ctx.restore();
 }
 
+/// The selection panel's unit portrait slots: each selected unit with the
+/// CSS position of its 32x32 portrait. One geometry source for the draw
+/// and the click hit-test (portraits are buttons: click = select only that
+/// unit, shift-click = drop it from / return it to the selection).
+#[cfg(target_arch = "wasm32")]
+pub fn selection_slots(
+    game: &Game,
+    w_css: f32,
+    h_css: f32,
+) -> Vec<(crate::game::UnitInfo, f64, f64)> {
+    let units: Vec<_> = game
+        .selected_infos()
+        .into_iter()
+        .filter(|u| !u.barracks)
+        .collect();
+    if units.is_empty() {
+        return Vec::new();
+    }
+    let (card_x, _, _, _) = card_panel_css(w_css, h_css);
+    let mid_c = (HUD_H + (card_x - 12.0)) / 2.0;
+    let n = units.len().min(16);
+    let cols = 8.min(n);
+    let cell = 38.0_f64;
+    let px = mid_c - cols as f64 * cell / 2.0;
+    let py = h_css as f64 - MID_H + 12.0;
+    units
+        .into_iter()
+        .take(n)
+        .enumerate()
+        .map(|(i, u)| {
+            (
+                u,
+                px + (i % 8) as f64 * cell,
+                py + (i / 8) as f64 * (cell + 4.0),
+            )
+        })
+        .collect()
+}
+
+/// The unit under a physical-pixel point in the selection panel, if any.
+#[cfg(target_arch = "wasm32")]
+pub fn selection_hit(game: &Game, cx: f32, cy: f32, w_phys: f32, h_phys: f32) -> Option<u32> {
+    let d = dpr();
+    let (ccx, ccy) = ((cx / d) as f64, (cy / d) as f64);
+    for (u, x, y) in selection_slots(game, w_phys / d, h_phys / d) {
+        if ccx >= x && ccx <= x + 32.0 && ccy >= y && ccy <= y + 37.0 {
+            return Some(u.index);
+        }
+    }
+    None
+}
+
 /// Minimap geometry in CSS pixels `(mx, my, mm)`: the left section of the
 /// bottom HUD strip. Single source of truth for draw and hit-test.
 #[cfg(target_arch = "wasm32")]
@@ -1011,21 +1063,22 @@ pub fn draw(
     {
         let infos = game.selected_infos();
         let astro = game.player_is_astromancer();
-        let units: Vec<_> = infos.iter().filter(|u| !u.barracks).collect();
-        if !units.is_empty() {
-            let n = units.len().min(16);
-            let cols = 8.min(n);
-            let cell = 38.0_f64;
-            let px = mid_c - cols as f64 * cell / 2.0;
-            let py = hf - bar + 12.0;
-            for (i, u) in units.iter().take(n).enumerate() {
-                let x = px + (i % 8) as f64 * cell;
-                let y = py + (i / 8) as f64 * (cell + 4.0);
+        let slots = selection_slots(game, w, h);
+        if !slots.is_empty() {
+            let dc = dpr as f64;
+            let (ccx, ccy) = (cursor.0 as f64 / dc, cursor.1 as f64 / dc);
+            for (u, x, y) in slots {
+                // Portraits are buttons: hover brightens the frame.
+                let hover = ccx >= x && ccx <= x + 32.0 && ccy >= y && ccy <= y + 37.0;
                 ctx.set_fill_style_str("rgba(20,30,48,0.9)");
                 ctx.fill_rect(x, y, 32.0, 32.0);
                 draw_icon(&ctx, info_icon(u.kind, astro), x, y, 32.0);
-                ctx.set_stroke_style_str("rgba(140,180,230,0.8)");
-                ctx.set_line_width(1.0);
+                ctx.set_stroke_style_str(if hover {
+                    "rgba(220,240,255,1.0)"
+                } else {
+                    "rgba(140,180,230,0.8)"
+                });
+                ctx.set_line_width(if hover { 2.0 } else { 1.0 });
                 ctx.stroke_rect(x, y, 32.0, 32.0);
                 ctx.set_fill_style_str("rgba(0,0,0,0.65)");
                 ctx.fill_rect(x, y + 33.0, 32.0, 4.0);

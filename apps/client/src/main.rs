@@ -485,6 +485,22 @@ impl App {
         self.build_mode = Some(kind);
     }
 
+    /// If the point hits a portrait in the selection panel, re-select: a
+    /// plain click keeps only that unit, shift-click drops it from (or
+    /// returns it to) the group. Reports the click consumed (web HUD only).
+    #[cfg(target_arch = "wasm32")]
+    fn selection_panel_click(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
+        let Some(idx) = hud::selection_hit(&self.game, cx, cy, w, h) else {
+            return false;
+        };
+        if self.input.shift {
+            self.game.toggle_selected(idx);
+        } else {
+            self.game.select_only(idx);
+        }
+        true
+    }
+
     /// If the point hits a command-card button, perform its action (queue a
     /// unit, or arm build-placement mode) and report the click consumed
     /// (web HUD only).
@@ -851,8 +867,13 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
                             #[cfg(target_arch = "wasm32")]
-                            let consumed =
-                                self.card_click(cx, cy, w, h) || self.minimap_press(cx, cy, w, h);
+                            let consumed = self.card_click(cx, cy, w, h)
+                                || self.selection_panel_click(cx, cy, w, h)
+                                || self.minimap_press(cx, cy, w, h)
+                                // Dead HUD surface swallows the click, so a
+                                // miss on the console can't clear the
+                                // selection through a world-click.
+                                || hud::over_ui(&self.game, cx, cy, w, h);
                             #[cfg(not(target_arch = "wasm32"))]
                             let consumed = false;
                             if !consumed {
@@ -954,7 +975,10 @@ impl ApplicationHandler<UserEvent> for App {
                         let pressed = self.input.left_press.take();
                         let (w, h) = self.dims();
                         #[cfg(target_arch = "wasm32")]
-                        if self.card_click(cx, cy, w, h) || self.minimap_jump(cx, cy, w, h) {
+                        if self.card_click(cx, cy, w, h)
+                            || self.selection_panel_click(cx, cy, w, h)
+                            || self.minimap_jump(cx, cy, w, h)
+                        {
                             return;
                         }
                         if let Some((px, py)) = pressed {

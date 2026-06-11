@@ -170,6 +170,8 @@ pub struct RenderData {
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub struct UnitInfo {
+    /// Entity index in the sim (lets the HUD's selection panel re-select).
+    pub index: u32,
     pub owner: u16,
     pub barracks: bool,
     /// Entity kind (drives the HUD's portrait icon).
@@ -1281,6 +1283,7 @@ impl Game {
             _ => "INFANTRY",
         };
         UnitInfo {
+            index: s.index,
             owner: s.owner,
             barracks,
             kind: s.kind,
@@ -1547,6 +1550,25 @@ impl Game {
                 wz,
                 born: self.time,
             });
+        }
+    }
+
+    /// Select exactly this entity (a portrait click in the HUD panel).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn select_only(&mut self, idx: u32) {
+        if self.curr.iter().any(|s| s.index == idx) {
+            self.selected = vec![idx];
+        }
+    }
+
+    /// Shift-click in the HUD panel: drop the entity from the selection, or
+    /// add it back if it was already dropped.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn toggle_selected(&mut self, idx: u32) {
+        if let Some(p) = self.selected.iter().position(|&u| u == idx) {
+            self.selected.remove(p);
+        } else if self.curr.iter().any(|s| s.index == idx) {
+            self.selected.push(idx);
         }
     }
 
