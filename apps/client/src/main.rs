@@ -35,21 +35,21 @@ enum UserEvent {
 /// Mobile **test** controls (web only).
 ///
 /// DOM is allowed only for these - they let a developer drive desktop
-/// interactions (pan / zoom / right-click) from a touch device. The buttons are
-/// bare elements in `index.html`; all behavior is wired here. State lives in a
+/// interactions (pan / zoom / right-click) from a touch device. The elements
+/// are bare in `index.html`; all behavior is wired here. State lives in a
 /// thread-local the app reads each frame; everything else stays in WASM.
 #[cfg(target_arch = "wasm32")]
 mod mobile {
     use std::cell::Cell;
+    use std::rc::Rc;
     use wasm_bindgen::closure::Closure;
     use wasm_bindgen::JsCast;
 
     #[derive(Clone, Copy)]
     pub struct Controls {
-        pub up: bool,
-        pub down: bool,
-        pub left: bool,
-        pub right: bool,
+        /// Analog pan stick deflection, each axis -1..1 (+x right, +y down
+        /// in screen terms); (0, 0) when released.
+        pub pan: (f32, f32),
         pub zoom: i32,     // +1 = zoom in, -1 = out, 0 = idle
         pub rc_mode: bool, // when set, a tap issues a move/attack order
     }
@@ -57,7 +57,7 @@ mod mobile {
     thread_local! {
         static STATE: Cell<Controls> = const {
             Cell::new(Controls {
-                up: false, down: false, left: false, right: false, zoom: 0, rc_mode: false,
+                pan: (0.0, 0.0), zoom: 0, rc_mode: false,
             })
         };
     }
@@ -77,22 +77,80 @@ mod mobile {
         web_sys::window()?.document()?.get_element_by_id(id)
     }
 
-    /// A button that holds a flag while pressed.
-    fn hold(id: &str, set: fn(&mut Controls, bool)) {
-        let Some(el) = element(id) else { return };
-        let down = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
-            e.prevent_default();
-            update(|c| set(c, true));
-        });
-        let up = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
-            e.prevent_default();
-            update(|c| set(c, false));
-        });
-        let _ = el.add_event_listener_with_callback("pointerdown", down.as_ref().unchecked_ref());
-        for ev in ["pointerup", "pointerleave", "pointercancel"] {
-            let _ = el.add_event_listener_with_callback(ev, up.as_ref().unchecked_ref());
+    /// The virtual pan stick: dragging the knob pans with analog magnitude
+    /// and direction; releasing snaps it back to center and stops the pan.
+    fn stick() {
+        let Some(base) = element("stick") else { return };
+        let knob = element("stick-knob");
+        let engaged = Rc::new(Cell::new(false));
+        // Recompute the deflection from a pointer position (or recenter),
+        // store it for the app, and move the knob to match.
+        let apply: Rc<dyn Fn(&web_sys::PointerEvent, bool)> = {
+            let base = base.clone();
+            Rc::new(move |e: &web_sys::PointerEvent, held: bool| {
+                let rect = base.get_bounding_client_rect();
+                let r = rect.width() / 2.0;
+                // The knob travels at most 70% of the base radius.
+                let travel = (r * 0.7).max(1.0);
+                let (mut dx, mut dy) = if held {
+                    (
+                        (e.client_x() as f64 - rect.left() - r) / travel,
+                        (e.client_y() as f64 - rect.top() - r) / travel,
+                    )
+                } else {
+                    (0.0, 0.0)
+                };
+                let len = (dx * dx + dy * dy).sqrt();
+                if len > 1.0 {
+                    dx /= len;
+                    dy /= len;
+                }
+                update(|c| c.pan = (dx as f32, dy as f32));
+                if let Some(k) = &knob {
+                    let _ = k.set_attribute(
+                        "style",
+                        &format!(
+                            "transform: translate({:.1}px, {:.1}px)",
+                            dx * travel,
+                            dy * travel
+                        ),
+                    );
+                }
+            })
+        };
+        let down = {
+            let (engaged, apply, base) = (engaged.clone(), apply.clone(), base.clone());
+            Closure::<dyn FnMut(web_sys::PointerEvent)>::new(move |e: web_sys::PointerEvent| {
+                e.prevent_default();
+                let _ = base.set_pointer_capture(e.pointer_id());
+                engaged.set(true);
+                apply(&e, true);
+            })
+        };
+        let mv = {
+            let (engaged, apply) = (engaged.clone(), apply.clone());
+            Closure::<dyn FnMut(web_sys::PointerEvent)>::new(move |e: web_sys::PointerEvent| {
+                if engaged.get() {
+                    e.prevent_default();
+                    apply(&e, true);
+                }
+            })
+        };
+        let up = {
+            let (engaged, apply) = (engaged.clone(), apply.clone());
+            Closure::<dyn FnMut(web_sys::PointerEvent)>::new(move |e: web_sys::PointerEvent| {
+                e.prevent_default();
+                engaged.set(false);
+                apply(&e, false);
+            })
+        };
+        let _ = base.add_event_listener_with_callback("pointerdown", down.as_ref().unchecked_ref());
+        let _ = base.add_event_listener_with_callback("pointermove", mv.as_ref().unchecked_ref());
+        for ev in ["pointerup", "pointercancel"] {
+            let _ = base.add_event_listener_with_callback(ev, up.as_ref().unchecked_ref());
         }
         down.forget();
+        mv.forget();
         up.forget();
     }
 
@@ -132,12 +190,9 @@ mod mobile {
         cb.forget();
     }
 
-    /// Wire up the (already-present) DOM test buttons. Safe to call once.
+    /// Wire up the (already-present) DOM test controls. Safe to call once.
     pub fn install() {
-        hold("pan-up", |c, v| c.up = v);
-        hold("pan-down", |c, v| c.down = v);
-        hold("pan-left", |c, v| c.left = v);
-        hold("pan-right", |c, v| c.right = v);
+        stick();
         hold_zoom("zoom-in", 1);
         hold_zoom("zoom-out", -1);
         toggle_rc("rc-toggle");
@@ -265,7 +320,8 @@ struct App {
     input: Input,
     last_frame: Instant,
     /// Set once a touch is seen, so edge-panning (a mouse affordance) is
-    /// disabled on touch devices - the d-pad pans there instead.
+    /// disabled on touch devices - the pan stick pans there instead - and
+    /// the pointer is never locked (a held lock freezes tap coordinates).
     pointer_is_touch: bool,
     /// When set, the sim is frozen and the pause menu is shown; the cursor is
     /// also released from the window (it is confined again on resume).
@@ -418,7 +474,10 @@ impl App {
         let in_game = self.screen == menu::Screen::InGame;
         #[cfg(not(target_arch = "wasm32"))]
         let in_game = true;
-        let confine = in_game && !self.paused;
+        // Never lock the pointer on a touch device: while a pointer lock is
+        // held the browser freezes client coordinates, so every tap would
+        // report a stale position and selection/orders go dead.
+        let confine = in_game && !self.paused && !self.pointer_is_touch;
         let mode = if !confine {
             CursorGrabMode::None
         } else if cfg!(target_arch = "wasm32") {
@@ -489,6 +548,24 @@ impl App {
             return;
         }
         self.build_mode = Some(kind);
+    }
+
+    /// Drop the armed building at the screen point (shared by mouse click
+    /// and touch tap): re-check affordability at the drop (resources can
+    /// drain while aiming, so the hologram can't outspend the stockpile),
+    /// place, and disarm.
+    fn drop_build(&mut self, kind: protocol::BuildingKind, cx: f32, cy: f32) {
+        let (w, h) = self.dims();
+        let (ore, carbon) = Game::build_cost(kind);
+        if (self.game.player_ore() as i64) < ore || (self.game.player_carbon() as i64) < carbon {
+            self.build_mode = None;
+            self.arm_build(kind); // refuses + raises the toast
+            return;
+        }
+        if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
+            self.game.build_selected(kind, wx, wz);
+        }
+        self.build_mode = None;
     }
 
     /// If the point hits a portrait in the selection panel, re-select: a
@@ -852,20 +929,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // ground point; a right-click cancels. Consumes the click.
                 if let Some(kind) = self.build_mode {
                     if button == MouseButton::Left && state == ElementState::Pressed {
-                        // Resources can drain while aiming; re-check at the
-                        // drop so the hologram can't outspend the stockpile.
-                        let (ore, carbon) = Game::build_cost(kind);
-                        if (self.game.player_ore() as i64) < ore
-                            || (self.game.player_carbon() as i64) < carbon
-                        {
-                            self.build_mode = None;
-                            self.arm_build(kind); // refuses + raises the toast
-                            return;
-                        }
-                        if let Some((wx, wz)) = self.camera.ground_pick(cx, cy, w, h) {
-                            self.game.build_selected(kind, wx, wz);
-                        }
-                        self.build_mode = None;
+                        self.drop_build(kind, cx, cy);
                     } else if button == MouseButton::Right && state == ElementState::Pressed {
                         self.build_mode = None;
                     }
@@ -976,16 +1040,43 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
                 match touch.phase {
-                    TouchPhase::Started => self.input.left_press = Some((cx, cy)),
+                    TouchPhase::Started => {
+                        // A stray pointer lock freezes tap coordinates;
+                        // release it (apply_cursor_grab never locks on touch).
+                        #[cfg(target_arch = "wasm32")]
+                        if self.cursor_locked {
+                            self.apply_cursor_grab();
+                        }
+                        self.input.left_press = Some((cx, cy));
+                    }
                     TouchPhase::Moved => {}
                     TouchPhase::Cancelled => self.input.left_press = None,
                     TouchPhase::Ended => {
                         let pressed = self.input.left_press.take();
                         let (w, h) = self.dims();
+                        // Build placement: a tap drops the armed building;
+                        // with the RMB toggle on, the tap cancels instead
+                        // (the mouse's right-click), like on desktop where an
+                        // armed build consumes the click before the HUD.
+                        if let Some(kind) = self.build_mode {
+                            #[cfg(target_arch = "wasm32")]
+                            let rc = mobile::snapshot().rc_mode;
+                            #[cfg(not(target_arch = "wasm32"))]
+                            let rc = false;
+                            if rc {
+                                self.build_mode = None;
+                            } else {
+                                self.drop_build(kind, cx, cy);
+                            }
+                            return;
+                        }
                         #[cfg(target_arch = "wasm32")]
                         if self.card_click(cx, cy, w, h)
                             || self.selection_panel_click(cx, cy, w, h)
                             || self.minimap_jump(cx, cy, w, h)
+                            // Dead HUD surface swallows the tap, so a miss on
+                            // the console can't clear the selection.
+                            || hud::over_ui(&self.game, cx, cy, w, h)
                         {
                             return;
                         }
@@ -1068,7 +1159,9 @@ impl ApplicationHandler<UserEvent> for App {
                 #[cfg(target_arch = "wasm32")]
                 {
                     let locked = ptrlock::is_locked();
-                    if self.was_locked && !locked && !self.paused {
+                    // On touch the lock is never requested (and is released if
+                    // a stray one is held), so its loss is not an Esc press.
+                    if self.was_locked && !locked && !self.paused && !self.pointer_is_touch {
                         self.set_paused(true);
                     }
                     self.was_locked = locked;
@@ -1111,7 +1204,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let mut fwd = (self.input.fwd as i32 - self.input.back as i32) as f32;
                 let mut right = (self.input.right as i32 - self.input.left as i32) as f32;
                 // Edge panning: scroll the camera when the mouse rests near a
-                // screen edge. Disabled on touch (the d-pad pans there) so a
+                // screen edge. Disabled on touch (the stick pans there) so a
                 // resting finger position can't make the camera drift forever.
                 if self.input.cursor_in && !self.pointer_is_touch && !self.input.middle_down {
                     let (sw, sh) = self.dims();
@@ -1141,12 +1234,14 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     }
                 }
-                // Mobile test controls: d-pad pan + held zoom.
+                // Mobile test controls: analog stick pan + held zoom. Pushing
+                // the stick up (screen -y) pans the camera forward, and the
+                // deflection magnitude scales the pan speed.
                 #[cfg(target_arch = "wasm32")]
                 {
                     let m = mobile::snapshot();
-                    fwd += (m.up as i32 - m.down as i32) as f32;
-                    right += (m.right as i32 - m.left as i32) as f32;
+                    fwd -= m.pan.1;
+                    right += m.pan.0;
                     if m.zoom != 0 {
                         self.camera.zoom(m.zoom as f32 * 0.15);
                     }
