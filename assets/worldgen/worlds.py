@@ -73,9 +73,11 @@ ARCHETYPES = {
         "accent": (214, 96, 40), "dark": (58, 46, 26), "scale": 4.0,
     },
     # UNIQUE: Titan. Orange organic haze, dark dunes, dark hydrocarbon lakes.
+    # The dunes are dark brown SAND, not black: they must read as walkable
+    # land next to the truly dark lakes (liquid), in the preview and in game.
     "titan_haze": {
         "low": (84, 54, 30), "mid": (168, 116, 64), "high": (198, 158, 104),
-        "accent": (40, 42, 54), "dark": (60, 38, 22), "scale": 4.5,
+        "accent": (96, 76, 54), "dark": (60, 38, 22), "scale": 4.5,
     },
     # UNIQUE: Triton. Pinkish nitrogen ice, cantaloupe terrain, dark plume streaks.
     "triton_ice": {

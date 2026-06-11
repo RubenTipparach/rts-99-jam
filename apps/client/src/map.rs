@@ -66,7 +66,8 @@ pub fn active_scenario() -> &'static str {
 }
 
 /// `(owner, x, z)` of every HQ in world `idx`'s fitted scenario, so the
-/// lobby preview marks the starts where they actually are on that world.
+/// lobby preview marks the spawn sites where they actually are on that
+/// world (projected through the preview image's exact fit).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // web lobby only
 pub fn world_spawns(idx: usize) -> Vec<(u16, f32, f32)> {
     let src = WORLD_SCENARIOS.get(idx).copied().unwrap_or(SKIRMISH);
@@ -249,14 +250,15 @@ mod tests {
                 _ => other += 1,
             }
         }
-        // Three mains (6 ore + 1 carbon each), four naturals (4 + 1), a rich
+        // Four mains (6 ore + 1 carbon each), four naturals (4 + 1), a rich
         // center (6 + 2), and two side clusters (4 + 1).
-        assert_eq!(ore, 6 * 3 + 4 * 4 + 6 + 4 * 2);
-        assert_eq!(carbon, 3 + 4 + 2 + 2);
-        // StarCraft-style starts: each main is exactly an HQ + 4 workers;
-        // nothing else (no free production or army) is on the map.
-        assert_eq!(hqs, 3);
-        assert_eq!(workers, 3 * 4);
+        assert_eq!(ore, 6 * 4 + 4 * 4 + 6 + 4 * 2);
+        assert_eq!(carbon, 4 + 4 + 2 + 2);
+        // StarCraft-style starts: each of the four spawn sites is exactly an
+        // HQ + 4 workers; nothing else (no free production or army) is on
+        // the map.
+        assert_eq!(hqs, 4);
+        assert_eq!(workers, 4 * 4);
         assert_eq!(other, 0);
     }
 

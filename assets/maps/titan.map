@@ -3,30 +3,18 @@
 # template, not this file; re-baking overwrites it.
 name Crossfire Basin
 
-hq 0 0 208
-worker 0 -9 219
-worker 0 -3 220
-worker 0 3 220
-worker 0 9 219
-ore -23 227
-ore -15 234
-ore -5 238
-ore 5 238
-ore 15 234
-ore 23 227
-carbon 38 216
-hq 1 -344 -200
-worker 1 -353 -211
-worker 1 -347 -212
-worker 1 -341 -212
-worker 1 -335 -211
-ore -367 -219
-ore -359 -226
-ore -349 -230
-ore -339 -230
-ore -329 -226
-ore -321 -219
-carbon -382 -208
+hq 0 -152 192
+worker 0 -161 203
+worker 0 -155 204
+worker 0 -149 204
+worker 0 -143 203
+ore -175 211
+ore -167 218
+ore -157 222
+ore -147 222
+ore -137 218
+ore -129 211
+carbon -190 200
 hq 1 400 80
 worker 1 391 69
 worker 1 397 68
@@ -39,6 +27,30 @@ ore 405 50
 ore 415 54
 ore 423 61
 carbon 438 72
+hq 2 -344 -200
+worker 2 -353 -211
+worker 2 -347 -212
+worker 2 -341 -212
+worker 2 -335 -211
+ore -367 -219
+ore -359 -226
+ore -349 -230
+ore -339 -230
+ore -329 -226
+ore -321 -219
+carbon -382 -208
+hq 3 152 192
+worker 3 143 203
+worker 3 149 204
+worker 3 155 204
+worker 3 161 203
+ore 129 211
+ore 137 218
+ore 147 222
+ore 157 222
+ore 167 218
+ore 175 211
+carbon 190 200
 ore -110 128
 ore -102 134
 ore -92 137

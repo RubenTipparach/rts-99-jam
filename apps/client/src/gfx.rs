@@ -1455,8 +1455,9 @@ impl Gfx {
             0.0
         };
         let liquid = crate::voxel::active_liquid().unwrap_or(EARTH_WATER);
+        let t = crate::voxel::active_tint();
         self.write_world(WorldUniform {
-            tint: [1.0, 1.0, 1.0, lava],
+            tint: [t[0], t[1], t[2], lava],
             liquid,
         });
     }
