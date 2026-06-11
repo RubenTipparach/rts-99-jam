@@ -2,8 +2,8 @@
 """Generate chunky, hand-painted-ish terrain tiles as PNGs (no dependencies).
 
 Run:  python3 assets/gen_textures.py
-Outputs 32x32 tiles to assets/textures/ for the client to load with
-nearest-neighbour sampling (PS1 / WC3 look). Edit the palettes below and re-run.
+Outputs 64x64 tiles to assets/textures/ for the client to sample with linear
+filtering (a soft painterly look). Edit the palettes below and re-run.
 """
 
 import os
@@ -12,7 +12,7 @@ import zlib
 import math
 
 OUT = os.path.join(os.path.dirname(__file__), "textures")
-SIZE = 32
+SIZE = 64
 
 
 def write_png(path, w, h, rgba):
@@ -38,12 +38,13 @@ def write_png(path, w, h, rgba):
         f.write(out)
 
 
-# Small deterministic value-noise so tiles wrap seamlessly.
-def vnoise(seed):
+# Small deterministic value-noise whose lattice wraps every `period` cells,
+# so a tile sampled over [0, period) is seamless.
+def vnoise(seed, period=8):
     g = {}
 
     def grad(ix, iy):
-        key = (ix % 8, iy % 8)  # wrap at 8 for tileability
+        key = (ix % period, iy % period)
         if key not in g:
             n = (key[0] * 1619 + key[1] * 31337 + seed * 1013) & 0x7FFFFFFF
             n = (n ^ (n >> 13)) * 1274126177 & 0x7FFFFFFF
@@ -78,20 +79,30 @@ def rnd(x, y, s):
 
 
 def tile(name, lo, hi, scale, seed, light=None, dark=None, light_p=0.07, dark_p=0.06):
-    n = vnoise(seed)
+    # Three octaves on wrapping lattices: broad patches, mid clumps, and a
+    # fine grain, each sampled over exactly one period so the tile is seamless.
+    period = max(2, int(round(scale)))
+    n = vnoise(seed, period)
+    n2 = vnoise(seed + 7, period * 2)
+    n3 = vnoise(seed + 13, period * 4)
     px = bytearray()
     for y in range(SIZE):
         for x in range(SIZE):
-            v = n(x / SIZE * scale, y / SIZE * scale)
-            v2 = n(x / SIZE * scale * 2.3 + 4.0, y / SIZE * scale * 2.3 + 9.0)
-            t = max(0.0, min(1.0, v * 0.65 + v2 * 0.35))
+            u, v = x / SIZE * period, y / SIZE * period
+            t = (
+                n(u, v) * 0.52
+                + n2(u * 2.0 + 4.0, v * 2.0 + 9.0) * 0.30
+                + n3(u * 4.0 + 2.0, v * 4.0 + 5.0) * 0.18
+            )
+            t = max(0.0, min(1.0, t))
             c = lerp(lo, hi, t)
-            # Randomly scattered light/dark flecks for a hand-painted look.
+            # Randomly scattered light/dark flecks for a hand-painted look,
+            # softened toward the base color so they read as brushed dabs.
             r = rnd(x, y, seed * 7 + 1)
             if light and r < light_p:
-                c = light
+                c = lerp(c, light, 0.75)
             elif dark and r > 1.0 - dark_p:
-                c = dark
+                c = lerp(c, dark, 0.75)
             px += bytes((c[0], c[1], c[2], 255))
     write_png(os.path.join(OUT, name), SIZE, SIZE, px)
 

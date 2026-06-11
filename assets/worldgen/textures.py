@@ -2,7 +2,7 @@
 """Generate tileable texture sets, one per archetype, under
 `assets/textures/worlds/<archetype>/`.
 
-Each set has four 64x64 tiles that drop straight into the client's existing
+Each set has four 128x128 tiles that drop straight into the client's existing
 four-sampler terrain shader (`apps/client/src/shader.wgsl`), which blends a base
 surface with a low/lowland tile, a high/slope tile and an accent tile:
 
@@ -22,7 +22,7 @@ import zlib
 from common import write_png, clamp8, lerp3, scale3
 import worlds as cat
 
-SIZE = 64
+SIZE = 128
 OUT_ROOT = os.path.join(os.path.dirname(__file__), "..", "textures", "worlds")
 
 
@@ -72,13 +72,18 @@ def make_tile(path, lo, hi, scale, seed, light=None, dark=None,
     period = max(2, int(round(scale)))
     n = _wrap_noise(period, seed)
     n2 = _wrap_noise(period * 2, seed + 7)
+    n3 = _wrap_noise(period * 4, seed + 13)
     px = bytearray()
     sd, cd = math.sin(streak_dir), math.cos(streak_dir)
     for y in range(SIZE):
         for x in range(SIZE):
             u = x / SIZE * scale
             v = y / SIZE * scale
-            t = n(u, v) * 0.62 + n2(u * 2.0 + 4.0, v * 2.0 + 9.0) * 0.38
+            t = (
+                n(u, v) * 0.50
+                + n2(u * 2.0 + 4.0, v * 2.0 + 9.0) * 0.32
+                + n3(u * 4.0 + 2.0, v * 4.0 + 5.0) * 0.18
+            )
             t = max(0.0, min(1.0, t))
             c = lerp3(lo, hi, t)
             if streak > 0.0:
