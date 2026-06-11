@@ -11,6 +11,7 @@ members = [
     "crates/testkit",
     "apps/client",
     "tools/mesher",
+    "tools/modelgen",
 ]
 
 [workspace.package]

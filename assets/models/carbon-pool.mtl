@@ -1,0 +1,6 @@
+# carbon-pool.mtl - colors are editable; KEEP the material names,
+# the engine reads the _t/_d flags from them.
+newmtl m80f299_t0_d0
+Kd 0.5000 0.9500 0.6000
+newmtl mccffd6_t0_d0
+Kd 0.8000 1.0000 0.8400

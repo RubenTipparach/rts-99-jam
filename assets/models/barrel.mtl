@@ -1,0 +1,10 @@
+# barrel.mtl - colors are editable; KEEP the material names,
+# the engine reads the _t/_d flags from them.
+newmtl m4d6b52_t0_d2
+Kd 0.3000 0.4200 0.3200
+newmtl m2e3833_t0_d2
+Kd 0.1800 0.2200 0.2000
+newmtl mcc9433_t0_d2
+Kd 0.8000 0.5800 0.2000
+newmtl m8cf280_t0_d2
+Kd 0.5500 0.9500 0.5000

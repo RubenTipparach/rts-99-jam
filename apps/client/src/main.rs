@@ -8,6 +8,7 @@ mod gfx;
 mod hud;
 mod map;
 mod menu;
+mod model;
 mod terrain;
 mod voxel;
 mod worlds;

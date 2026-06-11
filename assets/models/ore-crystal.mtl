@@ -1,0 +1,8 @@
+# ore-crystal.mtl - colors are editable; KEEP the material names,
+# the engine reads the _t/_d flags from them.
+newmtl m78d6eb_t0_d0
+Kd 0.4700 0.8400 0.9200
+newmtl md1f7ff_t0_d0
+Kd 0.8200 0.9700 1.0000
+newmtl m5cbddb_t0_d0
+Kd 0.3600 0.7400 0.8600
