@@ -21,7 +21,7 @@ from common import write_png, value_noise, clamp8  # noqa: E402
 
 OUT = os.path.join(os.path.dirname(__file__), "hud")
 
-BASE = (96, 108, 128)  # steel blue, lit value; shading multiplies this
+BASE = (66, 74, 90)  # dark blue-grey steel; shading multiplies this
 GLOW = (70, 200, 245)
 SCREEN = (3, 9, 14)  # the dark display well (deep blue-green black)
 
@@ -57,26 +57,26 @@ class Img:
 
 
 def metal_base(img, seed):
-    """Steel with a specular reflection band and brushed horizontal grain."""
+    """Matte dark steel: a gentle top light and brushed horizontal grain
+    (kept deliberately low-gloss; the lights and screens do the talking)."""
     w, h = img.w, img.h
     for y in range(h):
         t = y / max(h - 1, 1)
-        shade = 0.80 - 0.40 * t
-        shade += 0.55 * math.exp(-(((t - 0.14) / 0.09) ** 2))  # spec band
-        shade += 0.10 * math.exp(-(((t - 0.55) / 0.25) ** 2))
-        streak = (value_noise(0.0, y * 1.7, seed) - 0.5) * 0.16
+        shade = 0.92 - 0.30 * t
+        shade += 0.18 * math.exp(-(((t - 0.14) / 0.10) ** 2))  # soft sheen
+        streak = (value_noise(0.0, y * 1.7, seed) - 0.5) * 0.12
         for x in range(w):
-            grain = (value_noise(x * 0.05, y * 1.7, seed + 7) - 0.5) * 0.10
-            fine = (value_noise(x * 0.45, y * 2.3, seed + 13) - 0.5) * 0.05
+            grain = (value_noise(x * 0.05, y * 1.7, seed + 7) - 0.5) * 0.08
+            fine = (value_noise(x * 0.45, y * 2.3, seed + 13) - 0.5) * 0.04
             v = shade + streak + grain + fine
             img.put(x, y, (BASE[0] * v, BASE[1] * v, BASE[2] * v))
-    for k in range(w // 60):  # sparse scratches catching the light
+    for k in range(w // 60):  # sparse scratches, barely catching the light
         y = int(value_noise(k * 3.1, 0.7, seed + 31) * (h - 8)) + 4
         x0 = int(value_noise(k * 5.7, 3.3, seed + 37) * w * 0.7)
         ln = 30 + int(value_noise(k * 1.9, 9.1, seed + 41) * 90)
         for x in range(x0, min(x0 + ln, w)):
-            img.add(x, y, (70, 80, 95), 0.25)
-            img.blend(x, y + 1, (10, 12, 18), 0.2)
+            img.add(x, y, (45, 52, 62), 0.18)
+            img.blend(x, y + 1, (10, 12, 18), 0.15)
 
 
 def screen(img, x0, y0, x1, y1, seed, tint=(0, 14, 10)):
@@ -195,14 +195,14 @@ def edge_trim(img):
     Corners stay SHARP: no chamfers, just crisp square edges."""
     w, h = img.w, img.h
     for x in range(w):
-        img.put(x, 0, (210, 225, 245))
-        img.blend(x, 1, (120, 140, 165), 0.8)
+        img.put(x, 0, (130, 145, 168))
+        img.blend(x, 1, (84, 96, 116), 0.7)
     for x in range(w):
         flick = 0.85 + 0.15 * value_noise(x * 0.07, 1.0, 5)
-        img.put(x, 3, (200, 245, 255))
-        for d in range(1, 4):
-            img.add(x, 3 - d, GLOW, flick * 0.5 / (d * d))
-            img.add(x, 3 + d, GLOW, flick * 0.5 / (d * d))
+        img.blend(x, 3, (110, 190, 215), 0.8)
+        for d in range(1, 3):
+            img.add(x, 3 - d, GLOW, flick * 0.22 / (d * d))
+            img.add(x, 3 + d, GLOW, flick * 0.22 / (d * d))
     for x in range(w):
         img.blend(x, h - 2, (8, 10, 16), 0.7)
         img.put(x, h - 1, (3, 5, 9))
