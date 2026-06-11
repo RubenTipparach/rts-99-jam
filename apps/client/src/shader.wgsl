@@ -261,6 +261,25 @@ fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
+// group 3 (unit/building pipeline only): the model surface-detail map -
+// panel grain, seams, scratches, rivets - triplanar-sampled in OBJECT space
+// (the meshes have no UVs), so every unit and building reads as textured and
+// the texture rides the model as it moves and turns.
+@group(3) @binding(0) var t_detail: texture_2d<f32>;
+@group(3) @binding(1) var samp_detail: sampler;
+
+// Triplanar sample of the detail map by the local-space normal. Explicit
+// LOD so it is safe after non-uniform control flow (the mode early-outs).
+fn detail_at(p: vec3<f32>, n: vec3<f32>) -> f32 {
+    var w = pow(abs(n), vec3<f32>(4.0));
+    w = w / max(w.x + w.y + w.z, 0.001);
+    let s = 0.45;
+    let cx = textureSampleLevel(t_detail, samp_detail, p.zy * s, 0.0).r;
+    let cy = textureSampleLevel(t_detail, samp_detail, p.xz * s, 0.0).r;
+    let cz = textureSampleLevel(t_detail, samp_detail, p.xy * s, 0.0).r;
+    return cx * w.x + cy * w.y + cz * w.z;
+}
+
 // ---------------- units / buildings ----------------
 // The instance tint's alpha selects a render mode:
 //   < 0     crystal (glassy resource node: fresnel rim, glint, screen-door body)
@@ -275,6 +294,9 @@ struct UnitOut {
     @location(2) mode: f32,
     @location(3) world: vec3<f32>,
     @location(4) plight: vec3<f32>,
+    /// Model-space position (scaled + yawed, before the world offset), the
+    /// anchor for the triplanar detail texture.
+    @location(5) local: vec3<f32>,
 };
 @vertex
 fn vs_unit(
@@ -317,6 +339,7 @@ fn vs_unit(
     albedo = mix(albedo, albedo * 1.25 + vec3<f32>(0.05, 0.18, 0.07), sel);
     o.albedo = albedo;
     o.mode = tcol.a;
+    o.local = rp;
     let world = rp + offset;
     o.world = world;
     o.plight = point_lights(world, normalize(rn));
@@ -354,9 +377,13 @@ fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
         return vec4<f32>(in.albedo * (1.1 * scan), 1.0);
     }
     let n = normalize(in.normal);
+    // Surface detail: the triplanar map turns into a brightness multiplier
+    // around 1.0 (the tile is authored around mid-grey; sRGB decode puts
+    // that at ~0.214, so 0.70 + 1.40 * d is neutral there).
+    let det = 0.70 + 1.40 * detail_at(in.local, n);
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
     let lit = 0.45 + 0.7 * ndl;
-    let col = in.albedo * (vec3<f32>(lit, lit, lit) + in.plight);
+    let col = in.albedo * det * (vec3<f32>(lit, lit, lit) + in.plight);
     return vec4<f32>(col, 1.0);
 }
 

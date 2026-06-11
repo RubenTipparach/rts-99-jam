@@ -107,6 +107,79 @@ def tile(name, lo, hi, scale, seed, light=None, dark=None, light_p=0.07, dark_p=
     write_png(os.path.join(OUT, name), SIZE, SIZE, px)
 
 
+def detail_tile(name, seed=11, size=128):
+    """The model surface-detail map: a neutral grey plate texture (panel
+    grain, jittered seam lines, per-panel tone shifts, scratches, rivets and
+    pitting) that the unit shader triplanar-maps over every unit/building
+    mesh. Authored around mid-grey = "no change"; the shader turns it into a
+    multiplier, so it must stay colorless."""
+    period = 8
+    n = vnoise(seed, period)
+    n2 = vnoise(seed + 7, period * 2)
+    n3 = vnoise(seed + 13, period * 4)
+    # Jittered, wrap-friendly panel seams on each axis.
+    panels = 4
+    seams_x = [
+        (k * size // panels + int(rnd(k, 0, seed) * 12) - 6) % size for k in range(panels)
+    ]
+    seams_y = [
+        (k * size // panels + int(rnd(0, k, seed + 1) * 12) - 6) % size for k in range(panels)
+    ]
+
+    def wrap_dist(a, seams):
+        return min(min(abs(a - s), size - abs(a - s)) for s in seams)
+
+    def panel_of(a, seams):
+        return sum(1 for s in seams if a >= s)
+
+    # Pre-painted scratches: short light streaks at random angles.
+    scratch = {}
+    for i in range(60):
+        x = rnd(i, 3, seed * 5) * size
+        y = rnd(i, 7, seed * 5) * size
+        ang = rnd(i, 9, seed * 5) * 6.28318
+        ln = 4 + rnd(i, 11, seed * 5) * 9.0
+        for s in range(int(ln)):
+            sx = int(x + math.cos(ang) * s) % size
+            sy = int(y + math.sin(ang) * s) % size
+            scratch[(sx, sy)] = 0.10 + rnd(i, 13, seed * 5) * 0.08
+    # Rivets: bright dots inset from seam crossings.
+    rivets = set()
+    for sx in seams_x:
+        for sy in seams_y:
+            for ox, oy in ((4, 4), (-5, 4), (4, -5), (-5, -5)):
+                rivets.add(((sx + ox) % size, (sy + oy) % size))
+
+    px = bytearray()
+    for y in range(size):
+        for x in range(size):
+            u, v = x / size * period, y / size * period
+            t = (
+                n(u, v) * 0.50
+                + n2(u * 2.0 + 4.0, v * 2.0 + 9.0) * 0.30
+                + n3(u * 4.0 + 2.0, v * 4.0 + 5.0) * 0.20
+            )
+            val = 0.5 + (t - 0.5) * 0.24
+            # Per-panel tone shift so plates read as separate pieces.
+            val += (rnd(panel_of(x, seams_x), panel_of(y, seams_y), seed * 3) - 0.5) * 0.09
+            # Seam lines: a dark groove with a softer shoulder.
+            dx, dy = wrap_dist(x, seams_x), wrap_dist(y, seams_y)
+            d = min(dx, dy)
+            if d == 0:
+                val -= 0.18
+            elif d == 1:
+                val -= 0.08
+            # Scratches, rivets, pitting.
+            val += scratch.get((x, y), 0.0)
+            if (x, y) in rivets or (x, y - 1) in rivets:
+                val += 0.14
+            if rnd(x, y, seed * 9) < 0.02:
+                val -= 0.10
+            g = int(max(0.18, min(0.85, val)) * 255)
+            px += bytes((g, g, g, 255))
+    write_png(os.path.join(OUT, name), size, size, px)
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     # WC3-ish warm, saturated, limited palettes with scattered flecks.
@@ -115,6 +188,7 @@ def main():
     tile("rock.png", (76, 72, 68), (122, 116, 106), 5.0, 3, light=(150, 144, 134), dark=(52, 48, 44))
     tile("sand.png", (152, 136, 90), (198, 180, 122), 3.5, 4, light=(214, 198, 142), dark=(132, 116, 74))
     tile("water.png", (26, 68, 108), (44, 112, 152), 3.0, 5, light=(70, 140, 176), dark=(20, 52, 86))
+    detail_tile("detail.png")
     print("wrote tiles to", OUT)
 
 

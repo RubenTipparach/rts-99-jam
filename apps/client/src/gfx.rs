@@ -2292,6 +2292,8 @@ pub struct Gfx {
     ring_buf: wgpu::Buffer,
     camera_buf: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
+    /// The model surface-detail map (group 3 of the unit pipeline).
+    detail_bind: wgpu::BindGroup,
     terrain_bind: wgpu::BindGroup,
     terrain_layout: wgpu::BindGroupLayout,
     tile_sampler: wgpu::Sampler,
@@ -2528,6 +2530,36 @@ impl Gfx {
             ],
         });
 
+        // group 3 (unit pipeline): the model surface-detail map, triplanar
+        // sampled in object space so units/buildings are textured without UVs.
+        let detail = load_tile(
+            &device,
+            &queue,
+            include_bytes!("../../../assets/textures/detail.png"),
+            "detail",
+        );
+        let detail_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("detail-layout"),
+            entries: &[
+                tex_entry(0, true),
+                samp_entry(1, wgpu::SamplerBindingType::Filtering),
+            ],
+        });
+        let detail_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("detail-bind"),
+            layout: &detail_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&detail),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&tile_sampler),
+                },
+            ],
+        });
+
         // group 2: per-world appearance (voxel terrain tint + liquid colour).
         let world_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("world-layout"),
@@ -2573,6 +2605,13 @@ impl Gfx {
         let pl_plain = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pl-plain"),
             bind_group_layouts: &[Some(&camera_layout)],
+            immediate_size: 0,
+        });
+        // Units/buildings: camera + the surface-detail map at group 3
+        // (groups 1 and 2 are holes; fs_unit touches neither).
+        let pl_unit = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pl-unit"),
+            bind_group_layouts: &[Some(&camera_layout), None, None, Some(&detail_layout)],
             immediate_size: 0,
         });
         // Voxel terrain + water sample the world uniform at group 2.
@@ -2697,7 +2736,7 @@ impl Gfx {
         );
         let unit_pipeline = mk(
             "unit",
-            &pl_plain,
+            &pl_unit,
             "vs_unit",
             "fs_unit",
             &[v3u.clone(), inst.clone()],
@@ -2988,6 +3027,7 @@ impl Gfx {
             ring_buf,
             camera_buf,
             camera_bind,
+            detail_bind,
             terrain_bind,
             terrain_layout,
             tile_sampler,
@@ -3325,6 +3365,9 @@ impl Gfx {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, &self.camera_bind, &[]);
+            // The unit pipeline's surface-detail map rides at group 3 for
+            // the whole pass; other pipelines simply ignore it.
+            pass.set_bind_group(3, &self.detail_bind, &[]);
 
             let voxel = self.voxel_terrain.is_some();
             if let Some((buf, len, bind)) = self.voxel_terrain.as_ref() {
@@ -3532,6 +3575,41 @@ mod tests {
         let ll = (0.5_f32 * 0.5 + 1.0 + 0.35 * 0.35).sqrt();
         let light = [0.5 / ll, 1.0 / ll, 0.35 / ll];
 
+        // The shader's surface-detail map, decoded sRGB -> linear and
+        // triplanar-sampled exactly like fs_unit's `detail_at`, so the
+        // preview shows the textured models the renderer draws.
+        let det_img =
+            image::load_from_memory(include_bytes!("../../../assets/textures/detail.png"))
+                .expect("decode detail")
+                .to_rgba8();
+        let (dw, dh) = (det_img.width() as usize, det_img.height() as usize);
+        let det_lin: Vec<f32> = det_img
+            .pixels()
+            .map(|p| (p[0] as f32 / 255.0).powf(2.2))
+            .collect();
+        let det_sample = |u: f32, v: f32| -> f32 {
+            let fx = u.rem_euclid(1.0) * dw as f32;
+            let fy = v.rem_euclid(1.0) * dh as f32;
+            let (x0, y0) = (fx as usize % dw, fy as usize % dh);
+            let (x1, y1) = ((x0 + 1) % dw, (y0 + 1) % dh);
+            let (tx, ty) = (fx.fract(), fy.fract());
+            let at = |x: usize, y: usize| det_lin[y * dw + x];
+            let a = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
+            let b = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
+            a + (b - a) * ty
+        };
+        let detail_at = |p: [f32; 3], n: [f32; 3]| -> f32 {
+            let mut wgt = [n[0].abs().powi(4), n[1].abs().powi(4), n[2].abs().powi(4)];
+            let sum = (wgt[0] + wgt[1] + wgt[2]).max(0.001);
+            for v in &mut wgt {
+                *v /= sum;
+            }
+            let s = 0.45;
+            wgt[0] * det_sample(p[2] * s, p[1] * s)
+                + wgt[1] * det_sample(p[0] * s, p[2] * s)
+                + wgt[2] * det_sample(p[0] * s, p[1] * s)
+        };
+
         let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 14, 24, 255]));
         let mut depth = vec![f32::MIN; (w * h) as usize];
         for tri in mesh.chunks_exact(3) {
@@ -3544,11 +3622,6 @@ mod tests {
             };
             let shade = 0.45 + 0.7 * dot(tri[0].normal, light).max(0.0);
             let base = albedo(&tri[0]);
-            let rgb = [
-                ((base[0] * shade).clamp(0.0, 1.0) * 255.0) as u8,
-                ((base[1] * shade).clamp(0.0, 1.0) * 255.0) as u8,
-                ((base[2] * shade).clamp(0.0, 1.0) * 255.0) as u8,
-            ];
             let p: Vec<(f32, f32, f32)> = tri
                 .iter()
                 .map(|v| {
@@ -3587,6 +3660,19 @@ mod tests {
                     let i = (py * w + px) as usize;
                     if d > depth[i] {
                         depth[i] = d;
+                        // Interpolate the model-space position and apply the
+                        // detail multiplier per pixel, like the shader.
+                        let pos = [
+                            w0 * tri[0].pos[0] + w1 * tri[1].pos[0] + w2 * tri[2].pos[0],
+                            w0 * tri[0].pos[1] + w1 * tri[1].pos[1] + w2 * tri[2].pos[1],
+                            w0 * tri[0].pos[2] + w1 * tri[1].pos[2] + w2 * tri[2].pos[2],
+                        ];
+                        let det = 0.70 + 1.40 * detail_at(pos, tri[0].normal);
+                        let rgb = [
+                            ((base[0] * shade * det).clamp(0.0, 1.0) * 255.0) as u8,
+                            ((base[1] * shade * det).clamp(0.0, 1.0) * 255.0) as u8,
+                            ((base[2] * shade * det).clamp(0.0, 1.0) * 255.0) as u8,
+                        ];
                         img.put_pixel(px, py, image::Rgba([rgb[0], rgb[1], rgb[2], 255]));
                     }
                 }
