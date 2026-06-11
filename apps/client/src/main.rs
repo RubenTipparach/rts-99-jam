@@ -385,6 +385,8 @@ impl App {
                 &rd.heavies,
                 &rd.turrets,
                 &rd.supplies,
+                &rd.wards_astro,
+                &rd.supplies_astro,
                 &rd.barrels,
                 &particles,
                 &rd.ore_crystals,
@@ -483,6 +485,22 @@ impl App {
             return;
         }
         self.build_mode = Some(kind);
+    }
+
+    /// If the point hits a portrait in the selection panel, re-select: a
+    /// plain click keeps only that unit, shift-click drops it from (or
+    /// returns it to) the group. Reports the click consumed (web HUD only).
+    #[cfg(target_arch = "wasm32")]
+    fn selection_panel_click(&mut self, cx: f32, cy: f32, w: f32, h: f32) -> bool {
+        let Some(idx) = hud::selection_hit(&self.game, cx, cy, w, h) else {
+            return false;
+        };
+        if self.input.shift {
+            self.game.toggle_selected(idx);
+        } else {
+            self.game.select_only(idx);
+        }
+        true
     }
 
     /// If the point hits a command-card button, perform its action (queue a
@@ -851,8 +869,13 @@ impl ApplicationHandler<UserEvent> for App {
                     MouseButton::Left => {
                         if state == ElementState::Pressed {
                             #[cfg(target_arch = "wasm32")]
-                            let consumed =
-                                self.card_click(cx, cy, w, h) || self.minimap_press(cx, cy, w, h);
+                            let consumed = self.card_click(cx, cy, w, h)
+                                || self.selection_panel_click(cx, cy, w, h)
+                                || self.minimap_press(cx, cy, w, h)
+                                // Dead HUD surface swallows the click, so a
+                                // miss on the console can't clear the
+                                // selection through a world-click.
+                                || hud::over_ui(&self.game, cx, cy, w, h);
                             #[cfg(not(target_arch = "wasm32"))]
                             let consumed = false;
                             if !consumed {
@@ -954,7 +977,10 @@ impl ApplicationHandler<UserEvent> for App {
                         let pressed = self.input.left_press.take();
                         let (w, h) = self.dims();
                         #[cfg(target_arch = "wasm32")]
-                        if self.card_click(cx, cy, w, h) || self.minimap_jump(cx, cy, w, h) {
+                        if self.card_click(cx, cy, w, h)
+                            || self.selection_panel_click(cx, cy, w, h)
+                            || self.minimap_jump(cx, cy, w, h)
+                        {
                             return;
                         }
                         if let Some((px, py)) = pressed {
@@ -1084,11 +1110,13 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.input.cursor_in && !self.pointer_is_touch && !self.input.middle_down {
                     let (sw, sh) = self.dims();
                     let (cx, cy) = self.input.cursor;
-                    // Never edge-pan from over the in-game UI (command bar,
-                    // its buttons, the minimap) or while scrubbing the minimap.
+                    // Don't pan while scrubbing the minimap. The in-game UI
+                    // needs no gate of its own: the 2-pixel trigger zone is
+                    // already past every button, and the screen border must
+                    // keep panning even where the HUD strip reaches it (the
+                    // bottom edge always pans south).
                     #[cfg(target_arch = "wasm32")]
-                    let blocked =
-                        self.input.minimap_drag || hud::over_ui(&self.game, cx, cy, sw, sh);
+                    let blocked = self.input.minimap_drag;
                     #[cfg(not(target_arch = "wasm32"))]
                     let blocked = false;
                     // A hair-trigger zone: panning only from the outermost
@@ -1170,7 +1198,9 @@ impl ApplicationHandler<UserEvent> for App {
                         && (cx <= EDGE || cy <= EDGE || cx >= w - EDGE || cy >= h - EDGE);
                     if self.build_mode.is_some() {
                         hud::CursorKind::Build
-                    } else if self.input.middle_down || (at_edge && !on_ui) {
+                    } else if self.input.middle_down || at_edge {
+                        // The edge wins even over the HUD: the bottom border
+                        // pans south through the console strip.
                         hud::CursorKind::Pan
                     } else if self.input.shift {
                         hud::CursorKind::AddSelect
@@ -1181,6 +1211,11 @@ impl ApplicationHandler<UserEvent> for App {
                         match self.camera.ground_pick(cx, cy, w, h) {
                             Some((wx, wz)) if units && self.game.hover_enemy(wx, wz) => {
                                 hud::CursorKind::Attack
+                            }
+                            Some((wx, wz))
+                                if workers && self.game.hover_damaged_friendly(wx, wz) =>
+                            {
+                                hud::CursorKind::Build
                             }
                             Some((wx, wz)) if workers && self.game.hover_node(wx, wz) => {
                                 hud::CursorKind::Harvest

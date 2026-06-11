@@ -161,6 +161,8 @@ pub struct RenderData {
     pub heavies: Vec<InstanceRaw>,
     pub turrets: Vec<InstanceRaw>,
     pub supplies: Vec<InstanceRaw>,
+    pub wards_astro: Vec<InstanceRaw>,
+    pub supplies_astro: Vec<InstanceRaw>,
     pub barrels: Vec<InstanceRaw>,
     pub ore_crystals: Vec<InstanceRaw>,
     pub carbon_pools: Vec<InstanceRaw>,
@@ -170,6 +172,8 @@ pub struct RenderData {
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub struct UnitInfo {
+    /// Entity index in the sim (lets the HUD's selection panel re-select).
+    pub index: u32,
     pub owner: u16,
     pub barracks: bool,
     /// Entity kind (drives the HUD's portrait icon).
@@ -392,8 +396,10 @@ impl Game {
                 self.fx.hit(pos, organic);
             }
         }
-        // Structures being raised shower welding sparks.
-        let welds: Vec<([f32; 3], f32)> = self
+        // Construction fx, per faction: Hollowmen structures shower welding
+        // sparks as they rise; Astromancer structures descend through a
+        // summoning gate that breathes aether motes around its rim.
+        let welds: Vec<([f32; 3], f32, bool)> = self
             .curr
             .iter()
             .filter(|s| {
@@ -409,11 +415,33 @@ impl Game {
                     Kind::Barracks => 5.0,
                     _ => 2.5,
                 };
-                (at(s), r)
+                (at(s), r, self.faction_of(s.owner) == Faction::Astromancer)
             })
             .collect();
-        for (pos, spread) in welds {
-            self.fx.weld(pos, spread);
+        for (pos, spread, astro) in welds {
+            if astro {
+                self.fx.portal_motes(pos, spread * 1.6);
+            } else {
+                self.fx.weld(pos, spread);
+            }
+        }
+
+        // Repairing workers weld at their own position (the building's wall
+        // is right at their reach), sparks for Hollowmen, motes for the
+        // Astromancers' mending light.
+        let repairs: Vec<([f32; 3], bool)> = self
+            .curr
+            .iter()
+            .filter(|s| s.repairing)
+            .filter(|s| s.owner == 0 || self.cell_visible(f(s.pos.x), f(s.pos.y)))
+            .map(|s| (at(s), self.faction_of(s.owner) == Faction::Astromancer))
+            .collect();
+        for (pos, astro) in repairs {
+            if astro {
+                self.fx.portal_motes(pos, 0.8);
+            } else {
+                self.fx.weld(pos, 0.9);
+            }
         }
 
         // Damaged buildings burn: smoke from light damage, flames and a
@@ -517,6 +545,19 @@ impl Game {
             }
             let ground = terrain::height(wx, wz);
             match s.kind {
+                // An Astromancer structure mid-summons: the gate itself is a
+                // light source, washing the pad in aether while the shell
+                // descends through it.
+                Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    if f(s.construct_frac) < 0.999
+                        && self.faction_of(s.owner) == Faction::Astromancer =>
+                {
+                    out.push(FxLight {
+                        pos: [wx, ground + 1.5, wz],
+                        radius: 15.0,
+                        color: [0.45, 0.85, 1.2],
+                    });
+                }
                 // Floodlights only come on once construction is finished:
                 // wall lamps just outside the footprint corners, hugging the
                 // ground so the pool lands on the terrain vertices around
@@ -847,6 +888,8 @@ impl Game {
         let mut heavies = Vec::new();
         let mut turrets = Vec::new();
         let mut supplies = Vec::new();
+        let mut wards_astro = Vec::new();
+        let mut supplies_astro = Vec::new();
         let mut barrels = Vec::new();
         let mut ore_crystals = Vec::new();
         let mut carbon_pools = Vec::new();
@@ -881,9 +924,13 @@ impl Game {
                 s.kind,
                 Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
             ) {
-                // Buildings rise out of the ground as they are constructed
-                // (construct_frac 0 -> 1); a finished one is at full height.
+                // Construction, two ways. Hollowmen structures rise out of
+                // the ground (construct_frac scales height). Astromancer
+                // structures are SUMMONED: a portal gate opens on the pad
+                // and the finished shell descends through it, screen-door
+                // ghosted until it touches down.
                 let cf = f(s.construct_frac).clamp(0.08, 1.0);
+                let astro = self.faction_of(s.owner) == Faction::Astromancer;
                 let selected = sel.contains(&s.index);
                 // Selected buildings brighten (tint alpha 1.5 is the shader's
                 // highlight flag) on top of their ground ring.
@@ -891,9 +938,13 @@ impl Game {
                 if selected {
                     color[3] = 1.5;
                 }
-                let inst = InstanceRaw {
+                let mut inst = InstanceRaw {
                     offset: [wx, ground, wz],
-                    scale: [1.0, cf, 1.0],
+                    scale: if astro {
+                        [1.0, 1.0, 1.0]
+                    } else {
+                        [1.0, cf, 1.0]
+                    },
                     color,
                     // Turrets swivel toward their target; other buildings sit.
                     rot: if s.kind == Kind::Turret {
@@ -903,19 +954,62 @@ impl Game {
                     },
                     anim: ANIM_NONE,
                 };
+                if astro && cf < 1.0 {
+                    inst.offset[1] = ground + (1.0 - cf) * 16.0;
+                    inst.color[3] = 2.4; // placed-holo dither while crossing
+                                         // The gate: a bright aether ring snaps open on the pad
+                                         // and holds until the structure lands.
+                    let radius = match s.kind {
+                        Kind::Hq => 9.0,
+                        Kind::Barracks => 8.0,
+                        Kind::Turret => 4.0,
+                        _ => 4.5,
+                    };
+                    let open = (cf * 6.0).min(1.0);
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: radius * 1.2 * open,
+                        color: [0.55, 0.88, 1.0, 0.95],
+                        inner: RING,
+                    });
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: radius * 1.05 * open,
+                        color: [0.35, 0.65, 0.95, 0.30],
+                        inner: 0.0,
+                    });
+                }
                 // The Earth 2150-style floodlight pooling under the building
                 // is a real point light now: see `world_lights`.
                 match s.kind {
-                    Kind::Turret => turrets.push(inst),
-                    Kind::Supply => supplies.push(inst),
-                    Kind::Hq => match self.faction_of(s.owner) {
-                        Faction::Astromancer => hq_astro.push(inst),
-                        Faction::Hollowmen => hq_hollow.push(inst),
-                    },
-                    _ => match self.faction_of(s.owner) {
-                        Faction::Astromancer => barracks_astro.push(inst),
-                        Faction::Hollowmen => barracks_hollow.push(inst),
-                    },
+                    Kind::Turret => {
+                        if astro {
+                            wards_astro.push(inst)
+                        } else {
+                            turrets.push(inst)
+                        }
+                    }
+                    Kind::Supply => {
+                        if astro {
+                            supplies_astro.push(inst)
+                        } else {
+                            supplies.push(inst)
+                        }
+                    }
+                    Kind::Hq => {
+                        if astro {
+                            hq_astro.push(inst)
+                        } else {
+                            hq_hollow.push(inst)
+                        }
+                    }
+                    _ => {
+                        if astro {
+                            barracks_astro.push(inst)
+                        } else {
+                            barracks_hollow.push(inst)
+                        }
+                    }
                 }
                 if selected {
                     // Selection reads via the shader brighten + the HUD's
@@ -937,14 +1031,14 @@ impl Game {
                 // bob; the Engineer plants and bobs while walking. While mining,
                 // both get a faster work bob to read as "gathering".
                 let phase = s.index as f32 * 1.3;
-                let work = if s.mining {
+                let work = if s.mining || s.repairing {
                     (self.time * 14.0 + phase).sin().abs()
                 } else {
                     0.0
                 };
                 let inst = match self.faction_of(s.owner) {
                     Faction::Astromancer => {
-                        let hover = if s.mining { 0.5 } else { 1.1 }; // dips to gather
+                        let hover = if s.mining || s.repairing { 0.5 } else { 1.1 }; // dips to work
                         let y = ground + hover + ((self.time * 2.2) + phase).sin() * 0.18;
                         InstanceRaw {
                             offset: [wx, y, wz],
@@ -957,7 +1051,7 @@ impl Game {
                     }
                     Faction::Hollowmen => {
                         let mut y = ground;
-                        if s.moving && !s.mining {
+                        if s.moving && !s.mining && !s.repairing {
                             y += ((self.time * 9.0) + phase).sin().abs() * 0.12;
                         }
                         y += work * 0.10; // drilling bob
@@ -966,7 +1060,7 @@ impl Game {
                             scale: [1.0, 1.0, 1.0],
                             color: tint,
                             rot: rot_of(s),
-                            anim: if s.moving && !s.mining {
+                            anim: if s.moving && !s.mining && !s.repairing {
                                 [self.time * 9.0 + phase, 0.30]
                             } else {
                                 ANIM_NONE
@@ -1095,8 +1189,14 @@ impl Game {
                     Faction::Astromancer => barracks_astro.push(inst),
                     Faction::Hollowmen => barracks_hollow.push(inst),
                 },
-                BuildingKind::Turret => turrets.push(inst),
-                BuildingKind::Supply => supplies.push(inst),
+                BuildingKind::Turret => match self.faction_of(0) {
+                    Faction::Astromancer => wards_astro.push(inst),
+                    Faction::Hollowmen => turrets.push(inst),
+                },
+                BuildingKind::Supply => match self.faction_of(0) {
+                    Faction::Astromancer => supplies_astro.push(inst),
+                    Faction::Hollowmen => supplies.push(inst),
+                },
             }
             rings.push(RingRaw {
                 center: [gx, ground, gz],
@@ -1146,8 +1246,14 @@ impl Game {
                     Faction::Astromancer => barracks_astro.push(inst),
                     Faction::Hollowmen => barracks_hollow.push(inst),
                 },
-                BuildingKind::Turret => turrets.push(inst),
-                BuildingKind::Supply => supplies.push(inst),
+                BuildingKind::Turret => match self.faction_of(0) {
+                    Faction::Astromancer => wards_astro.push(inst),
+                    Faction::Hollowmen => turrets.push(inst),
+                },
+                BuildingKind::Supply => match self.faction_of(0) {
+                    Faction::Astromancer => supplies_astro.push(inst),
+                    Faction::Hollowmen => supplies.push(inst),
+                },
             }
         }
 
@@ -1188,6 +1294,8 @@ impl Game {
             heavies,
             turrets,
             supplies,
+            wards_astro,
+            supplies_astro,
             barrels,
             ore_crystals,
             carbon_pools,
@@ -1281,6 +1389,7 @@ impl Game {
             _ => "INFANTRY",
         };
         UnitInfo {
+            index: s.index,
             owner: s.owner,
             barracks,
             kind: s.kind,
@@ -1550,6 +1659,25 @@ impl Game {
         }
     }
 
+    /// Select exactly this entity (a portrait click in the HUD panel).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn select_only(&mut self, idx: u32) {
+        if self.curr.iter().any(|s| s.index == idx) {
+            self.selected = vec![idx];
+        }
+    }
+
+    /// Shift-click in the HUD panel: drop the entity from the selection, or
+    /// add it back if it was already dropped.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn toggle_selected(&mut self, idx: u32) {
+        if let Some(p) = self.selected.iter().position(|&u| u == idx) {
+            self.selected.remove(p);
+        } else if self.curr.iter().any(|s| s.index == idx) {
+            self.selected.push(idx);
+        }
+    }
+
     /// Ore + carbon price of a building (mirrors the sim's costs; the HUD
     /// card, hotkeys, and placement checks all share this table).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -1746,6 +1874,38 @@ impl Game {
         true
     }
 
+    /// The damaged friendly building under a ground point, if any (a click
+    /// inside its footprint, with hit points missing): the repair target.
+    fn damaged_friendly_at(&self, wx: f32, wz: f32) -> Option<u32> {
+        self.curr
+            .iter()
+            .find(|s| {
+                s.owner == 0
+                    && matches!(
+                        s.kind,
+                        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    )
+                    && f(s.hp) < f(s.max_hp) - 0.5
+                    && {
+                        let r = match s.kind {
+                            Kind::Hq => 9.0,
+                            Kind::Barracks => 8.0,
+                            Kind::Turret => 4.0,
+                            _ => 4.5,
+                        } + 1.5;
+                        (wx - f(s.pos.x)).hypot(wz - f(s.pos.y)) <= r
+                    }
+            })
+            .map(|s| s.index)
+    }
+
+    /// True when a damaged friendly building sits under the cursor (drives
+    /// the repair-flavored context cursor when workers are selected).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub fn hover_damaged_friendly(&self, wx: f32, wz: f32) -> bool {
+        self.damaged_friendly_at(wx, wz).is_some()
+    }
+
     /// If `(wx, wz)` lands on a placed hologram and workers are selected,
     /// re-issue the build to them and refresh the ghost's clock. Returns
     /// whether the click was consumed.
@@ -1791,6 +1951,27 @@ impl Game {
         // builder died or was pulled away).
         if !attack && self.resume_pending_build(wx, wz) {
             return;
+        }
+        // Right-clicking a damaged friendly building sends selected workers
+        // to repair it; any escorts in the selection just move up.
+        if !attack {
+            if let Some(target) = self.damaged_friendly_at(wx, wz) {
+                if self.selected.iter().any(|&u| self.is_worker(u)) {
+                    for u in self.selected.clone() {
+                        if self.is_worker(u) {
+                            self.pending.push(Command::Repair { unit: u, target });
+                        } else {
+                            self.pending.push(Command::Move {
+                                unit: u,
+                                x: fx(wx),
+                                y: fx(wz),
+                            });
+                        }
+                    }
+                    self.ping(Ping::Harvest, wx, wz, Some(target));
+                    return;
+                }
+            }
         }
         // Right-clicking a resource node sends selected workers to harvest it;
         // any non-worker in the selection just moves to the spot.

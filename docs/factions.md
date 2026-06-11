@@ -67,6 +67,8 @@ scaffolding added for completeness, easy to rename or cut.
 *"Knowledge is magic."* Elite and few. Everything hovers, structures are *grown*
 rather than built, and units carry regenerating magical shields. Powerful and
 expensive, slow to mass. Home turf: irradiated zones, where they heal.
+Full concept (design pillars, visual and fx language, player fantasy):
+[`factions/astromancers.md`](factions/astromancers.md).
 
 **Ground**
 - **Acolyte** *(glue)* - worker; *grows* structures instead of constructing them.

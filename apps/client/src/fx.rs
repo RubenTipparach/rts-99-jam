@@ -260,6 +260,24 @@ impl Fx {
         );
     }
 
+    /// Aether motes around an Astromancer summoning gate (or a mending
+    /// Acolyte): cyan-white points of light drifting up off the rim, with a
+    /// soft pulsing glow. Re-fed every sim tick while the work lasts.
+    pub fn portal_motes(&mut self, pos: [f32; 3], spread: f32) {
+        let (jx, jz) = (self.jitter(), self.jitter());
+        // Spawn on the gate's rim, not its centre, so the ring reads.
+        let l = (jx * jx + jz * jz).sqrt().max(0.001);
+        let p = [
+            pos[0] + jx / l * spread,
+            pos[1] - 0.6,
+            pos[2] + jz / l * spread,
+        ];
+        self.burst(p, [0.55, 0.85, 1.0], 1, 0.8, 1.1, 0.2, -0.06);
+        if self.jitter() > 0.55 {
+            self.light(p, 6.0, [0.35, 0.65, 0.95], 0.12);
+        }
+    }
+
     /// A carbon geyser's ambient plume: slow wisps of green gas climbing out
     /// of the vent. Called with a jittered cadence per visible node.
     pub fn geyser_smoke(&mut self, pos: [f32; 3]) {

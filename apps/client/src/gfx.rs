@@ -1006,6 +1006,64 @@ fn heavy_mesh() -> Vec<UnitVertex> {
 
 /// Opaque dark walls around the map rim, from above the water down past the
 /// seabed, so you don't see under the (translucent) water at the edges. Drawn
+/// Astromancer Ward: a levitating concrete monolith (the faction's turret).
+/// A small anchor pad stays grounded; the carved stone hovers a clear gap
+/// above it, gold-banded, with a team-tinted aether crystal at the crown and
+/// the firing prong on the -z face (the swivel convention).
+fn ward_mesh_astro() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let rock = [0.52, 0.51, 0.48];
+    let rock_dk = [0.38, 0.37, 0.35];
+    let gold = [0.78, 0.65, 0.35];
+    let team = [0.5, 0.5, 0.5];
+    // Grounded anchor pad.
+    push_frustum(
+        &mut m, 0.0, 0.0, 1.7, 1.3, 0.0, 0.4, rock_dk, 0.0, 6, 0.0, true,
+    );
+    // The hovering monolith (clear gap from 0.4 to 1.4).
+    push_frustum(
+        &mut m, 0.0, 0.0, 2.4, 1.9, 1.4, 4.4, rock, 0.0, 6, 0.0, false,
+    );
+    push_frustum(
+        &mut m, 0.0, 0.0, 1.9, 1.0, 4.4, 6.2, rock_dk, 0.0, 6, 0.0, false,
+    );
+    // Gold waistband + crowning team crystal.
+    push_prism(&mut m, 0.0, 0.0, 2.0, 2.9, 3.3, gold, 0.0, 6, 0.0, false);
+    push_pyramid(&mut m, 0.0, 0.0, 0.9, 6.2, 7.4, team, 1.0, 5, 0.0);
+    // The aether prong fires toward -z.
+    push_box(
+        &mut m,
+        [-0.25, 3.5, -3.2],
+        [0.25, 4.0, -1.7],
+        [0.85, 0.95, 1.0],
+        0.0,
+    );
+    m
+}
+
+/// Astromancer Depot: levitating concrete storage slabs - two carved blocks
+/// hovering stacked above a grounded pad, ringed by a gold band, with a
+/// small team beacon on top.
+fn supply_mesh_astro() -> Vec<UnitVertex> {
+    let mut m = Vec::new();
+    let rock = [0.55, 0.54, 0.51];
+    let rock_dk = [0.40, 0.39, 0.37];
+    let gold = [0.78, 0.65, 0.35];
+    let team = [0.5, 0.5, 0.5];
+    // Grounded anchor pad.
+    push_frustum(
+        &mut m, 0.0, 0.0, 2.2, 1.8, 0.0, 0.4, rock_dk, 0.0, 6, 0.0, true,
+    );
+    // Main slab hovers over a clear gap; a smaller slab floats above it.
+    push_box(&mut m, [-2.6, 1.2, -2.2], [2.6, 2.8, 2.2], rock, 0.0);
+    push_box(&mut m, [-1.8, 3.4, -1.5], [1.8, 4.4, 1.5], rock_dk, 0.0);
+    // Gold band around the main slab's waist.
+    push_box(&mut m, [-2.7, 1.9, -2.3], [2.7, 2.15, 2.3], gold, 0.0);
+    // Team beacon.
+    push_pyramid(&mut m, 0.0, 0.0, 0.5, 4.4, 5.2, team, 1.0, 5, 0.0);
+    m
+}
+
 /// with the unit pipeline via an identity instance.
 fn water_walls() -> Vec<UnitVertex> {
     let mut m = Vec::new();
@@ -1208,6 +1266,10 @@ pub struct Gfx {
     turret_len: u32,
     supply_buf: wgpu::Buffer,
     supply_len: u32,
+    ward_astro_buf: wgpu::Buffer,
+    ward_astro_len: u32,
+    supply_astro_buf: wgpu::Buffer,
+    supply_astro_len: u32,
     particle_buf: wgpu::Buffer,
     particle_len: u32,
     heavy_buf: wgpu::Buffer,
@@ -1800,6 +1862,18 @@ impl Gfx {
             bytemuck::cast_slice(&supply),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
+        let ward_astro = ward_mesh_astro();
+        let ward_astro_buf = mkbuf(
+            "ward-astro",
+            bytemuck::cast_slice(&ward_astro),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let supply_astro = supply_mesh_astro();
+        let supply_astro_buf = mkbuf(
+            "supply-astro",
+            bytemuck::cast_slice(&supply_astro),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let particle = particle_mesh();
         let particle_buf = mkbuf(
             "particle",
@@ -1891,6 +1965,10 @@ impl Gfx {
             turret_len: turret.len() as u32,
             supply_buf,
             supply_len: supply.len() as u32,
+            ward_astro_buf,
+            ward_astro_len: ward_astro.len() as u32,
+            supply_astro_buf,
+            supply_astro_len: supply_astro.len() as u32,
             particle_buf,
             particle_len: particle.len() as u32,
             heavy_buf,
@@ -2074,6 +2152,8 @@ impl Gfx {
         heavies: &[InstanceRaw],
         turrets: &[InstanceRaw],
         supplies: &[InstanceRaw],
+        wards_astro: &[InstanceRaw],
+        supplies_astro: &[InstanceRaw],
         barrels: &[InstanceRaw],
         particles: &[InstanceRaw],
         ore_crystals: &[InstanceRaw],
@@ -2103,19 +2183,22 @@ impl Gfx {
             heavies.len(),
             turrets.len(),
             supplies.len(),
+            wards_astro.len(),
+            supplies_astro.len(),
             barrels.len(),
             particles.len(),
             ore_crystals.len(),
             carbon_pools.len(),
         ];
         // Clamp each group's count so the running total never exceeds the buffer.
-        let mut counts = [0usize; 16];
+        let mut counts = [0usize; 18];
         let mut used = 0usize;
         for (c, &g) in counts.iter_mut().zip(groups.iter()) {
             *c = g.min(MAX_INSTANCES - used);
             used += *c;
         }
-        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr, nsp, nbr, npt, noc, ncp] = counts;
+        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr, nsp, nwa, nsa, nbr, npt, noc, ncp] =
+            counts;
         let ring_verts = ring_decals(rings);
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
         let mut light_pos = [[0.0f32; 4]; MAX_LIGHTS];
@@ -2172,6 +2255,8 @@ impl Gfx {
             &heavies[..nhv],
             &turrets[..ntr],
             &supplies[..nsp],
+            &wards_astro[..nwa],
+            &supplies_astro[..nsa],
             &barrels[..nbr],
             &particles[..npt],
             &ore_crystals[..noc],
@@ -2277,6 +2362,8 @@ impl Gfx {
                     (&self.heavy_buf, self.heavy_len, nhv),
                     (&self.turret_buf, self.turret_len, ntr),
                     (&self.supply_buf, self.supply_len, nsp),
+                    (&self.ward_astro_buf, self.ward_astro_len, nwa),
+                    (&self.supply_astro_buf, self.supply_astro_len, nsa),
                     (&self.barrel_buf, self.barrel_len, nbr),
                     (&self.particle_buf, self.particle_len, npt),
                 ];
@@ -2392,6 +2479,8 @@ mod tests {
         check_mesh(&barrel_mesh(), "barrel");
         check_mesh(&turret_mesh(), "turret");
         check_mesh(&supply_mesh(), "supply");
+        check_mesh(&ward_mesh_astro(), "ward-astro");
+        check_mesh(&supply_mesh_astro(), "supply-astro");
         check_mesh(&particle_mesh(), "particle");
         check_mesh(&heavy_mesh(), "heavy");
     }
@@ -2523,6 +2612,58 @@ mod tests {
             let img = rasterize(&mesh, team, 560, 640);
             img.save(format!("target/previews/{name}.png")).unwrap();
         }
+    }
+
+    /// Renders the Astromancer concept lineup (Spire, Sanctum, Ward,
+    /// Acolyte side by side over the faction palette) to
+    /// `target/previews/astromancers-concept.png`. A dev tool for
+    /// `docs/factions/astromancers.md`; run on demand with
+    /// `cargo test -p client render_astromancer_concept -- --ignored`.
+    #[test]
+    #[ignore = "writes the concept sheet to target/previews; run on demand"]
+    fn render_astromancer_concept() {
+        let team = [0.25, 0.55, 1.0];
+        let jobs: [(Vec<UnitVertex>, u32); 4] = [
+            (hq_mesh_astro(), 360),
+            (barracks_mesh_astro(), 330),
+            (turret_mesh(), 250),
+            (acolyte_mesh(), 210),
+        ];
+        let (w, h) = (1280u32, 580u32);
+        let mut sheet = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 14, 24, 255]));
+        let mut x = 24u32;
+        for (mesh, size) in jobs {
+            let img = rasterize(&mesh, team, size, 440);
+            for (px, py, p) in img.enumerate_pixels() {
+                if p[3] > 0 && x + px < w {
+                    sheet.put_pixel(x + px, 30 + py, *p);
+                }
+            }
+            x += size + 24;
+        }
+        // The faction palette: porcelain shell, indigo shadow, aether cyan,
+        // auric gold, team accent.
+        let swatches = [
+            [233u8, 229, 222],
+            [26, 32, 54],
+            [140, 230, 255],
+            [196, 160, 84],
+            [64, 140, 255],
+        ];
+        for (i, c) in swatches.iter().enumerate() {
+            for yy in 0..48u32 {
+                for xx in 0..110u32 {
+                    let sx = 24 + i as u32 * 122 + xx;
+                    if sx < w {
+                        sheet.put_pixel(sx, h - 72 + yy, image::Rgba([c[0], c[1], c[2], 255]));
+                    }
+                }
+            }
+        }
+        std::fs::create_dir_all("target/previews").unwrap();
+        sheet
+            .save("target/previews/astromancers-concept.png")
+            .unwrap();
     }
 
     /// Renders a small icon PNG of every unit and building mesh to

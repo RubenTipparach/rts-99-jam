@@ -71,6 +71,9 @@ pub enum Command {
     SpawnResource { kind: ResourceKind, x: Fx, y: Fx },
     /// Send a worker to harvest a resource node (mine, then return to deposit).
     Harvest { unit: u32, node: u32 },
+    /// Send a worker to repair a damaged friendly building (costs ore per
+    /// hit point restored).
+    Repair { unit: u32, target: u32 },
     /// Send a worker to construct a building at a point (costs ore on arrival).
     Build {
         unit: u32,
