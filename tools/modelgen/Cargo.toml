@@ -1,0 +1,9 @@
+[package]
+name = "modelgen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "One-time scaffolding tool: writes the unit/building/node meshes as static OBJ/MTL assets"
+
+[dependencies]

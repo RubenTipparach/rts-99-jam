@@ -27,6 +27,33 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
   except the root `CLAUDE.md` and `README` files (the root `readme.md`, plus
   conventional folder-level `README.md`s such as `assets/branding/README.md`).
 
+## Static, editable assets (hard requirement)
+
+- **Every content asset is a static file in a standard format**, editable
+  with ordinary content software: models are Wavefront OBJ/MTL (Blender),
+  textures are PNG (Photoshop), and future animation and sound assets must
+  follow suit (e.g. glTF clips; WAV/OGG for Audacity). Any request to
+  "generate a model / texture / animation / sound" means: create or update
+  the static asset file the engine loads - never geometry, pixels, or clips
+  baked into code. This applies retroactively to all assets.
+- **The checked-in asset file is the source of truth.** Generator scripts
+  (`tools/modelgen`, `assets/gen_textures.py`, `assets/worldgen/textures.py`)
+  are scaffolding for brand-new assets; re-running one overwrites hand
+  edits, so never regenerate an existing asset unless asked.
+- Unit/building/node models live in `assets/models/*.obj` + `.mtl`, loaded
+  by `apps/client/src/model.rs`. The MTL `Kd` is the color; the material
+  NAME carries the engine flags (`_t1` team tint, `_d0/_d1/_d2`
+  surface-detail channel) - see `assets/models/README.md`. Scaffold a new
+  model with `cargo run -p modelgen`.
+- Animations are static assets too: walk cycles are OBJ keyframe
+  sequences (`assets/models/<unit>-walk-<k>.obj`, idle + 8 frames) the
+  renderer plays back by frame bucket; edit individual frames in Blender.
+  Pure positioning motion (hover bob, eased facing rotation, construction
+  rise, fx particles) is engine behavior, not an asset.
+- Engine geometry that is parametric to the running map (the water rim
+  walls), bare fx primitives (the particle cube), and runtime-generated
+  state (the fog-of-war field) are not content assets and stay in code.
+
 ## Determinism rules (do not break these)
 
 - **No floats and no nondeterminism in the sim crates.** CI greps

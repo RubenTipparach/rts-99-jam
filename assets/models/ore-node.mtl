@@ -1,0 +1,8 @@
+# ore-node.mtl - colors are editable; KEEP the material names,
+# the engine reads the _t/_d flags from them.
+newmtl m2b3340_t0_d1
+Kd 0.1700 0.2000 0.2500
+newmtl m475261_t0_d1
+Kd 0.2800 0.3200 0.3800
+newmtl m5c697a_t0_d1
+Kd 0.3600 0.4100 0.4800

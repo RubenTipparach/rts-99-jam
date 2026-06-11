@@ -261,6 +261,28 @@ fn fs_water(in: WaterOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, alpha);
 }
 
+// group 3 (unit/building pipeline only): the model surface-detail map,
+// triplanar-sampled in OBJECT space (the meshes have no UVs), so units and
+// buildings read as textured and the texture rides the model as it moves
+// and turns. Two materials share the tile: R = plate/masonry (panel seams,
+// rivets, scratches), G = organic rock/dirt grain (no straight lines). The
+// per-vertex `detail` selector picks one - or none, for things that must
+// stay flat shaded (crystals, gas pools, fx particles).
+@group(3) @binding(0) var t_detail: texture_2d<f32>;
+@group(3) @binding(1) var samp_detail: sampler;
+
+// Triplanar sample of the detail map by the local-space normal. Explicit
+// LOD so it is safe after non-uniform control flow (the mode early-outs).
+fn detail_at(p: vec3<f32>, n: vec3<f32>) -> vec2<f32> {
+    var w = pow(abs(n), vec3<f32>(4.0));
+    w = w / max(w.x + w.y + w.z, 0.001);
+    let s = 0.45;
+    let cx = textureSampleLevel(t_detail, samp_detail, p.zy * s, 0.0).rg;
+    let cy = textureSampleLevel(t_detail, samp_detail, p.xz * s, 0.0).rg;
+    let cz = textureSampleLevel(t_detail, samp_detail, p.xy * s, 0.0).rg;
+    return cx * w.x + cy * w.y + cz * w.z;
+}
+
 // ---------------- units / buildings ----------------
 // The instance tint's alpha selects a render mode:
 //   < 0     crystal (glassy resource node: fresnel rim, glint, screen-door body)
@@ -275,33 +297,28 @@ struct UnitOut {
     @location(2) mode: f32,
     @location(3) world: vec3<f32>,
     @location(4) plight: vec3<f32>,
+    /// Model-space position (scaled + yawed, before the world offset), the
+    /// anchor for the triplanar detail texture.
+    @location(5) local: vec3<f32>,
+    /// Detail material selector: 0 flat, 1 organic rock grain, 2 plate.
+    @location(6) det: f32,
 };
 @vertex
 fn vs_unit(
     @location(0) pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(5) mcol: vec4<f32>,
+    @location(8) mdet: f32,
     @location(2) offset: vec3<f32>,
     @location(3) scale: vec3<f32>,
     @location(4) tcol: vec4<f32>,
     @location(6) rot: vec2<f32>,
-    @location(7) anim: vec2<f32>,
 ) -> UnitOut {
     var o: UnitOut;
-    // Procedural walk: geometry near the ground (the legs) swings fore-aft
-    // along the mesh's facing axis (z), the left and right sides in
-    // counter-phase, with a small lift on the stepping foot. anim = (phase,
-    // amplitude); buildings and idle units pass amplitude 0.
-    var ap = pos;
-    if (anim.y > 0.0) {
-        let side = select(3.14159, 0.0, pos.x >= 0.0);
-        let foot = clamp(1.0 - pos.y / 1.3, 0.0, 1.0);
-        let swing = sin(anim.x + side);
-        ap.z = ap.z + swing * anim.y * foot;
-        ap.y = ap.y + max(swing, 0.0) * anim.y * 0.45 * foot;
-    }
+    // Walk cycles are baked OBJ keyframe assets (assets/models/<unit>-walk-*),
+    // drawn per frame bucket; the shader applies no procedural animation.
     // Yaw the mesh (and its normal) by the instance facing: rot = (cos, sin).
-    let sp = ap * scale;
+    let sp = pos * scale;
     let rp = vec3<f32>(sp.x * rot.x + sp.z * rot.y, sp.y, -sp.x * rot.y + sp.z * rot.x);
     let rn = vec3<f32>(
         normal.x * rot.x + normal.z * rot.y,
@@ -317,6 +334,8 @@ fn vs_unit(
     albedo = mix(albedo, albedo * 1.25 + vec3<f32>(0.05, 0.18, 0.07), sel);
     o.albedo = albedo;
     o.mode = tcol.a;
+    o.local = rp;
+    o.det = mdet;
     let world = rp + offset;
     o.world = world;
     o.plight = point_lights(world, normalize(rn));
@@ -354,9 +373,18 @@ fn fs_unit(in: UnitOut) -> @location(0) vec4<f32> {
         return vec4<f32>(in.albedo * (1.1 * scan), 1.0);
     }
     let n = normalize(in.normal);
+    // Surface detail: the selected channel turns into a brightness
+    // multiplier around 1.0 (the tile is authored around mid-grey; sRGB
+    // decode puts that at ~0.214, so 0.70 + 1.40 * d is neutral there).
+    // Selector 0 keeps the surface flat shaded.
+    var det = 1.0;
+    if (in.det > 0.5) {
+        let d = detail_at(in.local, n);
+        det = 0.70 + 1.40 * select(d.y, d.x, in.det > 1.5);
+    }
     let ndl = max(dot(n, normalize(cam.light_dir.xyz)), 0.0);
     let lit = 0.45 + 0.7 * ndl;
-    let col = in.albedo * (vec3<f32>(lit, lit, lit) + in.plight);
+    let col = in.albedo * det * (vec3<f32>(lit, lit, lit) + in.plight);
     return vec4<f32>(col, 1.0);
 }
 

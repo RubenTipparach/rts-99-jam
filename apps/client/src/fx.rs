@@ -9,7 +9,7 @@
 //! Pure floats, pure cosmetics: nothing here feeds back into the sim. The
 //! internal RNG is just a frame-local jitter source.
 
-use crate::gfx::{FxLight, InstanceRaw, ANIM_NONE, MAX_LIGHTS, ROT_NONE};
+use crate::gfx::{FxLight, InstanceRaw, MAX_LIGHTS, ROT_NONE};
 
 const MAX_PARTICLES: usize = 4096;
 const GRAVITY: f32 = -22.0;
@@ -341,7 +341,6 @@ impl Fx {
                     },
                     color: [col[0], col[1], col[2], 3.0 + t],
                     rot: q.rot,
-                    anim: ANIM_NONE,
                 }
             })
             .collect()

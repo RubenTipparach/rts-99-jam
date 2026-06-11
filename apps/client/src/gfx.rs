@@ -14,16 +14,17 @@ pub struct InstanceRaw {
     pub color: [f32; 4],
     /// Yaw about +Y as `(cos, sin)`; `ROT_NONE` leaves the mesh unrotated.
     pub rot: [f32; 2],
-    /// Procedural walk cycle as `(phase, amplitude)`: the vertex shader
-    /// swings geometry near the ground (legs) along the facing axis, the two
-    /// sides in counter-phase. `ANIM_NONE` for buildings and idle units.
-    pub anim: [f32; 2],
 }
 
 /// Identity rotation for [`InstanceRaw::rot`].
 pub const ROT_NONE: [f32; 2] = [1.0, 0.0];
-/// No walk cycle for [`InstanceRaw::anim`].
-pub const ANIM_NONE: [f32; 2] = [0.0, 0.0];
+
+/// Baked walk-cycle keyframes per walking unit: static OBJ assets
+/// (`assets/models/<unit>-walk-<k>.obj`) covering one full gait cycle.
+pub const WALK_FRAMES: usize = 8;
+/// Instance buckets per walking kind: the idle base model plus each
+/// walk keyframe. Instances snap to the nearest frame (no interpolation).
+pub const WALK_BUCKETS: usize = WALK_FRAMES + 1;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -57,12 +58,30 @@ struct Vertex3 {
 
 /// A unit/building mesh vertex. `color.rgb` is the material color; `color.a` is
 /// the team-tint weight (0 = keep material, 1 = full faction color).
+/// `detail` selects the surface-detail texture: [`DETAIL_FLAT`] for things
+/// that must stay flat shaded (crystals, gas, glow), [`DETAIL_ROCK`] for
+/// organic rock/dirt grain, [`DETAIL_PLATE`] for plate/masonry seams.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct UnitVertex {
-    pos: [f32; 3],
-    normal: [f32; 3],
-    color: [f32; 4],
+pub(crate) struct UnitVertex {
+    pub(crate) pos: [f32; 3],
+    pub(crate) normal: [f32; 3],
+    pub(crate) color: [f32; 4],
+    pub(crate) detail: f32,
+}
+
+/// No surface detail: flat shaded (crystals, gas pools, fx particles).
+pub(crate) const DETAIL_FLAT: f32 = 0.0;
+/// Organic grain (green channel of the detail map): rock, dirt, scree.
+pub(crate) const DETAIL_ROCK: f32 = 1.0;
+/// Plate/masonry seams (red channel): metal hulls and carved stone.
+pub(crate) const DETAIL_PLATE: f32 = 2.0;
+
+/// Tag every vertex with a detail-map selector (meshes default to plate).
+fn set_detail(m: &mut [UnitVertex], d: f32) {
+    for v in m {
+        v.detail = d;
+    }
 }
 
 #[repr(C)]
@@ -121,11 +140,68 @@ const MAX_RING_VERTS: usize = MAX_RINGS * RING_SEGMENTS * 6;
 pub const FOW_RES: usize = 256;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-// --- low-poly mesh building (vertex-colored, flat-shaded) ---------------------
+// --- model assets --------------------------------------------------------
 //
-// Meshes are composed from boxes and a gable roof. Face normals are computed and
-// oriented outward from the primitive's center, so winding never matters (the
-// unit pipeline doesn't cull) and lighting is always correct.
+// All unit/building/node models are STATIC Wavefront OBJ/MTL assets under
+// assets/models/, edited in Blender (conventions in assets/models/README.md)
+// and parsed by `crate::model`. A brand-new model is scaffolded once with
+// `cargo run -p modelgen`; after that the checked-in file is the source of
+// truth. Only geometry parametric to the running map (the water rim walls)
+// and the fx particle cube are still built in code, from boxes whose face
+// normals point outward from the box center (the unit pipeline doesn't
+// cull, so winding never matters and lighting is always correct).
+
+/// Load a static model asset (baked into the binary for the web build).
+macro_rules! model {
+    ($name:expr) => {
+        crate::model::load(
+            include_str!(concat!("../../../assets/models/", $name, ".obj")),
+            include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+        )
+    };
+}
+
+/// Load a walking unit's animation set: the idle base model followed by its
+/// baked walk keyframes (all sharing the base model's MTL).
+macro_rules! walk_models {
+    ($name:literal) => {
+        vec![
+            model!($name),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-0.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-1.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-2.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-3.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-4.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-5.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-6.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-walk-7.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+        ]
+    };
+}
 
 fn v_sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -170,6 +246,7 @@ fn push_tri(
             pos: p,
             normal: n,
             color,
+            detail: DETAIL_PLATE,
         });
     }
 }
@@ -254,696 +331,6 @@ fn push_box(out: &mut Vec<UnitVertex>, min: [f32; 3], max: [f32; 3], rgb: [f32; 
     ); // -y
 }
 
-/// A gable roof: ridge along x, eaves at `base_y`, peak at `base_y + peak_h`.
-#[allow(clippy::too_many_arguments)]
-fn push_roof(
-    out: &mut Vec<UnitVertex>,
-    cx: f32,
-    cz: f32,
-    hx: f32,
-    hz: f32,
-    base_y: f32,
-    peak_h: f32,
-    rgb: [f32; 3],
-) {
-    let peak = base_y + peak_h;
-    let c = [cx, base_y + peak_h * 0.5, cz];
-    let col = [rgb[0], rgb[1], rgb[2], 0.0];
-    let ra = [cx - hx, peak, cz];
-    let rb = [cx + hx, peak, cz];
-    let fl = [cx - hx, base_y, cz + hz];
-    let fr = [cx + hx, base_y, cz + hz];
-    let bl = [cx - hx, base_y, cz - hz];
-    let br = [cx + hx, base_y, cz - hz];
-    push_quad(out, ra, rb, fr, fl, c, col); // front slope
-    push_quad(out, ra, rb, br, bl, c, col); // back slope
-    push_tri(out, ra, fl, bl, c, col); // gable -x
-    push_tri(out, rb, fr, br, c, col); // gable +x
-}
-
-/// A horizontal ring of `n` points (a regular polygon) at height `y`.
-fn poly_ring(n: usize, cx: f32, cz: f32, r: f32, y: f32, rot: f32) -> Vec<[f32; 3]> {
-    (0..n)
-        .map(|k| {
-            let a = rot + std::f32::consts::TAU * k as f32 / n as f32;
-            [cx + r * a.cos(), y, cz + r * a.sin()]
-        })
-        .collect()
-}
-
-/// A vertical n-gon prism (cylinder-ish) from `y0` to `y1`, optional top cap.
-#[allow(clippy::too_many_arguments)]
-fn push_prism(
-    out: &mut Vec<UnitVertex>,
-    cx: f32,
-    cz: f32,
-    r: f32,
-    y0: f32,
-    y1: f32,
-    rgb: [f32; 3],
-    team: f32,
-    n: usize,
-    rot: f32,
-    top: bool,
-) {
-    let center = [cx, (y0 + y1) * 0.5, cz];
-    let col = [rgb[0], rgb[1], rgb[2], team];
-    let lo = poly_ring(n, cx, cz, r, y0, rot);
-    let hi = poly_ring(n, cx, cz, r, y1, rot);
-    for k in 0..n {
-        let j = (k + 1) % n;
-        push_quad(out, lo[k], lo[j], hi[j], hi[k], center, col);
-    }
-    if top {
-        let cap = [cx, y1, cz];
-        for k in 0..n {
-            let j = (k + 1) % n;
-            push_tri(out, hi[k], hi[j], cap, center, col);
-        }
-    }
-}
-
-/// A tapered n-gon frustum from radius `r0`@`y0` to `r1`@`y1`, optional top cap.
-#[allow(clippy::too_many_arguments)]
-fn push_frustum(
-    out: &mut Vec<UnitVertex>,
-    cx: f32,
-    cz: f32,
-    r0: f32,
-    r1: f32,
-    y0: f32,
-    y1: f32,
-    rgb: [f32; 3],
-    team: f32,
-    n: usize,
-    rot: f32,
-    top: bool,
-) {
-    let center = [cx, (y0 + y1) * 0.5, cz];
-    let col = [rgb[0], rgb[1], rgb[2], team];
-    let lo = poly_ring(n, cx, cz, r0, y0, rot);
-    let hi = poly_ring(n, cx, cz, r1, y1, rot);
-    for k in 0..n {
-        let j = (k + 1) % n;
-        push_quad(out, lo[k], lo[j], hi[j], hi[k], center, col);
-    }
-    if top {
-        let cap = [cx, y1, cz];
-        for k in 0..n {
-            let j = (k + 1) % n;
-            push_tri(out, hi[k], hi[j], cap, center, col);
-        }
-    }
-}
-
-/// An n-gon pyramid: base ring at `y0`, apex at `y1`.
-#[allow(clippy::too_many_arguments)]
-fn push_pyramid(
-    out: &mut Vec<UnitVertex>,
-    cx: f32,
-    cz: f32,
-    r: f32,
-    y0: f32,
-    y1: f32,
-    rgb: [f32; 3],
-    team: f32,
-    n: usize,
-    rot: f32,
-) {
-    let center = [cx, (y0 + y1) * 0.5, cz];
-    let col = [rgb[0], rgb[1], rgb[2], team];
-    let base = poly_ring(n, cx, cz, r, y0, rot);
-    let apex = [cx, y1, cz];
-    for k in 0..n {
-        let j = (k + 1) % n;
-        push_tri(out, base[k], base[j], apex, center, col);
-    }
-}
-
-/// A low-poly infantry soldier, ~2.4 units tall, facing -z.
-fn infantry_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let trousers = [0.20, 0.22, 0.27];
-    let leather = [0.45, 0.35, 0.27];
-    let skin = [0.80, 0.62, 0.48];
-    let metal = [0.54, 0.57, 0.64];
-    let wood = [0.40, 0.27, 0.16];
-    // Legs.
-    push_box(
-        &mut m,
-        [-0.34, 0.0, -0.25],
-        [-0.04, 0.95, 0.25],
-        trousers,
-        0.0,
-    );
-    push_box(
-        &mut m,
-        [0.04, 0.0, -0.25],
-        [0.34, 0.95, 0.25],
-        trousers,
-        0.0,
-    );
-    // Arms (under the pauldrons).
-    push_box(
-        &mut m,
-        [-0.5, 1.0, -0.18],
-        [-0.34, 1.52, 0.18],
-        leather,
-        0.0,
-    );
-    push_box(&mut m, [0.34, 1.0, -0.18], [0.5, 1.52, 0.18], leather, 0.0);
-    // Torso + shoulder pauldrons (team-colored tabard/armor).
-    push_box(
-        &mut m,
-        [-0.42, 0.92, -0.3],
-        [0.42, 1.72, 0.3],
-        [0.5, 0.5, 0.5],
-        1.0,
-    );
-    push_box(
-        &mut m,
-        [-0.52, 1.5, -0.28],
-        [-0.32, 1.72, 0.28],
-        [0.5, 0.5, 0.5],
-        1.0,
-    );
-    push_box(
-        &mut m,
-        [0.32, 1.5, -0.28],
-        [0.52, 1.72, 0.28],
-        [0.5, 0.5, 0.5],
-        1.0,
-    );
-    // Head + helmet + team plume.
-    push_box(&mut m, [-0.22, 1.72, -0.2], [0.22, 2.12, 0.2], skin, 0.0);
-    push_box(&mut m, [-0.26, 2.0, -0.24], [0.26, 2.26, 0.24], metal, 0.0);
-    push_box(
-        &mut m,
-        [-0.05, 2.26, -0.16],
-        [0.05, 2.58, 0.1],
-        [0.5, 0.5, 0.5],
-        1.0,
-    );
-    // Spear on the right side, tip above the head.
-    push_box(&mut m, [0.5, 0.2, 0.0], [0.6, 2.5, 0.12], wood, 0.0);
-    push_box(&mut m, [0.48, 2.46, -0.02], [0.62, 2.72, 0.14], metal, 0.0);
-    m
-}
-
-// Placeholder faction buildings (see assets/concepts/buildings.png and
-// docs/building-design-language.md). Authored at world scale, ~11 wide, facing
-// -z. The team-tint channel (a = 1.0) rides the faction's signature element: the
-// Astromancer core/spire and the Hollowmen banner/window.
-
-/// Astromancer production building: a grown, hovering faceted tower with a
-/// team-tinted energy core and a gold-tipped spire. A short root hangs in the
-/// air gap below so it reads as floating.
-fn barracks_mesh_astro() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let shell = [0.86, 0.84, 0.76];
-    let shell2 = [0.74, 0.72, 0.64];
-    let gold = [0.86, 0.75, 0.45];
-    let rot = std::f32::consts::FRAC_PI_8; // flat face toward -z
-                                           // Hanging grown root (does not touch the ground -> visible hover gap).
-    push_frustum(
-        &mut m, 0.0, 0.0, 4.0, 0.5, 1.6, 0.5, shell2, 0.0, 8, rot, false,
-    );
-    // Octagonal body, tapering, with a gold belt.
-    push_prism(&mut m, 0.0, 0.0, 4.4, 1.6, 5.0, shell, 0.0, 8, rot, false);
-    push_prism(&mut m, 0.0, 0.0, 4.5, 3.0, 3.5, gold, 0.0, 8, rot, false);
-    push_frustum(
-        &mut m, 0.0, 0.0, 4.4, 2.8, 5.0, 7.6, shell2, 0.0, 8, rot, false,
-    );
-    // Crowning spire + team-tinted energy core running up the middle.
-    push_pyramid(&mut m, 0.0, 0.0, 2.8, 7.6, 11.6, gold, 0.0, 8, rot);
-    push_prism(
-        &mut m,
-        0.0,
-        0.0,
-        1.2,
-        2.2,
-        8.2,
-        [0.5, 0.5, 0.5],
-        1.0,
-        6,
-        rot,
-        true,
-    );
-    // Two hovering shards flanking the door side (+z).
-    for sx in [-3.2_f32, 3.2] {
-        push_prism(&mut m, sx, 3.4, 0.5, 1.4, 2.4, shell, 0.0, 6, 0.0, false);
-        push_pyramid(&mut m, sx, 3.4, 0.5, 2.4, 3.4, [0.5, 0.5, 0.5], 1.0, 6, 0.0);
-    }
-    m
-}
-
-/// Hollowmen production building: a grounded, armored hangar with a sawtooth
-/// roof, a blast door, a smokestack, a roof turret (the built-in gun), a
-/// team-tinted window band, and a hazard skirt.
-fn barracks_mesh_hollow() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let steel = [0.46, 0.49, 0.53];
-    let steel2 = [0.58, 0.61, 0.65];
-    let dark = [0.24, 0.26, 0.30];
-    let haz = [0.80, 0.58, 0.20];
-    let gun = [0.17, 0.19, 0.22];
-    // Foundation slab + plated body.
-    push_box(&mut m, [-5.6, 0.0, -4.6], [5.6, 0.5, 4.6], dark, 0.0);
-    push_box(&mut m, [-5.2, 0.5, -4.2], [5.2, 4.0, 4.2], steel, 0.0);
-    push_box(&mut m, [-5.2, 0.5, -4.2], [5.2, 1.0, 4.2], haz, 0.0); // hazard skirt
-                                                                    // Sawtooth roof (three gables along x).
-    for cx in [-3.4_f32, 0.0, 3.4] {
-        push_roof(&mut m, cx, 0.0, 1.7, 4.4, 4.0, 1.4, steel2);
-    }
-    // Blast door + team-tinted window band on the +z face.
-    push_box(&mut m, [-1.6, 0.0, 4.15], [1.6, 2.8, 4.35], gun, 0.0);
-    push_box(&mut m, [-1.7, 0.2, 4.2], [1.7, 0.7, 4.4], haz, 0.0);
-    push_box(
-        &mut m,
-        [-4.6, 2.4, 4.2],
-        [-2.2, 3.2, 4.34],
-        [0.5, 0.5, 0.5],
-        1.0,
-    );
-    push_box(
-        &mut m,
-        [2.2, 2.4, 4.2],
-        [4.6, 3.2, 4.34],
-        [0.5, 0.5, 0.5],
-        1.0,
-    );
-    // Smokestack.
-    push_prism(&mut m, -4.0, -2.8, 0.7, 4.0, 7.2, steel2, 0.0, 6, 0.0, true);
-    push_prism(&mut m, -4.0, -2.8, 0.72, 6.8, 7.2, dark, 0.0, 6, 0.0, true);
-    // Roof turret with a barrel (the built-in gun).
-    push_box(&mut m, [2.4, 4.0, -1.0], [4.0, 5.0, 0.6], gun, 0.0);
-    push_box(&mut m, [2.9, 4.3, 0.5], [3.5, 4.7, 3.2], gun, 0.0);
-    m
-}
-
-/// Astromancer Spire (HQ): a tapered faceted tower on a hanging grown root,
-/// crowned by a gold spire over a team-tinted core, with small shards orbiting
-/// the base. The tallest structure in the colony (see
-/// docs/building-design-language.md).
-fn hq_mesh_astro() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let shell = [0.86, 0.84, 0.76];
-    let shell2 = [0.74, 0.72, 0.64];
-    let gold = [0.86, 0.75, 0.45];
-    let rot = std::f32::consts::FRAC_PI_8; // flat face toward -z
-                                           // Hanging grown root (visible hover gap).
-    push_frustum(
-        &mut m, 0.0, 0.0, 5.0, 0.7, 2.0, 0.6, shell2, 0.0, 8, rot, false,
-    );
-    // Broad grown base with a gold ceremonial belt.
-    push_frustum(
-        &mut m, 0.0, 0.0, 6.2, 4.6, 0.6, 3.6, shell, 0.0, 8, rot, false,
-    );
-    push_prism(&mut m, 0.0, 0.0, 4.7, 3.6, 4.4, gold, 0.0, 8, rot, false);
-    // Tapering faceted tower, two stages.
-    push_frustum(
-        &mut m, 0.0, 0.0, 4.3, 2.9, 4.4, 9.6, shell2, 0.0, 8, rot, false,
-    );
-    push_frustum(
-        &mut m, 0.0, 0.0, 2.9, 1.9, 9.6, 13.2, shell, 0.0, 8, rot, false,
-    );
-    // Gold crown ring + crowning spire.
-    push_prism(&mut m, 0.0, 0.0, 2.2, 13.2, 14.0, gold, 0.0, 8, rot, false);
-    push_pyramid(&mut m, 0.0, 0.0, 1.6, 14.0, 17.4, gold, 0.0, 8, rot);
-    // Team-tinted energy core running up the middle of the tower.
-    push_prism(
-        &mut m,
-        0.0,
-        0.0,
-        1.0,
-        1.6,
-        14.8,
-        [0.5, 0.5, 0.5],
-        1.0,
-        6,
-        rot,
-        true,
-    );
-    // Orbiting shards around the base, at uneven heights.
-    for (sx, sz, y0) in [(-4.8_f32, 2.6, 2.6), (5.0, 1.6, 3.4), (0.8, -5.4, 2.1)] {
-        push_prism(
-            &mut m,
-            sx,
-            sz,
-            0.55,
-            y0,
-            y0 + 1.6,
-            shell,
-            0.0,
-            6,
-            0.0,
-            false,
-        );
-        push_pyramid(
-            &mut m,
-            sx,
-            sz,
-            0.55,
-            y0 + 1.6,
-            y0 + 2.5,
-            [0.5, 0.5, 0.5],
-            1.0,
-            6,
-            0.0,
-        );
-    }
-    m
-}
-
-/// Hollowmen Command HQ: a broad armored block with angled corner armor, a
-/// raised control tower with a team-tinted window band, a roof turret (the
-/// built-in gun), an antenna mast, a hazard skirt, and a blast door (see
-/// docs/building-design-language.md).
-fn hq_mesh_hollow() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let steel = [0.46, 0.49, 0.53];
-    let steel2 = [0.58, 0.61, 0.65];
-    let dark = [0.24, 0.26, 0.30];
-    let haz = [0.80, 0.58, 0.20];
-    let gun = [0.17, 0.19, 0.22];
-    // Foundation slab + broad armored body + hazard skirt.
-    push_box(&mut m, [-6.4, 0.0, -5.4], [6.4, 0.5, 5.4], dark, 0.0);
-    push_box(&mut m, [-6.0, 0.5, -5.0], [6.0, 4.6, 5.0], steel, 0.0);
-    push_box(&mut m, [-6.0, 0.5, -5.0], [6.0, 1.0, 5.0], haz, 0.0);
-    // Angled corner armor (frustum wedges at the four corners).
-    for (sx, sz) in [(-4.9_f32, -3.9_f32), (4.9, -3.9), (-4.9, 3.9), (4.9, 3.9)] {
-        push_frustum(
-            &mut m,
-            sx,
-            sz,
-            1.7,
-            1.1,
-            0.5,
-            5.0,
-            steel2,
-            0.0,
-            4,
-            std::f32::consts::FRAC_PI_4,
-            true,
-        );
-    }
-    // Raised control tower with the team-tinted window band all around.
-    push_box(&mut m, [-2.6, 4.6, -2.2], [2.6, 7.6, 2.2], steel2, 0.0);
-    push_box(
-        &mut m,
-        [-2.7, 6.2, -2.3],
-        [2.7, 7.0, 2.3],
-        [0.5, 0.5, 0.5],
-        1.0,
-    );
-    push_box(&mut m, [-2.8, 7.6, -2.4], [2.8, 8.0, 2.4], dark, 0.0);
-    // Roof turret with a barrel (the built-in gun) on the deck.
-    push_box(&mut m, [3.2, 4.6, -1.4], [5.0, 5.8, 0.4], gun, 0.0);
-    push_box(&mut m, [3.7, 5.0, 0.3], [4.5, 5.5, 3.6], gun, 0.0);
-    // Antenna mast with a dish plate.
-    push_prism(&mut m, -4.4, -3.2, 0.22, 4.6, 10.4, dark, 0.0, 6, 0.0, true);
-    push_box(&mut m, [-5.0, 9.2, -3.5], [-3.8, 9.5, -2.9], steel2, 0.0);
-    // Blast door + hazard frame on the +z face.
-    push_box(&mut m, [-2.0, 0.0, 4.95], [2.0, 3.2, 5.15], gun, 0.0);
-    push_box(&mut m, [-2.2, 0.2, 5.0], [2.2, 0.7, 5.2], haz, 0.0);
-    m
-}
-
-// Placeholder faction workers (see assets/concepts/units_resources.png). ~2.7
-// tall, facing -z. Team tint rides the Astromancer focus-core and the Hollowmen
-// visor/shoulder. The Acolyte is authored to sit just above y=0 and is lifted
-// into a hover by the instance offset.
-
-/// Astromancer Acolyte: a grown automaton held together by magic instead of
-/// joints - the head, torso, pelvis pod, and bare forearms all hover with
-/// visible gaps between them (marionette-style), around a team-tinted core.
-/// Faces +z (eyes), like the Engineer's visor.
-fn acolyte_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let shell = [0.86, 0.84, 0.76];
-    let shell2 = [0.78, 0.76, 0.68];
-    let gold = [0.86, 0.75, 0.45];
-    let eyes = [0.55, 0.92, 0.86];
-    let team = [0.5, 0.5, 0.5];
-    // Pelvis pod: a small tapered keel, lowest floating segment.
-    push_frustum(
-        &mut m, 0.0, 0.0, 0.30, 0.16, 0.95, 0.40, shell2, 0.0, 6, 0.0, true,
-    );
-    // Team-tinted core, exposed in the gap between pelvis and chest.
-    push_prism(&mut m, 0.0, 0.0, 0.14, 1.02, 1.30, team, 1.0, 6, 0.3, true);
-    // Chest shell: a faceted barrel with a gold collar plate; clear gap below.
-    push_frustum(
-        &mut m, 0.0, 0.0, 0.26, 0.37, 1.38, 1.78, shell, 0.0, 6, 0.0, false,
-    );
-    push_frustum(
-        &mut m, 0.0, 0.0, 0.37, 0.26, 1.78, 2.08, shell, 0.0, 6, 0.0, false,
-    );
-    push_prism(&mut m, 0.0, 0.0, 0.27, 2.08, 2.17, gold, 0.0, 6, 0.0, true);
-    // Head: a separate capsule floating above the collar (visible neck gap),
-    // glowing eye band on the +z face.
-    push_frustum(
-        &mut m, 0.0, 0.0, 0.16, 0.20, 2.34, 2.56, shell, 0.0, 6, 0.0, false,
-    );
-    push_frustum(
-        &mut m, 0.0, 0.0, 0.20, 0.11, 2.56, 2.76, shell2, 0.0, 6, 0.0, true,
-    );
-    push_box(&mut m, [-0.13, 2.41, 0.16], [0.13, 2.51, 0.24], eyes, 0.0);
-    // Floating shoulder pods and bare forearms: no upper arms at all, the
-    // "joints" are just gaps held by magic. Gold cuff caps each forearm.
-    for sx in [-1.0_f32, 1.0] {
-        push_prism(
-            &mut m,
-            sx * 0.56,
-            0.0,
-            0.10,
-            1.94,
-            2.12,
-            gold,
-            0.0,
-            6,
-            0.0,
-            true,
-        );
-        push_box(
-            &mut m,
-            [sx * 0.56 - 0.10, 1.30, -0.10],
-            [sx * 0.56 + 0.10, 1.42, 0.10],
-            gold,
-            0.0,
-        );
-        push_box(
-            &mut m,
-            [sx * 0.58 - 0.09, 0.92, -0.09],
-            [sx * 0.58 + 0.09, 1.28, 0.09],
-            shell,
-            0.0,
-        );
-    }
-    m
-}
-
-/// Hollowmen Engineer: a stocky powered-armor worker with a team-tinted visor
-/// and shoulder, a hazard chest band, and a carried tool; walks, welds, drills.
-fn engineer_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let steel = [0.48, 0.51, 0.55];
-    let steel2 = [0.60, 0.63, 0.67];
-    let dark = [0.24, 0.26, 0.30];
-    let haz = [0.80, 0.58, 0.20];
-    let amber = [0.95, 0.75, 0.35];
-    let gun = [0.17, 0.19, 0.22];
-    let team = [0.5, 0.5, 0.5];
-    // Legs + boots (neutral stance).
-    push_box(&mut m, [-0.34, 0.0, -0.32], [-0.06, 0.66, 0.10], dark, 0.0);
-    push_box(&mut m, [0.06, 0.0, -0.10], [0.34, 0.66, 0.32], dark, 0.0);
-    push_box(&mut m, [-0.36, 0.0, -0.34], [-0.04, 0.12, 0.28], gun, 0.0);
-    push_box(&mut m, [0.04, 0.0, -0.12], [0.36, 0.12, 0.50], gun, 0.0);
-    // Torso + hazard chest band.
-    push_box(&mut m, [-0.44, 0.66, -0.34], [0.44, 1.50, 0.34], steel, 0.0);
-    push_box(&mut m, [-0.44, 1.00, -0.34], [0.44, 1.18, 0.36], haz, 0.0);
-    // Backpack + glowing vent.
-    push_box(&mut m, [-0.34, 0.80, -0.56], [0.34, 1.46, -0.34], dark, 0.0);
-    push_box(
-        &mut m,
-        [-0.24, 1.20, -0.60],
-        [0.24, 1.40, -0.54],
-        amber,
-        0.0,
-    );
-    // Head + team-tinted visor + crown.
-    push_box(
-        &mut m,
-        [-0.26, 1.50, -0.24],
-        [0.26, 1.98, 0.24],
-        steel2,
-        0.0,
-    );
-    push_box(&mut m, [-0.26, 1.66, 0.22], [0.26, 1.84, 0.30], team, 1.0);
-    push_box(&mut m, [-0.30, 1.96, -0.26], [0.30, 2.06, 0.26], dark, 0.0);
-    // Arms + carried tool + team shoulder pad.
-    push_box(
-        &mut m,
-        [-0.62, 0.80, -0.16],
-        [-0.44, 1.46, 0.16],
-        steel,
-        0.0,
-    );
-    push_box(&mut m, [0.44, 0.80, -0.16], [0.62, 1.46, 0.16], steel, 0.0);
-    push_box(&mut m, [0.46, 0.74, 0.0], [0.60, 1.00, 0.50], gun, 0.0);
-    push_box(&mut m, [-0.62, 1.36, -0.18], [-0.42, 1.54, 0.18], team, 1.0);
-    m
-}
-
-// Neutral resource nodes (see assets/concepts/units_resources.png). Never team
-// tinted. Authored at world scale; ~6 units across so they read as map features.
-
-/// Ore: a cluster of bright, faceted crystals erupting from a dark rock base.
-/// "Shininess" is faked with near-white tips and bright inner cores (the
-/// flat-shaded pipeline has no real translucency).
-/// Ore node, opaque part: just the rock pedestal. The crystal shards render
-/// separately through the blended crystal pipeline (`ore_crystal_mesh`).
-fn ore_node_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let rock = [0.28, 0.32, 0.38];
-    let rock_dk = [0.17, 0.20, 0.25];
-    push_frustum(
-        &mut m, 0.0, 0.0, 3.4, 2.6, 0.0, 1.0, rock_dk, 0.0, 7, 0.0, true,
-    );
-    // Solid rocky heart filling the bowl: the shards erupt from rock, and a
-    // sightline through a translucent shard lands on stone instead of
-    // passing through a hollow mound to the terrain behind it.
-    push_frustum(
-        &mut m, 0.0, 0.0, 2.4, 1.4, 1.0, 1.5, rock, 0.0, 7, 0.0, true,
-    );
-    m
-}
-
-/// The ore crystal shards: drawn alpha-blended with env reflections
-/// (Warcraft 3 style), riding the same instance transform as the rock base.
-/// Also reused tiny (scaled down) as the load a hauling worker carries.
-fn ore_crystal_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let body = [0.47, 0.84, 0.92];
-    let body2 = [0.36, 0.74, 0.86];
-    let core = [0.82, 0.97, 1.0];
-    // (cx, cz, r, height, body color)
-    let shards = [
-        (0.0, 0.0, 1.2, 5.4, body),
-        (1.7, 0.7, 0.8, 3.4, body2),
-        (-1.4, 1.1, 0.7, 3.0, body),
-        (0.8, -1.6, 0.6, 2.6, body2),
-        (-1.1, -1.1, 0.5, 2.0, body),
-    ];
-    for (cx, cz, r, hgt, col) in shards {
-        let y0 = 0.4;
-        let ymid = y0 + hgt * 0.55;
-        let ytip = y0 + hgt;
-        push_prism(&mut m, cx, cz, r, y0, ymid, col, 0.0, 5, 0.0, false);
-        push_pyramid(&mut m, cx, cz, r, ymid, ytip, core, 0.0, 5, 0.0);
-    }
-    m
-}
-
-/// Carbon node, opaque part: the vented rock mound. The glowing gas pool in
-/// the crater renders through the blended crystal pipeline
-/// (`carbon_pool_mesh`), and the rising green smoke is an fx emitter.
-fn carbon_node_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let vent = [0.21, 0.25, 0.23];
-    let vent_dk = [0.13, 0.16, 0.15];
-    push_frustum(
-        &mut m, 0.0, 0.0, 4.0, 3.0, 0.0, 1.6, vent_dk, 0.0, 8, 0.0, false,
-    );
-    // Capped: the translucent gas pool sits right on this rim, so the
-    // throat must read as solid rock through it, not a hollow shell.
-    push_frustum(
-        &mut m, 0.0, 0.0, 3.0, 2.2, 1.6, 3.0, vent, 0.0, 8, 0.0, true,
-    );
-    // Crooked vent rocks around the rim.
-    for (cx, cz) in [(2.2, 0.8), (-1.4, 2.0), (-2.0, -1.4), (1.2, -2.0)] {
-        push_box(
-            &mut m,
-            [cx - 0.55, 0.8, cz - 0.55],
-            [cx + 0.55, 2.2 + 0.18 * cx, cz + 0.55],
-            vent,
-            0.0,
-        );
-    }
-    m
-}
-
-/// The glowing gas pool capping a carbon geyser: a shallow translucent dome,
-/// blended like the crystals so it reads as liquid light.
-fn carbon_pool_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let glow = [0.50, 0.95, 0.60];
-    let glow_core = [0.80, 1.0, 0.84];
-    push_prism(&mut m, 0.0, 0.0, 1.9, 3.0, 3.2, glow, 0.0, 8, 0.0, true);
-    push_prism(
-        &mut m, 0.0, 0.0, 1.3, 3.1, 3.35, glow_core, 0.0, 8, 0.0, true,
-    );
-    m
-}
-
-/// The barrel of green sludge a worker hauls home from a carbon geyser.
-/// Authored tiny at the origin; the instance places it on the carrier.
-fn barrel_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let drum = [0.30, 0.42, 0.32];
-    let band = [0.18, 0.22, 0.20];
-    let sludge = [0.55, 0.95, 0.50];
-    push_prism(&mut m, 0.0, 0.0, 0.45, 0.0, 1.0, drum, 0.0, 6, 0.0, false);
-    push_prism(&mut m, 0.0, 0.0, 0.49, 0.40, 0.62, band, 0.0, 6, 0.0, false);
-    push_prism(&mut m, 0.0, 0.0, 0.38, 1.0, 1.10, sludge, 0.0, 6, 0.0, true);
-    m
-}
-
-/// Defensive turret: an octagonal armoured base, a team-tinted housing, and a
-/// raised twin-barrel cannon. Authored at world scale, ~5 wide, facing -z.
-fn turret_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let steel = [0.40, 0.43, 0.48];
-    let dark = [0.22, 0.24, 0.28];
-    let gun = [0.16, 0.18, 0.21];
-    let team = [0.5, 0.5, 0.5];
-    // Footing + plated base.
-    push_frustum(
-        &mut m, 0.0, 0.0, 2.6, 2.1, 0.0, 0.6, dark, 0.0, 8, 0.0, true,
-    );
-    push_prism(&mut m, 0.0, 0.0, 2.0, 0.6, 1.9, steel, 0.0, 8, 0.0, true);
-    // Team-tinted rotating housing.
-    push_prism(&mut m, 0.0, 0.0, 1.5, 1.9, 3.0, team, 1.0, 6, 0.0, true);
-    // Twin barrels pointing -z.
-    for sx in [-0.55_f32, 0.25] {
-        push_box(&mut m, [sx, 2.2, -3.4], [sx + 0.3, 2.6, 0.4], gun, 0.0);
-    }
-    push_box(&mut m, [-0.9, 2.0, 0.2], [0.9, 2.9, 1.0], gun, 0.0); // breech
-    m
-}
-
-/// Supply depot: a squat habitat bunker (small 5x5 footprint tier) with a
-/// hazard skirt, a team-tinted habitat band, a domed roof, and a vent stack.
-/// Shared by both factions, like the turret.
-fn supply_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let steel = [0.50, 0.53, 0.57];
-    let dark = [0.26, 0.28, 0.32];
-    let haz = [0.80, 0.58, 0.20];
-    let team = [0.5, 0.5, 0.5];
-    // Pad + plated bunker body + hazard skirt.
-    push_box(&mut m, [-2.6, 0.0, -2.6], [2.6, 0.4, 2.6], dark, 0.0);
-    push_box(&mut m, [-2.2, 0.4, -2.2], [2.2, 2.2, 2.2], steel, 0.0);
-    push_box(&mut m, [-2.2, 0.4, -2.2], [2.2, 0.8, 2.2], haz, 0.0);
-    // Team-tinted habitat band + domed roof.
-    push_box(&mut m, [-2.3, 1.6, -2.3], [2.3, 2.0, 2.3], team, 1.0);
-    push_frustum(
-        &mut m, 0.0, 0.0, 2.0, 1.1, 2.2, 3.3, steel, 0.0, 8, 0.0, true,
-    );
-    // Vent stack on one corner.
-    push_prism(&mut m, 1.4, 1.4, 0.3, 2.2, 3.1, dark, 0.0, 6, 0.0, true);
-    m
-}
-
 /// Fx particle: a unit cube around the origin. Drawn emissive (instance tint
 /// alpha >= 3.0), scaled per particle; the chunky cube reads PS1-appropriate.
 fn particle_mesh() -> Vec<UnitVertex> {
@@ -955,123 +342,13 @@ fn particle_mesh() -> Vec<UnitVertex> {
         [1.0, 1.0, 1.0],
         0.0,
     );
+    set_detail(&mut m, DETAIL_FLAT);
     m
 }
 
-/// Heavy assault unit (placeholder War-Mech / Golem): a stocky two-legged walker,
-/// team-tinted core, with shoulder guns. ~3.4 tall, facing -z.
-fn heavy_mesh() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let armor = [0.46, 0.49, 0.54];
-    let armor2 = [0.34, 0.37, 0.42];
-    let dark = [0.18, 0.20, 0.24];
-    let gun = [0.15, 0.17, 0.20];
-    let team = [0.5, 0.5, 0.5];
-    // Legs + feet.
-    for sx in [-0.62_f32, 0.26] {
-        push_box(
-            &mut m,
-            [sx, 0.0, -0.34],
-            [sx + 0.36, 1.1, 0.34],
-            armor2,
-            0.0,
-        );
-        push_box(
-            &mut m,
-            [sx - 0.05, 0.0, -0.5],
-            [sx + 0.41, 0.2, 0.5],
-            dark,
-            0.0,
-        );
-    }
-    // Hip + broad torso.
-    push_box(&mut m, [-0.7, 1.1, -0.5], [0.7, 1.5, 0.5], armor2, 0.0);
-    push_box(&mut m, [-0.85, 1.5, -0.6], [0.85, 2.7, 0.6], armor, 0.0);
-    // Team-tinted core + head.
-    push_box(&mut m, [-0.3, 1.8, 0.55], [0.3, 2.3, 0.72], team, 1.0);
-    push_box(&mut m, [-0.4, 2.7, -0.4], [0.4, 3.2, 0.4], armor2, 0.0);
-    push_box(
-        &mut m,
-        [-0.28, 2.85, 0.38],
-        [0.28, 3.05, 0.5],
-        [0.9, 0.5, 0.3],
-        0.0,
-    ); // visor
-       // Shoulder guns, barrels out the face (+z) side.
-    for sx in [-1.15_f32, 0.85] {
-        push_box(&mut m, [sx, 2.0, -0.3], [sx + 0.3, 2.7, 0.3], dark, 0.0);
-        push_box(
-            &mut m,
-            [sx + 0.02, 2.2, 0.2],
-            [sx + 0.28, 2.5, 1.1],
-            gun,
-            0.0,
-        );
-    }
-    m
-}
-
-/// Opaque dark walls around the map rim, from above the water down past the
-/// seabed, so you don't see under the (translucent) water at the edges. Drawn
-/// Astromancer Ward: a levitating concrete monolith (the faction's turret).
-/// A small anchor pad stays grounded; the carved stone hovers a clear gap
-/// above it, gold-banded, with a team-tinted aether crystal at the crown and
-/// the firing prong on the -z face (the swivel convention).
-fn ward_mesh_astro() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let rock = [0.52, 0.51, 0.48];
-    let rock_dk = [0.38, 0.37, 0.35];
-    let gold = [0.78, 0.65, 0.35];
-    let team = [0.5, 0.5, 0.5];
-    // Grounded anchor pad.
-    push_frustum(
-        &mut m, 0.0, 0.0, 1.7, 1.3, 0.0, 0.4, rock_dk, 0.0, 6, 0.0, true,
-    );
-    // The hovering monolith (clear gap from 0.4 to 1.4).
-    push_frustum(
-        &mut m, 0.0, 0.0, 2.4, 1.9, 1.4, 4.4, rock, 0.0, 6, 0.0, false,
-    );
-    push_frustum(
-        &mut m, 0.0, 0.0, 1.9, 1.0, 4.4, 6.2, rock_dk, 0.0, 6, 0.0, false,
-    );
-    // Gold waistband + crowning team crystal.
-    push_prism(&mut m, 0.0, 0.0, 2.0, 2.9, 3.3, gold, 0.0, 6, 0.0, false);
-    push_pyramid(&mut m, 0.0, 0.0, 0.9, 6.2, 7.4, team, 1.0, 5, 0.0);
-    // The aether prong fires toward -z.
-    push_box(
-        &mut m,
-        [-0.25, 3.5, -3.2],
-        [0.25, 4.0, -1.7],
-        [0.85, 0.95, 1.0],
-        0.0,
-    );
-    m
-}
-
-/// Astromancer Depot: levitating concrete storage slabs - two carved blocks
-/// hovering stacked above a grounded pad, ringed by a gold band, with a
-/// small team beacon on top.
-fn supply_mesh_astro() -> Vec<UnitVertex> {
-    let mut m = Vec::new();
-    let rock = [0.55, 0.54, 0.51];
-    let rock_dk = [0.40, 0.39, 0.37];
-    let gold = [0.78, 0.65, 0.35];
-    let team = [0.5, 0.5, 0.5];
-    // Grounded anchor pad.
-    push_frustum(
-        &mut m, 0.0, 0.0, 2.2, 1.8, 0.0, 0.4, rock_dk, 0.0, 6, 0.0, true,
-    );
-    // Main slab hovers over a clear gap; a smaller slab floats above it.
-    push_box(&mut m, [-2.6, 1.2, -2.2], [2.6, 2.8, 2.2], rock, 0.0);
-    push_box(&mut m, [-1.8, 3.4, -1.5], [1.8, 4.4, 1.5], rock_dk, 0.0);
-    // Gold band around the main slab's waist.
-    push_box(&mut m, [-2.7, 1.9, -2.3], [2.7, 2.15, 2.3], gold, 0.0);
-    // Team beacon.
-    push_pyramid(&mut m, 0.0, 0.0, 0.5, 4.4, 5.2, team, 1.0, 5, 0.0);
-    m
-}
-
-/// with the unit pipeline via an identity instance.
+/// Opaque dark walls around the map rim, from above the water down past
+/// the seabed, so you don't see under the (translucent) water at the
+/// edges. Drawn with the unit pipeline via an identity instance.
 fn water_walls() -> Vec<UnitVertex> {
     let mut m = Vec::new();
     let h = terrain::HALF;
@@ -1083,6 +360,7 @@ fn water_walls() -> Vec<UnitVertex> {
     push_box(&mut m, [-h, bot, -h], [-h + t, top, h], c, 0.0); // west
     push_box(&mut m, [-h, bot, h - t], [h, top, h], c, 0.0); // south
     push_box(&mut m, [-h, bot, -h], [h, top, -h + t], c, 0.0); // north
+    set_detail(&mut m, DETAIL_FLAT);
     m
 }
 
@@ -1160,6 +438,24 @@ fn ring_decals(rings: &[RingRaw]) -> Vec<RingVertex> {
             }
             prev = Some((inner, outer));
         }
+    }
+    out
+}
+
+/// Expand one walking kind into its per-frame sub-draws: each bucket's
+/// vertex buffer with that bucket's instance count, clamped so the running
+/// total never exceeds the kind's (possibly clamped) instance total.
+fn frame_draws<'b>(
+    bufs: &'b [(wgpu::Buffer, u32)],
+    counts: &[u32; WALK_BUCKETS],
+    total: usize,
+) -> Vec<(&'b wgpu::Buffer, u32, usize)> {
+    let mut left = total as u32;
+    let mut out = Vec::with_capacity(WALK_BUCKETS);
+    for (k, (buf, vlen)) in bufs.iter().enumerate() {
+        let c = counts.get(k).copied().unwrap_or(0).min(left);
+        left -= c;
+        out.push((buf, *vlen, c as usize));
     }
     out
 }
@@ -1245,8 +541,8 @@ pub struct Gfx {
     terrain_indices: u32,
     water_buf: wgpu::Buffer,
     water_len: u32,
-    infantry_buf: wgpu::Buffer,
-    infantry_len: u32,
+    /// Idle base + walk keyframe vertex buffers (and counts) per walking kind.
+    infantry_bufs: Vec<(wgpu::Buffer, u32)>,
     barracks_astro_buf: wgpu::Buffer,
     barracks_astro_len: u32,
     barracks_hollow_buf: wgpu::Buffer,
@@ -1257,8 +553,7 @@ pub struct Gfx {
     hq_hollow_len: u32,
     acolyte_buf: wgpu::Buffer,
     acolyte_len: u32,
-    engineer_buf: wgpu::Buffer,
-    engineer_len: u32,
+    engineer_bufs: Vec<(wgpu::Buffer, u32)>,
     ore_node_buf: wgpu::Buffer,
     ore_node_len: u32,
     carbon_node_buf: wgpu::Buffer,
@@ -1279,8 +574,7 @@ pub struct Gfx {
     supply_astro_len: u32,
     particle_buf: wgpu::Buffer,
     particle_len: u32,
-    heavy_buf: wgpu::Buffer,
-    heavy_len: u32,
+    heavy_bufs: Vec<(wgpu::Buffer, u32)>,
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
@@ -1294,6 +588,8 @@ pub struct Gfx {
     ring_buf: wgpu::Buffer,
     camera_buf: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
+    /// The model surface-detail map (group 3 of the unit pipeline).
+    detail_bind: wgpu::BindGroup,
     terrain_bind: wgpu::BindGroup,
     terrain_layout: wgpu::BindGroupLayout,
     tile_sampler: wgpu::Sampler,
@@ -1530,6 +826,36 @@ impl Gfx {
             ],
         });
 
+        // group 3 (unit pipeline): the model surface-detail map, triplanar
+        // sampled in object space so units/buildings are textured without UVs.
+        let detail = load_tile(
+            &device,
+            &queue,
+            include_bytes!("../../../assets/textures/detail.png"),
+            "detail",
+        );
+        let detail_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("detail-layout"),
+            entries: &[
+                tex_entry(0, true),
+                samp_entry(1, wgpu::SamplerBindingType::Filtering),
+            ],
+        });
+        let detail_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("detail-bind"),
+            layout: &detail_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&detail),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&tile_sampler),
+                },
+            ],
+        });
+
         // group 2: per-world appearance (voxel terrain tint + liquid colour).
         let world_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("world-layout"),
@@ -1575,6 +901,13 @@ impl Gfx {
         let pl_plain = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pl-plain"),
             bind_group_layouts: &[Some(&camera_layout)],
+            immediate_size: 0,
+        });
+        // Units/buildings: camera + the surface-detail map at group 3
+        // (groups 1 and 2 are holes; fs_unit touches neither).
+        let pl_unit = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pl-unit"),
+            bind_group_layouts: &[Some(&camera_layout), None, None, Some(&detail_layout)],
             immediate_size: 0,
         });
         // Voxel terrain + water sample the world uniform at group 2.
@@ -1635,7 +968,7 @@ impl Gfx {
         let v3u = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<UnitVertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 5 => Float32x4],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 5 => Float32x4, 8 => Float32],
         };
         let pos3 = wgpu::VertexBufferLayout {
             array_stride: 12,
@@ -1650,7 +983,7 @@ impl Gfx {
         let inst = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<InstanceRaw>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4, 6 => Float32x2, 7 => Float32x2],
+            attributes: &wgpu::vertex_attr_array![2 => Float32x3, 3 => Float32x3, 4 => Float32x4, 6 => Float32x2],
         };
         let ring_v = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<RingVertex>() as u64,
@@ -1699,7 +1032,7 @@ impl Gfx {
         );
         let unit_pipeline = mk(
             "unit",
-            &pl_plain,
+            &pl_unit,
             "vs_unit",
             "fs_unit",
             &[v3u.clone(), inst.clone()],
@@ -1785,97 +1118,106 @@ impl Gfx {
             bytemuck::cast_slice(&water),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let infantry = infantry_mesh();
-        let infantry_buf = mkbuf(
-            "infantry",
-            bytemuck::cast_slice(&infantry),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
-        let barracks_astro = barracks_mesh_astro();
+        // Walking units load idle + their baked walk keyframes; each bucket
+        // gets its own vertex buffer and instances are grouped per frame.
+        let mkframes = |name: &str, frames: Vec<Vec<UnitVertex>>| -> Vec<(wgpu::Buffer, u32)> {
+            frames
+                .iter()
+                .enumerate()
+                .map(|(k, m)| {
+                    (
+                        mkbuf(
+                            &format!("{name}-{k}"),
+                            bytemuck::cast_slice(m),
+                            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        ),
+                        m.len() as u32,
+                    )
+                })
+                .collect()
+        };
+        let infantry_bufs = mkframes("infantry", walk_models!("infantry"));
+        let engineer_bufs = mkframes("engineer", walk_models!("engineer"));
+        let heavy_bufs = mkframes("heavy", walk_models!("heavy"));
+        let barracks_astro = model!("barracks-astro");
         let barracks_astro_buf = mkbuf(
             "barracks-astro",
             bytemuck::cast_slice(&barracks_astro),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let barracks_hollow = barracks_mesh_hollow();
+        let barracks_hollow = model!("barracks-hollow");
         let barracks_hollow_buf = mkbuf(
             "barracks-hollow",
             bytemuck::cast_slice(&barracks_hollow),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let hq_astro = hq_mesh_astro();
+        let hq_astro = model!("hq-astro");
         let hq_astro_buf = mkbuf(
             "hq-astro",
             bytemuck::cast_slice(&hq_astro),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let hq_hollow = hq_mesh_hollow();
+        let hq_hollow = model!("hq-hollow");
         let hq_hollow_buf = mkbuf(
             "hq-hollow",
             bytemuck::cast_slice(&hq_hollow),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let acolyte = acolyte_mesh();
+        let acolyte = model!("acolyte");
         let acolyte_buf = mkbuf(
             "acolyte",
             bytemuck::cast_slice(&acolyte),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let engineer = engineer_mesh();
-        let engineer_buf = mkbuf(
-            "engineer",
-            bytemuck::cast_slice(&engineer),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
-        let ore_node = ore_node_mesh();
+        let ore_node = model!("ore-node");
         let ore_node_buf = mkbuf(
             "ore-node",
             bytemuck::cast_slice(&ore_node),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let carbon_node = carbon_node_mesh();
+        let carbon_node = model!("carbon-node");
         let carbon_node_buf = mkbuf(
             "carbon-node",
             bytemuck::cast_slice(&carbon_node),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let ore_crystal = ore_crystal_mesh();
+        let ore_crystal = model!("ore-crystal");
         let ore_crystal_buf = mkbuf(
             "ore-crystal",
             bytemuck::cast_slice(&ore_crystal),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let carbon_pool = carbon_pool_mesh();
+        let carbon_pool = model!("carbon-pool");
         let carbon_pool_buf = mkbuf(
             "carbon-pool",
             bytemuck::cast_slice(&carbon_pool),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let barrel = barrel_mesh();
+        let barrel = model!("barrel");
         let barrel_buf = mkbuf(
             "barrel",
             bytemuck::cast_slice(&barrel),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let turret = turret_mesh();
+        let turret = model!("turret");
         let turret_buf = mkbuf(
             "turret",
             bytemuck::cast_slice(&turret),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let supply = supply_mesh();
+        let supply = model!("supply");
         let supply_buf = mkbuf(
             "supply",
             bytemuck::cast_slice(&supply),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let ward_astro = ward_mesh_astro();
+        let ward_astro = model!("ward-astro");
         let ward_astro_buf = mkbuf(
             "ward-astro",
             bytemuck::cast_slice(&ward_astro),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let supply_astro = supply_mesh_astro();
+        let supply_astro = model!("supply-astro");
         let supply_astro_buf = mkbuf(
             "supply-astro",
             bytemuck::cast_slice(&supply_astro),
@@ -1885,12 +1227,6 @@ impl Gfx {
         let particle_buf = mkbuf(
             "particle",
             bytemuck::cast_slice(&particle),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
-        let heavy = heavy_mesh();
-        let heavy_buf = mkbuf(
-            "heavy",
-            bytemuck::cast_slice(&heavy),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
         let walls = water_walls();
@@ -1906,7 +1242,6 @@ impl Gfx {
                 scale: [1.0, 1.0, 1.0],
                 color: [0.0, 0.0, 0.0, 1.0],
                 rot: ROT_NONE,
-                anim: ANIM_NONE,
             }),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
@@ -1944,8 +1279,7 @@ impl Gfx {
             terrain_indices: ti.len() as u32,
             water_buf,
             water_len: water.len() as u32,
-            infantry_buf,
-            infantry_len: infantry.len() as u32,
+            infantry_bufs,
             barracks_astro_buf,
             barracks_astro_len: barracks_astro.len() as u32,
             barracks_hollow_buf,
@@ -1956,8 +1290,7 @@ impl Gfx {
             hq_hollow_len: hq_hollow.len() as u32,
             acolyte_buf,
             acolyte_len: acolyte.len() as u32,
-            engineer_buf,
-            engineer_len: engineer.len() as u32,
+            engineer_bufs,
             ore_node_buf,
             ore_node_len: ore_node.len() as u32,
             carbon_node_buf,
@@ -1978,8 +1311,7 @@ impl Gfx {
             supply_astro_len: supply_astro.len() as u32,
             particle_buf,
             particle_len: particle.len() as u32,
-            heavy_buf,
-            heavy_len: heavy.len() as u32,
+            heavy_bufs,
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
@@ -1990,6 +1322,7 @@ impl Gfx {
             ring_buf,
             camera_buf,
             camera_bind,
+            detail_bind,
             terrain_bind,
             terrain_layout,
             tile_sampler,
@@ -2148,15 +1481,18 @@ impl Gfx {
     pub fn render(
         &mut self,
         infantry: &[InstanceRaw],
+        infantry_frames: &[u32; WALK_BUCKETS],
         barracks_astro: &[InstanceRaw],
         barracks_hollow: &[InstanceRaw],
         hq_astro: &[InstanceRaw],
         hq_hollow: &[InstanceRaw],
         acolytes: &[InstanceRaw],
         engineers: &[InstanceRaw],
+        engineer_frames: &[u32; WALK_BUCKETS],
         ore_nodes: &[InstanceRaw],
         carbon_nodes: &[InstanceRaw],
         heavies: &[InstanceRaw],
+        heavy_frames: &[u32; WALK_BUCKETS],
         turrets: &[InstanceRaw],
         supplies: &[InstanceRaw],
         wards_astro: &[InstanceRaw],
@@ -2327,6 +1663,9 @@ impl Gfx {
                 multiview_mask: None,
             });
             pass.set_bind_group(0, &self.camera_bind, &[]);
+            // The unit pipeline's surface-detail map rides at group 3 for
+            // the whole pass; other pipelines simply ignore it.
+            pass.set_bind_group(3, &self.detail_bind, &[]);
 
             let voxel = self.voxel_terrain.is_some();
             if let Some((buf, len, bind)) = self.voxel_terrain.as_ref() {
@@ -2356,24 +1695,34 @@ impl Gfx {
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                 // (mesh vertex buffer, mesh vertex count, instance count) per group,
                 // drawn over consecutive instance ranges matching the packing above.
-                let meshes = [
-                    (&self.infantry_buf, self.infantry_len, ni),
-                    (&self.barracks_astro_buf, self.barracks_astro_len, na),
-                    (&self.barracks_hollow_buf, self.barracks_hollow_len, nh),
-                    (&self.hq_astro_buf, self.hq_astro_len, nqa),
-                    (&self.hq_hollow_buf, self.hq_hollow_len, nqh),
-                    (&self.acolyte_buf, self.acolyte_len, nac),
-                    (&self.engineer_buf, self.engineer_len, nen),
-                    (&self.ore_node_buf, self.ore_node_len, nor),
-                    (&self.carbon_node_buf, self.carbon_node_len, ncar),
-                    (&self.heavy_buf, self.heavy_len, nhv),
-                    (&self.turret_buf, self.turret_len, ntr),
-                    (&self.supply_buf, self.supply_len, nsp),
-                    (&self.ward_astro_buf, self.ward_astro_len, nwa),
-                    (&self.supply_astro_buf, self.supply_astro_len, nsa),
-                    (&self.barrel_buf, self.barrel_len, nbr),
-                    (&self.particle_buf, self.particle_len, npt),
-                ];
+                // Walking kinds expand into one sub-draw per animation frame
+                // bucket (their instances are packed idle first, then frame
+                // 0..N, with `*_frames` carrying the per-bucket counts).
+                let mut meshes: Vec<(&wgpu::Buffer, u32, usize)> = Vec::new();
+                meshes.extend(frame_draws(
+                    self.infantry_bufs.as_slice(),
+                    infantry_frames,
+                    ni,
+                ));
+                meshes.push((&self.barracks_astro_buf, self.barracks_astro_len, na));
+                meshes.push((&self.barracks_hollow_buf, self.barracks_hollow_len, nh));
+                meshes.push((&self.hq_astro_buf, self.hq_astro_len, nqa));
+                meshes.push((&self.hq_hollow_buf, self.hq_hollow_len, nqh));
+                meshes.push((&self.acolyte_buf, self.acolyte_len, nac));
+                meshes.extend(frame_draws(
+                    self.engineer_bufs.as_slice(),
+                    engineer_frames,
+                    nen,
+                ));
+                meshes.push((&self.ore_node_buf, self.ore_node_len, nor));
+                meshes.push((&self.carbon_node_buf, self.carbon_node_len, ncar));
+                meshes.extend(frame_draws(self.heavy_bufs.as_slice(), heavy_frames, nhv));
+                meshes.push((&self.turret_buf, self.turret_len, ntr));
+                meshes.push((&self.supply_buf, self.supply_len, nsp));
+                meshes.push((&self.ward_astro_buf, self.ward_astro_len, nwa));
+                meshes.push((&self.supply_astro_buf, self.supply_astro_len, nsa));
+                meshes.push((&self.barrel_buf, self.barrel_len, nbr));
+                meshes.push((&self.particle_buf, self.particle_len, npt));
                 let mut base = 0u32;
                 for (buf, vlen, count) in meshes {
                     let count = count as u32;
@@ -2456,29 +1805,68 @@ mod tests {
                 v.color[3] == 0.0 || v.color[3] == 1.0,
                 "{name}[{k}] team weight must be 0 or 1"
             );
+            assert!(
+                v.detail == DETAIL_FLAT || v.detail == DETAIL_ROCK || v.detail == DETAIL_PLATE,
+                "{name}[{k}] bad detail selector"
+            );
         }
     }
 
     #[test]
     fn unit_meshes_are_well_formed() {
-        check_mesh(&infantry_mesh(), "infantry");
-        check_mesh(&barracks_mesh_astro(), "barracks-astro");
-        check_mesh(&barracks_mesh_hollow(), "barracks-hollow");
-        check_mesh(&hq_mesh_astro(), "hq-astro");
-        check_mesh(&hq_mesh_hollow(), "hq-hollow");
-        check_mesh(&acolyte_mesh(), "acolyte");
-        check_mesh(&engineer_mesh(), "engineer");
-        check_mesh(&ore_node_mesh(), "ore-node");
-        check_mesh(&carbon_node_mesh(), "carbon-node");
-        check_mesh(&ore_crystal_mesh(), "ore-crystal");
-        check_mesh(&carbon_pool_mesh(), "carbon-pool");
-        check_mesh(&barrel_mesh(), "barrel");
-        check_mesh(&turret_mesh(), "turret");
-        check_mesh(&supply_mesh(), "supply");
-        check_mesh(&ward_mesh_astro(), "ward-astro");
-        check_mesh(&supply_mesh_astro(), "supply-astro");
+        check_mesh(&model!("infantry"), "infantry");
+        check_mesh(&model!("barracks-astro"), "barracks-astro");
+        check_mesh(&model!("barracks-hollow"), "barracks-hollow");
+        check_mesh(&model!("hq-astro"), "hq-astro");
+        check_mesh(&model!("hq-hollow"), "hq-hollow");
+        check_mesh(&model!("acolyte"), "acolyte");
+        check_mesh(&model!("engineer"), "engineer");
+        check_mesh(&model!("ore-node"), "ore-node");
+        check_mesh(&model!("carbon-node"), "carbon-node");
+        check_mesh(&model!("ore-crystal"), "ore-crystal");
+        check_mesh(&model!("carbon-pool"), "carbon-pool");
+        check_mesh(&model!("barrel"), "barrel");
+        check_mesh(&model!("turret"), "turret");
+        check_mesh(&model!("supply"), "supply");
+        check_mesh(&model!("ward-astro"), "ward-astro");
+        check_mesh(&model!("supply-astro"), "supply-astro");
         check_mesh(&particle_mesh(), "particle");
-        check_mesh(&heavy_mesh(), "heavy");
+        check_mesh(&model!("heavy"), "heavy");
+        // The walk-cycle keyframe assets: idle + every baked frame.
+        for (name, frames) in [
+            ("infantry", walk_models!("infantry")),
+            ("engineer", walk_models!("engineer")),
+            ("heavy", walk_models!("heavy")),
+        ] {
+            assert_eq!(frames.len(), WALK_BUCKETS, "{name} walk set size");
+            for (k, m) in frames.iter().enumerate() {
+                check_mesh(m, &format!("{name}-frame-{k}"));
+            }
+        }
+    }
+
+    /// Renders the infantry walk-cycle keyframes side by side to
+    /// `target/previews/infantry-walk.png`. A dev tool: run on demand with
+    /// `cargo test -p client render_walk_strip -- --ignored`.
+    #[test]
+    #[ignore = "writes the walk strip to target/previews; run on demand"]
+    fn render_walk_strip() {
+        let team = [0.25, 0.55, 1.0];
+        let frames = walk_models!("infantry");
+        let (fw, fh) = (170u32, 320u32);
+        let w = 12 + frames.len() as u32 * (fw + 12);
+        let mut sheet = image::RgbaImage::from_pixel(w, fh + 24, image::Rgba([10, 14, 24, 255]));
+        for (k, mesh) in frames.iter().enumerate() {
+            let img = rasterize(mesh, team, fw, fh);
+            let x0 = 12 + k as u32 * (fw + 12);
+            for (px, py, p) in img.enumerate_pixels() {
+                if x0 + px < w {
+                    sheet.put_pixel(x0 + px, 12 + py, *p);
+                }
+            }
+        }
+        std::fs::create_dir_all("target/previews").unwrap();
+        sheet.save("target/previews/infantry-walk.png").unwrap();
     }
 
     /// Offline mesh preview: rasterizes a mesh with the game's iso camera
@@ -2523,6 +1911,46 @@ mod tests {
         let ll = (0.5_f32 * 0.5 + 1.0 + 0.35 * 0.35).sqrt();
         let light = [0.5 / ll, 1.0 / ll, 0.35 / ll];
 
+        // The shader's surface-detail map, decoded sRGB -> linear and
+        // triplanar-sampled exactly like fs_unit's `detail_at`, so the
+        // preview shows the textured models the renderer draws.
+        let det_img =
+            image::load_from_memory(include_bytes!("../../../assets/textures/detail.png"))
+                .expect("decode detail")
+                .to_rgba8();
+        let (dw, dh) = (det_img.width() as usize, det_img.height() as usize);
+        let det_lin: Vec<[f32; 2]> = det_img
+            .pixels()
+            .map(|p| {
+                [
+                    (p[0] as f32 / 255.0).powf(2.2),
+                    (p[1] as f32 / 255.0).powf(2.2),
+                ]
+            })
+            .collect();
+        let det_sample = |u: f32, v: f32, ch: usize| -> f32 {
+            let fx = u.rem_euclid(1.0) * dw as f32;
+            let fy = v.rem_euclid(1.0) * dh as f32;
+            let (x0, y0) = (fx as usize % dw, fy as usize % dh);
+            let (x1, y1) = ((x0 + 1) % dw, (y0 + 1) % dh);
+            let (tx, ty) = (fx.fract(), fy.fract());
+            let at = |x: usize, y: usize| det_lin[y * dw + x][ch];
+            let a = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
+            let b = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
+            a + (b - a) * ty
+        };
+        let detail_at = |p: [f32; 3], n: [f32; 3], ch: usize| -> f32 {
+            let mut wgt = [n[0].abs().powi(4), n[1].abs().powi(4), n[2].abs().powi(4)];
+            let sum = (wgt[0] + wgt[1] + wgt[2]).max(0.001);
+            for v in &mut wgt {
+                *v /= sum;
+            }
+            let s = 0.45;
+            wgt[0] * det_sample(p[2] * s, p[1] * s, ch)
+                + wgt[1] * det_sample(p[0] * s, p[2] * s, ch)
+                + wgt[2] * det_sample(p[0] * s, p[1] * s, ch)
+        };
+
         let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 14, 24, 255]));
         let mut depth = vec![f32::MIN; (w * h) as usize];
         for tri in mesh.chunks_exact(3) {
@@ -2535,11 +1963,6 @@ mod tests {
             };
             let shade = 0.45 + 0.7 * dot(tri[0].normal, light).max(0.0);
             let base = albedo(&tri[0]);
-            let rgb = [
-                ((base[0] * shade).clamp(0.0, 1.0) * 255.0) as u8,
-                ((base[1] * shade).clamp(0.0, 1.0) * 255.0) as u8,
-                ((base[2] * shade).clamp(0.0, 1.0) * 255.0) as u8,
-            ];
             let p: Vec<(f32, f32, f32)> = tri
                 .iter()
                 .map(|v| {
@@ -2578,6 +2001,25 @@ mod tests {
                     let i = (py * w + px) as usize;
                     if d > depth[i] {
                         depth[i] = d;
+                        // Interpolate the model-space position and apply the
+                        // selected detail channel per pixel, like the shader
+                        // (selector 0 stays flat shaded).
+                        let det = if tri[0].detail < 0.5 {
+                            1.0
+                        } else {
+                            let pos = [
+                                w0 * tri[0].pos[0] + w1 * tri[1].pos[0] + w2 * tri[2].pos[0],
+                                w0 * tri[0].pos[1] + w1 * tri[1].pos[1] + w2 * tri[2].pos[1],
+                                w0 * tri[0].pos[2] + w1 * tri[1].pos[2] + w2 * tri[2].pos[2],
+                            ];
+                            let ch = if tri[0].detail > 1.5 { 0 } else { 1 };
+                            0.70 + 1.40 * detail_at(pos, tri[0].normal, ch)
+                        };
+                        let rgb = [
+                            ((base[0] * shade * det).clamp(0.0, 1.0) * 255.0) as u8,
+                            ((base[1] * shade * det).clamp(0.0, 1.0) * 255.0) as u8,
+                            ((base[2] * shade * det).clamp(0.0, 1.0) * 255.0) as u8,
+                        ];
                         img.put_pixel(px, py, image::Rgba([rgb[0], rgb[1], rgb[2], 255]));
                     }
                 }
@@ -2593,15 +2035,21 @@ mod tests {
     #[ignore = "writes preview PNGs to target/previews; run on demand"]
     fn render_building_previews() {
         let team = [0.25, 0.55, 1.0]; // the player's blue
-        let jobs: [(&str, Vec<UnitVertex>); 8] = [
-            ("hq-spire-astromancer", hq_mesh_astro()),
-            ("hq-command-hollowmen", hq_mesh_hollow()),
-            ("barracks-astromancer", barracks_mesh_astro()),
-            ("barracks-hollowmen", barracks_mesh_hollow()),
-            ("turret", turret_mesh()),
-            ("supply-depot", supply_mesh()),
-            ("worker-acolyte", acolyte_mesh()),
-            ("worker-engineer", engineer_mesh()),
+        let mut ore = model!("ore-node");
+        ore.extend(model!("ore-crystal"));
+        let mut carbon = model!("carbon-node");
+        carbon.extend(model!("carbon-pool"));
+        let jobs: [(&str, Vec<UnitVertex>); 10] = [
+            ("hq-spire-astromancer", model!("hq-astro")),
+            ("hq-command-hollowmen", model!("hq-hollow")),
+            ("barracks-astromancer", model!("barracks-astro")),
+            ("barracks-hollowmen", model!("barracks-hollow")),
+            ("turret", model!("turret")),
+            ("supply-depot", model!("supply")),
+            ("worker-acolyte", model!("acolyte")),
+            ("worker-engineer", model!("engineer")),
+            ("ore-node", ore),
+            ("carbon-node", carbon),
         ];
         std::fs::create_dir_all("target/previews").unwrap();
         for (name, mesh) in jobs {
@@ -2620,10 +2068,10 @@ mod tests {
     fn render_astromancer_concept() {
         let team = [0.25, 0.55, 1.0];
         let jobs: [(Vec<UnitVertex>, u32); 4] = [
-            (hq_mesh_astro(), 360),
-            (barracks_mesh_astro(), 330),
-            (turret_mesh(), 250),
-            (acolyte_mesh(), 210),
+            (model!("hq-astro"), 360),
+            (model!("barracks-astro"), 330),
+            (model!("turret"), 250),
+            (model!("acolyte"), 210),
         ];
         let (w, h) = (1280u32, 580u32);
         let mut sheet = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 14, 24, 255]));
@@ -2671,16 +2119,16 @@ mod tests {
     fn render_unit_icons() {
         let team = [0.25, 0.55, 1.0]; // the player's blue
         let jobs: [(&str, Vec<UnitVertex>); 10] = [
-            ("hq-astromancer", hq_mesh_astro()),
-            ("hq-hollowmen", hq_mesh_hollow()),
-            ("barracks-astromancer", barracks_mesh_astro()),
-            ("barracks-hollowmen", barracks_mesh_hollow()),
-            ("turret", turret_mesh()),
-            ("supply", supply_mesh()),
-            ("worker-acolyte", acolyte_mesh()),
-            ("worker-engineer", engineer_mesh()),
-            ("infantry", infantry_mesh()),
-            ("heavy", heavy_mesh()),
+            ("hq-astromancer", model!("hq-astro")),
+            ("hq-hollowmen", model!("hq-hollow")),
+            ("barracks-astromancer", model!("barracks-astro")),
+            ("barracks-hollowmen", model!("barracks-hollow")),
+            ("turret", model!("turret")),
+            ("supply", model!("supply")),
+            ("worker-acolyte", model!("acolyte")),
+            ("worker-engineer", model!("engineer")),
+            ("infantry", model!("infantry")),
+            ("heavy", model!("heavy")),
         ];
         std::fs::create_dir_all("target/previews/icons").unwrap();
         for (name, mesh) in jobs {
@@ -2688,5 +2136,60 @@ mod tests {
             img.save(format!("target/previews/icons/{name}.png"))
                 .unwrap();
         }
+    }
+
+    /// Renders the full model lineup (Astromancer row, Hollowmen row, shared
+    /// units + neutral nodes row) to `target/previews/fidelity-sheet.png`.
+    /// A dev tool for design review; run on demand with
+    /// `cargo test -p client render_fidelity_sheet -- --ignored`.
+    #[test]
+    #[ignore = "writes the fidelity sheet to target/previews; run on demand"]
+    fn render_fidelity_sheet() {
+        let team = [0.25, 0.55, 1.0]; // the player's blue
+        let mut ore = model!("ore-node");
+        ore.extend(model!("ore-crystal"));
+        let mut carbon = model!("carbon-node");
+        carbon.extend(model!("carbon-pool"));
+        let rows: [Vec<(Vec<UnitVertex>, u32)>; 3] = [
+            vec![
+                (model!("hq-astro"), 330),
+                (model!("barracks-astro"), 300),
+                (model!("ward-astro"), 240),
+                (model!("supply-astro"), 240),
+                (model!("acolyte"), 170),
+            ],
+            vec![
+                (model!("hq-hollow"), 330),
+                (model!("barracks-hollow"), 300),
+                (model!("turret"), 240),
+                (model!("supply"), 240),
+                (model!("engineer"), 170),
+            ],
+            vec![
+                (model!("infantry"), 190),
+                (model!("heavy"), 230),
+                (ore, 300),
+                (carbon, 300),
+                (model!("barrel"), 130),
+            ],
+        ];
+        let row_h = 430u32;
+        let (w, h) = (1500u32, 24 + 3 * (row_h + 24));
+        let mut sheet = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 14, 24, 255]));
+        for (r, row) in rows.iter().enumerate() {
+            let y0 = 24 + r as u32 * (row_h + 24);
+            let mut x = 24u32;
+            for (mesh, size) in row {
+                let img = rasterize(mesh, team, *size, row_h);
+                for (px, py, p) in img.enumerate_pixels() {
+                    if p[3] > 0 && x + px < w && y0 + py < h {
+                        sheet.put_pixel(x + px, y0 + py, *p);
+                    }
+                }
+                x += size + 24;
+            }
+        }
+        std::fs::create_dir_all("target/previews").unwrap();
+        sheet.save("target/previews/fidelity-sheet.png").unwrap();
     }
 }

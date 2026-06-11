@@ -3,12 +3,14 @@
 
 use crate::camera::Camera;
 use crate::fx::Fx as FxSystem;
-use crate::gfx::{FxLight, InstanceRaw, RingRaw, ANIM_NONE, FOW_RES, RING, ROT_NONE};
+use crate::gfx::{
+    FxLight, InstanceRaw, RingRaw, FOW_RES, RING, ROT_NONE, WALK_BUCKETS, WALK_FRAMES,
+};
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
 use protocol::{BuildingKind, Command, UnitKind};
 use sim::{Kind, Snap, World};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use web_time::Instant;
 
 const TICK_HZ: u32 = 20;
@@ -33,23 +35,52 @@ fn team_color(owner: u16) -> [f32; 4] {
     }
 }
 
-/// Instance yaw `(cos, sin)` that points a mesh's authored face (+z: visors,
-/// eyes, tool arms) along the entity's sim facing. Falls back to no rotation
-/// for a degenerate facing.
-fn rot_of(s: &Snap) -> [f32; 2] {
+/// Ease an entity's displayed yaw toward its sim facing along the shortest
+/// arc, at most `rate` radians over `dt`, so units visibly rotate into a
+/// new heading instead of snapping. New entities start on target.
+fn smooth_rot(yaw: &mut HashMap<u32, f32>, s: &Snap, rate: f32, dt: f32) -> [f32; 2] {
     let (dx, dz) = (f(s.facing.x), f(s.facing.y));
-    let len = dx.hypot(dz);
-    if len < 1e-4 {
-        ROT_NONE
+    if dx.hypot(dz) < 1e-4 {
+        return ROT_NONE;
+    }
+    // rot = (cos, sin) with cos riding +z, so the yaw angle is atan2(x, z).
+    let target = dx.atan2(dz);
+    let cur = *yaw.entry(s.index).or_insert(target);
+    let mut d = target - cur;
+    while d > std::f32::consts::PI {
+        d -= std::f32::consts::TAU;
+    }
+    while d < -std::f32::consts::PI {
+        d += std::f32::consts::TAU;
+    }
+    let new = cur + d.signum() * (rate * dt).min(d.abs());
+    yaw.insert(s.index, new);
+    [new.cos(), new.sin()]
+}
+
+/// Walk-cycle instance bucket: 0 = idle (base model), 1..=N = the baked
+/// frame whose phase the unit is on right now.
+fn walk_bucket(moving: bool, phase: f32) -> usize {
+    if !moving {
+        0
     } else {
-        [dz / len, dx / len]
+        1 + ((phase / std::f32::consts::TAU).rem_euclid(1.0) * WALK_FRAMES as f32) as usize
+            % WALK_FRAMES
     }
 }
 
-/// As [`rot_of`], for meshes authored facing -z (the turret's barrels).
-fn rot_of_neg_z(s: &Snap) -> [f32; 2] {
-    let [c, sn] = rot_of(s);
-    [-c, -sn]
+/// Flatten per-frame instance buckets into one packed list plus the
+/// per-bucket counts the renderer draws sub-ranges with.
+fn flatten_walk(
+    buckets: [Vec<InstanceRaw>; WALK_BUCKETS],
+) -> (Vec<InstanceRaw>, [u32; WALK_BUCKETS]) {
+    let mut counts = [0u32; WALK_BUCKETS];
+    let mut flat = Vec::new();
+    for (k, b) in buckets.into_iter().enumerate() {
+        counts[k] = b.len() as u32;
+        flat.extend(b);
+    }
+    (flat, counts)
 }
 
 /// Squared ground distance between two snapshots (floats; presentation only).
@@ -150,15 +181,19 @@ fn pad_radius(kind: BuildingKind) -> f32 {
 #[derive(Default)]
 pub struct RenderData {
     pub infantry: Vec<InstanceRaw>,
+    /// Per walk-bucket counts (idle + each baked frame) into `infantry`.
+    pub infantry_frames: [u32; WALK_BUCKETS],
     pub barracks_astro: Vec<InstanceRaw>,
     pub barracks_hollow: Vec<InstanceRaw>,
     pub hq_astro: Vec<InstanceRaw>,
     pub hq_hollow: Vec<InstanceRaw>,
     pub acolytes: Vec<InstanceRaw>,
     pub engineers: Vec<InstanceRaw>,
+    pub engineer_frames: [u32; WALK_BUCKETS],
     pub ore_nodes: Vec<InstanceRaw>,
     pub carbon_nodes: Vec<InstanceRaw>,
     pub heavies: Vec<InstanceRaw>,
+    pub heavy_frames: [u32; WALK_BUCKETS],
     pub turrets: Vec<InstanceRaw>,
     pub supplies: Vec<InstanceRaw>,
     pub wards_astro: Vec<InstanceRaw>,
@@ -217,6 +252,11 @@ pub struct Game {
     fx: FxSystem,
     /// Build orders awaiting their worker (drawn as placed holograms).
     pending_builds: Vec<PendingBuild>,
+    /// Displayed yaw per entity: eased toward the sim facing each frame so
+    /// units visibly rotate into a new heading instead of snapping.
+    yaw: HashMap<u32, f32>,
+    /// `time` at the previous `render_data` call (drives the yaw easing dt).
+    yaw_time: f32,
 }
 
 impl Default for Game {
@@ -254,6 +294,8 @@ impl Game {
             terrain_dirty: false,
             fx: FxSystem::default(),
             pending_builds: Vec::new(),
+            yaw: HashMap::new(),
+            yaw_time: 0.0,
         };
         // The enemy is driven by the in-sim bot commander (mines, builds, trains).
         g.world.set_bot(1, true);
@@ -874,18 +916,23 @@ impl Game {
     /// the cursor's ground point. It draws as a holographic mesh (green when
     /// the site is clear, red when blocked) plus a footprint ring.
     #[allow(clippy::type_complexity)]
-    pub fn render_data(&self, ghost: Option<(BuildingKind, f32, f32)>) -> RenderData {
+    pub fn render_data(&mut self, ghost: Option<(BuildingKind, f32, f32)>) -> RenderData {
         let sel: HashSet<u32> = self.selected.iter().copied().collect();
-        let mut infantry = Vec::new();
+        // Displayed-yaw easing state: taken out of self for the loop (which
+        // borrows self.curr), put back pruned to the living entities below.
+        let mut yaw = std::mem::take(&mut self.yaw);
+        let dt = (self.time - self.yaw_time).clamp(0.0, 0.1);
+        self.yaw_time = self.time;
+        let mut infantry_b: [Vec<InstanceRaw>; WALK_BUCKETS] = Default::default();
         let mut barracks_astro = Vec::new();
         let mut barracks_hollow = Vec::new();
         let mut hq_astro = Vec::new();
         let mut hq_hollow = Vec::new();
         let mut acolytes = Vec::new();
-        let mut engineers = Vec::new();
+        let mut engineers_b: [Vec<InstanceRaw>; WALK_BUCKETS] = Default::default();
         let mut ore_nodes = Vec::new();
         let mut carbon_nodes = Vec::new();
-        let mut heavies = Vec::new();
+        let mut heavies_b: [Vec<InstanceRaw>; WALK_BUCKETS] = Default::default();
         let mut turrets = Vec::new();
         let mut supplies = Vec::new();
         let mut wards_astro = Vec::new();
@@ -911,7 +958,6 @@ impl Game {
                     scale: [scl, scl, scl],
                     color: [1.0, 1.0, 1.0, 0.0],
                     rot: ROT_NONE,
-                    anim: ANIM_NONE,
                 };
                 if s.kind == Kind::OreNode {
                     ore_nodes.push(inst);
@@ -946,13 +992,14 @@ impl Game {
                         [1.0, cf, 1.0]
                     },
                     color,
-                    // Turrets swivel toward their target; other buildings sit.
+                    // Turrets swivel toward their target (eased, so the
+                    // barrels visibly track); other buildings sit.
                     rot: if s.kind == Kind::Turret {
-                        rot_of_neg_z(s)
+                        let [c, sn] = smooth_rot(&mut yaw, s, 5.0, dt);
+                        [-c, -sn]
                     } else {
                         ROT_NONE
                     },
-                    anim: ANIM_NONE,
                 };
                 if astro && cf < 1.0 {
                     inst.offset[1] = ground + (1.0 - cf) * 16.0;
@@ -1044,9 +1091,7 @@ impl Game {
                             offset: [wx, y, wz],
                             scale: [1.0, 1.0, 1.0],
                             color: tint,
-                            rot: rot_of(s),
-                            // Hovers: no legs to swing.
-                            anim: ANIM_NONE,
+                            rot: smooth_rot(&mut yaw, s, 10.0, dt),
                         }
                     }
                     Faction::Hollowmen => {
@@ -1059,18 +1104,17 @@ impl Game {
                             offset: [wx, y, wz],
                             scale: [1.0, 1.0, 1.0],
                             color: tint,
-                            rot: rot_of(s),
-                            anim: if s.moving && !s.mining && !s.repairing {
-                                [self.time * 9.0 + phase, 0.30]
-                            } else {
-                                ANIM_NONE
-                            },
+                            rot: smooth_rot(&mut yaw, s, 10.0, dt),
                         }
                     }
                 };
                 match self.faction_of(s.owner) {
                     Faction::Astromancer => acolytes.push(inst),
-                    Faction::Hollowmen => engineers.push(inst),
+                    Faction::Hollowmen => {
+                        // Engineers play their baked walk frames while moving.
+                        let walking = s.moving && !s.mining && !s.repairing;
+                        engineers_b[walk_bucket(walking, self.time * 9.0 + phase)].push(inst)
+                    }
                 }
                 // The hauled load rides visibly on the worker: a little
                 // crystal (ore) or a barrel of green sludge (carbon), held
@@ -1091,7 +1135,6 @@ impl Game {
                             scale: [0.16, 0.16, 0.16],
                             color: [1.0, 1.0, 1.0, 0.0],
                             rot: inst.rot,
-                            anim: ANIM_NONE,
                         });
                     } else {
                         barrels.push(InstanceRaw {
@@ -1099,7 +1142,6 @@ impl Game {
                             scale: [1.0, 1.0, 1.0],
                             color: [1.0, 1.0, 1.0, 0.0],
                             rot: inst.rot,
-                            anim: ANIM_NONE,
                         });
                     }
                 }
@@ -1127,21 +1169,16 @@ impl Game {
                     offset: [wx, y, wz],
                     scale: [scl, scl, scl],
                     color: tint,
-                    rot: rot_of(s),
-                    anim: if s.moving {
-                        if heavy {
-                            [self.time * 5.5 + s.index as f32 * 1.3, 0.5]
-                        } else {
-                            [self.time * 9.0 + s.index as f32 * 1.3, 0.32]
-                        }
-                    } else {
-                        ANIM_NONE
-                    },
+                    // The heavy slews like a tank; infantry whip around fast.
+                    rot: smooth_rot(&mut yaw, s, if heavy { 6.0 } else { 12.0 }, dt),
                 };
+                // March cycle: pick the baked walk frame for this gait phase.
+                let gait = if heavy { 5.5 } else { 9.0 };
+                let bucket = walk_bucket(s.moving, self.time * gait + s.index as f32 * 1.3);
                 if heavy {
-                    heavies.push(inst);
+                    heavies_b[bucket].push(inst);
                 } else {
-                    infantry.push(inst);
+                    infantry_b[bucket].push(inst);
                 }
                 if sel.contains(&s.index) {
                     rings.push(RingRaw {
@@ -1172,7 +1209,6 @@ impl Game {
                 scale: [1.0, 1.0, 1.0],
                 color: holo,
                 rot: ROT_NONE,
-                anim: ANIM_NONE,
             };
             let radius = match kind {
                 BuildingKind::Hq => 9.0,
@@ -1235,7 +1271,6 @@ impl Game {
                 scale: [1.0, 1.0, 1.0],
                 color: [0.30, 1.0, 0.55, 2.4],
                 rot: ROT_NONE,
-                anim: ANIM_NONE,
             };
             match pb.kind {
                 BuildingKind::Hq => match self.faction_of(0) {
@@ -1281,17 +1316,29 @@ impl Game {
             });
         }
 
+        // Pack the walking kinds in frame-bucket order and prune the yaw
+        // state to entities still alive.
+        let (infantry, infantry_frames) = flatten_walk(infantry_b);
+        let (engineers, engineer_frames) = flatten_walk(engineers_b);
+        let (heavies, heavy_frames) = flatten_walk(heavies_b);
+        let live: HashSet<u32> = self.curr.iter().map(|s| s.index).collect();
+        yaw.retain(|k, _| live.contains(k));
+        self.yaw = yaw;
+
         RenderData {
             infantry,
+            infantry_frames,
             barracks_astro,
             barracks_hollow,
             hq_astro,
             hq_hollow,
             acolytes,
             engineers,
+            engineer_frames,
             ore_nodes,
             carbon_nodes,
             heavies,
+            heavy_frames,
             turrets,
             supplies,
             wards_astro,

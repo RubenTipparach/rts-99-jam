@@ -8,6 +8,7 @@ mod gfx;
 mod hud;
 mod map;
 mod menu;
+mod model;
 mod terrain;
 mod voxel;
 mod worlds;
@@ -374,15 +375,18 @@ impl App {
             let vp = self.camera.view_proj(aspect);
             gfx.render(
                 &rd.infantry,
+                &rd.infantry_frames,
                 &rd.barracks_astro,
                 &rd.barracks_hollow,
                 &rd.hq_astro,
                 &rd.hq_hollow,
                 &rd.acolytes,
                 &rd.engineers,
+                &rd.engineer_frames,
                 &rd.ore_nodes,
                 &rd.carbon_nodes,
                 &rd.heavies,
+                &rd.heavy_frames,
                 &rd.turrets,
                 &rd.supplies,
                 &rd.wards_astro,
