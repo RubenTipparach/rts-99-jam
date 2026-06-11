@@ -632,6 +632,27 @@ pub fn active_lava() -> bool {
     SELECTED.with(|s| s.get()) == Some(7)
 }
 
+/// Surface brightness tint (linear-light rgb multiplier) for world `idx`.
+/// Most worlds draw their tile set as-is; the near-coal carbonaceous
+/// regolith gets a readability lift (real Ceres is one of the darkest
+/// surfaces in the system, but battlefield legibility wins over albedo
+/// realism).
+fn world_tint(idx: usize) -> [f32; 3] {
+    match idx {
+        1 => [1.70, 1.66, 1.60], // Ceres: lift, slightly warm
+        _ => [1.0, 1.0, 1.0],
+    }
+}
+
+/// [`world_tint`] of the active world (white for the Earthlike default).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // driven by the web lobby
+pub fn active_tint() -> [f32; 3] {
+    SELECTED
+        .with(|s| s.get())
+        .map(world_tint)
+        .unwrap_or([1.0, 1.0, 1.0])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -722,12 +743,15 @@ mod tests {
         };
 
         // Per-world palette: the swatch split into the four tile slots, plus
-        // lava for the hazard channel.
+        // lava for the hazard channel. The world tint is a linear-light
+        // multiplier in the shader; fold it into these sRGB-ish tones via
+        // the gamma so the preview brightness matches the battlefield.
         let sw = MAP_SWATCH[idx];
+        let t = world_tint(idx);
         let swf = [
-            sw[0] as f32 / 255.0,
-            sw[1] as f32 / 255.0,
-            sw[2] as f32 / 255.0,
+            sw[0] as f32 / 255.0 * t[0].powf(1.0 / 2.2),
+            sw[1] as f32 / 255.0 * t[1].powf(1.0 / 2.2),
+            sw[2] as f32 / 255.0 * t[2].powf(1.0 / 2.2),
         ];
         let tone = |m: f32, g: f32| {
             [
