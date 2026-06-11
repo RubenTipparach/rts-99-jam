@@ -834,12 +834,22 @@ mod tests {
         let high = tinted(mix(pmid, phigh, 0.7));
         let accent = tinted(pacc);
         let lava = [0.95, 0.42, 0.12];
-        // Liquid color (matches `active_liquid`): Titan methane, Earth ocean.
-        let liq_col = match idx {
-            8 => [0.06, 0.05, 0.07],
+        // Liquid body color (matches `active_liquid`): Titan methane, Earth
+        // ocean. Drawn like the in-game water reads on screen: the shader
+        // always lifts the body with sky reflection and ripple glints, so
+        // the preview adds the same average sky pickup. Without it a dark
+        // methane sea rasterizes as a flat void-black hole.
+        let body = match idx {
+            8 => [0.06f32, 0.05, 0.07],
             21 => [0.06, 0.22, 0.34],
             _ => [0.0, 0.0, 0.0],
         };
+        let sky = [0.38f32, 0.50, 0.66]; // the water shader's horizon tones
+        let liq_col = [
+            body[0] * 1.12 + sky[0] * 0.30,
+            body[1] * 1.12 + sky[1] * 0.30,
+            body[2] * 1.12 + sky[2] * 0.30,
+        ];
         let ll = (0.5_f32 * 0.5 + 1.0 + 0.35 * 0.35).sqrt();
         let light = [0.5 / ll, 1.0 / ll, 0.35 / ll];
 
