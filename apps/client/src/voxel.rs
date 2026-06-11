@@ -765,7 +765,7 @@ mod tests {
         [[150.0, 150.0, 162.0], [212.0, 206.0, 196.0], [238.0, 233.0, 224.0], [156.0, 98.0, 70.0]],   // europa_ice
         [[92.0, 52.0, 36.0], [162.0, 98.0, 64.0], [202.0, 150.0, 110.0], [224.0, 224.0, 230.0]],   // mars_rust
         [[150.0, 122.0, 50.0], [212.0, 188.0, 86.0], [232.0, 220.0, 168.0], [214.0, 96.0, 40.0]],  // io_sulfur
-        [[84.0, 54.0, 30.0], [168.0, 116.0, 64.0], [198.0, 158.0, 104.0], [40.0, 42.0, 54.0]],     // titan_haze
+        [[84.0, 54.0, 30.0], [168.0, 116.0, 64.0], [198.0, 158.0, 104.0], [96.0, 76.0, 54.0]], // titan_haze
         [[150.0, 122.0, 122.0], [206.0, 180.0, 170.0], [230.0, 214.0, 206.0], [84.0, 66.0, 70.0]], // triton_ice
         [[110.0, 78.0, 60.0], [172.0, 132.0, 100.0], [226.0, 208.0, 180.0], [134.0, 76.0, 54.0]],  // pluto_tholin
         [[96.0, 132.0, 72.0], [74.0, 112.0, 58.0], [120.0, 112.0, 96.0], [236.0, 240.0, 244.0]],   // earth
@@ -938,5 +938,88 @@ mod tests {
             ));
         }
         std::fs::write("target/previews/maps/projection.txt", proj).unwrap();
+    }
+
+    /// Renders every preview with the lobby's LIVE spawn-marker math drawn
+    /// on top (the exact menu.rs projection), plus a printed report of each
+    /// spawn's distance to the nearest liquid column. A dev check for marker
+    /// accuracy: run on demand with
+    /// `cargo test -p client render_spawn_overlays -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "writes overlay PNGs to target/previews/spawncheck; run on demand"]
+    fn render_spawn_overlays() {
+        std::fs::create_dir_all("target/previews/spawncheck").unwrap();
+        for (i, key) in MAP_KEYS.iter().enumerate() {
+            let g = VoxelGrid::parse(MAPS[i]);
+            let (mut img, fit) = preview(&g, i, 384);
+            let [u0, u1, v0, v1, pw, ph] = fit;
+            // The lobby's marker math, verbatim (menu.rs draw_map_preview).
+            let (yaw, pitch) = (PREVIEW_YAW, PREVIEW_PITCH);
+            let right = [-yaw.sin(), 0.0, yaw.cos()];
+            let eye = [
+                yaw.cos() * pitch.cos(),
+                pitch.sin(),
+                yaw.sin() * pitch.cos(),
+            ];
+            let upv = [
+                right[1] * eye[2] - right[2] * eye[1],
+                right[2] * eye[0] - right[0] * eye[2],
+                right[0] * eye[1] - right[1] * eye[0],
+            ];
+            let s = ((pw - 8.0) / (u1 - u0)).min((ph - 8.0) / (v1 - v0));
+            for (owner, sx, sz) in crate::map::world_spawns(i) {
+                let p = [sx, g.surface_height(sx, sz), sz];
+                let u = p[0] * right[0] + p[1] * right[1] + p[2] * right[2];
+                let v = p[0] * upv[0] + p[1] * upv[1] + p[2] * upv[2];
+                let px = (u - u0) * s + (pw - (u1 - u0) * s) * 0.5;
+                let py = (v1 - v) * s + (ph - (v1 - v0) * s) * 0.5;
+                // Distance from the spawn to the nearest liquid column.
+                let (ci, ck) = g.col_index(sx, sz);
+                let mut best = f32::MAX;
+                for k in 0..g.nz {
+                    for ii in 0..g.nx {
+                        if g.liquid[k * g.nx + ii] != 0 {
+                            let d = (ii as f32 - ci as f32).hypot(k as f32 - ck as f32);
+                            best = best.min(d);
+                        }
+                    }
+                }
+                let du = best * g.dx();
+                let (wgt, haz) = g.weights_at([sx, g.surface_height(sx, sz) - 0.5, sz]);
+                let pix = img.get_pixel(px as u32, py as u32);
+                println!(
+                    "{key}: P{owner} spawn ({sx:.0},{sz:.0}) liquid {du:.0}u away  \
+                     weights mid {:.2} low {:.2} high {:.2} accent {:.2} haz {haz:.2}  \
+                     pixel {:?}",
+                    wgt[0], wgt[1], wgt[2], wgt[3], pix
+                );
+                let col: [u8; 3] = if owner == 0 {
+                    [74, 163, 255]
+                } else {
+                    [255, 90, 74]
+                };
+                let r = 4.0f32;
+                for dy in -6..=6 {
+                    for dx in -6..=6 {
+                        let (qx, qy) = (px + dx as f32, py + dy as f32);
+                        if qx < 0.0 || qy < 0.0 || qx >= pw || qy >= ph {
+                            continue;
+                        }
+                        let d = (dx as f32).hypot(dy as f32);
+                        if d < r {
+                            img.put_pixel(
+                                qx as u32,
+                                qy as u32,
+                                image::Rgba([col[0], col[1], col[2], 255]),
+                            );
+                        } else if d < r + 1.6 {
+                            img.put_pixel(qx as u32, qy as u32, image::Rgba([8, 10, 16, 255]));
+                        }
+                    }
+                }
+            }
+            img.save(format!("target/previews/spawncheck/{key}.png"))
+                .unwrap();
+        }
     }
 }
