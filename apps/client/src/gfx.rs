@@ -1764,20 +1764,9 @@ impl Gfx {
             // tail of the shared buffer (slot 1 is still bound).
             if noc + ncp > 0 {
                 pass.set_pipeline(&self.crystal_pipeline);
-                let opaque: u32 = (ni
-                    + na
-                    + nh
-                    + nqa
-                    + nqh
-                    + nac
-                    + nen
-                    + nor
-                    + ncar
-                    + nhv
-                    + ntr
-                    + nsp
-                    + nbr
-                    + npt) as u32;
+                // Everything before the two blended groups, derived from the
+                // packed total so adding an opaque group can't desync it.
+                let opaque: u32 = (used - noc - ncp) as u32;
                 if noc > 0 {
                     pass.set_vertex_buffer(0, self.ore_crystal_buf.slice(..));
                     pass.draw(0..self.ore_crystal_len, opaque..opaque + noc as u32);

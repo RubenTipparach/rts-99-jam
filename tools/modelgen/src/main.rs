@@ -1449,8 +1449,10 @@ fn carbon_node_mesh() -> Vec<UnitVertex> {
     push_frustum(
         &mut m, 0.0, 0.0, 3.4, 3.0, 0.9, 1.6, vent, 0.0, 10, 0.0, false,
     );
+    // Capped: the translucent gas pool sits right over this throat, so it
+    // must read as solid rock through it, not a hollow shell.
     push_frustum(
-        &mut m, 0.0, 0.0, 3.0, 2.2, 1.6, 3.0, vent, 0.0, 10, 0.0, false,
+        &mut m, 0.0, 0.0, 3.0, 2.2, 1.6, 3.0, vent, 0.0, 10, 0.0, true,
     );
     push_frustum(
         &mut m, 0.0, 0.0, 2.74, 2.55, 2.30, 2.62, stain, 0.0, 10, 0.0, true,
