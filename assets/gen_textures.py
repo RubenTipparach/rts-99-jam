@@ -108,15 +108,26 @@ def tile(name, lo, hi, scale, seed, light=None, dark=None, light_p=0.07, dark_p=
 
 
 def detail_tile(name, seed=11, size=128):
-    """The model surface-detail map: a neutral grey plate texture (panel
-    grain, jittered seam lines, per-panel tone shifts, scratches, rivets and
-    pitting) that the unit shader triplanar-maps over every unit/building
-    mesh. Authored around mid-grey = "no change"; the shader turns it into a
-    multiplier, so it must stay colorless."""
+    """The model surface-detail map the unit shader triplanar-maps over
+    unit/building meshes. Two materials share the tile, one per channel:
+
+      R - plate/masonry: panel grain, jittered seam lines, per-panel tone
+          shifts, scratches, rivets and pitting (metal hulls, carved stone).
+      G - organic grain: pure multi-octave noise with wandering crack veins,
+          no straight lines (rock, dirt, scree).
+
+    Both are authored around mid-grey = "no change"; the shader turns the
+    selected channel into a brightness multiplier."""
     period = 8
     n = vnoise(seed, period)
     n2 = vnoise(seed + 7, period * 2)
     n3 = vnoise(seed + 13, period * 4)
+    # The organic channel's own lattices, plus a smooth vein field whose
+    # zero-crossings become wandering cracks.
+    nr = vnoise(seed + 21, period)
+    nr2 = vnoise(seed + 27, period * 2)
+    nr3 = vnoise(seed + 33, period * 4)
+    nv = vnoise(seed + 41, period)
     # Jittered, wrap-friendly panel seams on each axis.
     panels = 4
     seams_x = [
@@ -175,8 +186,24 @@ def detail_tile(name, seed=11, size=128):
                 val += 0.14
             if rnd(x, y, seed * 9) < 0.02:
                 val -= 0.10
-            g = int(max(0.18, min(0.85, val)) * 255)
-            px += bytes((g, g, g, 255))
+            plate = int(max(0.18, min(0.85, val)) * 255)
+            # Organic channel: noise grain + crack veins + pitting only.
+            tr = (
+                nr(u, v) * 0.45
+                + nr2(u * 2.0 + 3.0, v * 2.0 + 6.0) * 0.33
+                + nr3(u * 4.0 + 1.0, v * 4.0 + 8.0) * 0.22
+            )
+            rv = 0.5 + (tr - 0.5) * 0.34
+            vein = abs(nv(u + 2.5, v + 1.5) - 0.5) * 2.0
+            if vein < 0.12:
+                rv -= 0.10 * (1.0 - vein / 0.12)
+            r2 = rnd(x, y, seed * 17)
+            if r2 < 0.03:
+                rv -= 0.09
+            elif r2 > 0.985:
+                rv += 0.08
+            rock = int(max(0.18, min(0.85, rv)) * 255)
+            px += bytes((plate, rock, 128, 255))
     write_png(os.path.join(OUT, name), size, size, px)
 
 

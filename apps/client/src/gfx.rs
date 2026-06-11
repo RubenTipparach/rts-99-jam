@@ -57,12 +57,30 @@ struct Vertex3 {
 
 /// A unit/building mesh vertex. `color.rgb` is the material color; `color.a` is
 /// the team-tint weight (0 = keep material, 1 = full faction color).
+/// `detail` selects the surface-detail texture: [`DETAIL_FLAT`] for things
+/// that must stay flat shaded (crystals, gas, glow), [`DETAIL_ROCK`] for
+/// organic rock/dirt grain, [`DETAIL_PLATE`] for plate/masonry seams.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct UnitVertex {
     pos: [f32; 3],
     normal: [f32; 3],
     color: [f32; 4],
+    detail: f32,
+}
+
+/// No surface detail: flat shaded (crystals, gas pools, fx particles).
+const DETAIL_FLAT: f32 = 0.0;
+/// Organic grain (green channel of the detail map): rock, dirt, scree.
+const DETAIL_ROCK: f32 = 1.0;
+/// Plate/masonry seams (red channel): metal hulls and carved stone.
+const DETAIL_PLATE: f32 = 2.0;
+
+/// Tag every vertex with a detail-map selector (meshes default to plate).
+fn set_detail(m: &mut [UnitVertex], d: f32) {
+    for v in m {
+        v.detail = d;
+    }
 }
 
 #[repr(C)]
@@ -170,6 +188,7 @@ fn push_tri(
             pos: p,
             normal: n,
             color,
+            detail: DETAIL_PLATE,
         });
     }
 }
@@ -1457,6 +1476,7 @@ fn ore_node_mesh() -> Vec<UnitVertex> {
             5,
         );
     }
+    set_detail(&mut m, DETAIL_ROCK);
     m
 }
 
@@ -1504,6 +1524,8 @@ fn ore_crystal_mesh() -> Vec<UnitVertex> {
         );
         push_pyramid(&mut m, cx, cz, r * 0.62, yneck, ytip, core, 0.0, 6, tw);
     }
+    // Crystal stays flat shaded: the glassy shader supplies all its life.
+    set_detail(&mut m, DETAIL_FLAT);
     m
 }
 
@@ -1560,6 +1582,7 @@ fn carbon_node_mesh() -> Vec<UnitVertex> {
             5,
         );
     }
+    set_detail(&mut m, DETAIL_ROCK);
     m
 }
 
@@ -1577,6 +1600,8 @@ fn carbon_pool_mesh() -> Vec<UnitVertex> {
     push_dome(&mut m, 0.5, 0.3, 0.30, 3.30, glow_core, 0.0, 8, 2);
     push_dome(&mut m, -0.7, -0.4, 0.22, 3.26, glow, 0.0, 8, 2);
     push_dome(&mut m, -0.1, 0.9, 0.16, 3.30, glow_core, 0.0, 8, 2);
+    // The gas reads as liquid light: keep it flat shaded.
+    set_detail(&mut m, DETAIL_FLAT);
     m
 }
 
@@ -1747,6 +1772,7 @@ fn particle_mesh() -> Vec<UnitVertex> {
         [1.0, 1.0, 1.0],
         0.0,
     );
+    set_detail(&mut m, DETAIL_FLAT);
     m
 }
 
@@ -2081,6 +2107,7 @@ fn water_walls() -> Vec<UnitVertex> {
     push_box(&mut m, [-h, bot, -h], [-h + t, top, h], c, 0.0); // west
     push_box(&mut m, [-h, bot, h - t], [h, top, h], c, 0.0); // south
     push_box(&mut m, [-h, bot, -h], [h, top, -h + t], c, 0.0); // north
+    set_detail(&mut m, DETAIL_FLAT);
     m
 }
 
@@ -2672,7 +2699,7 @@ impl Gfx {
         let v3u = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<UnitVertex>() as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 5 => Float32x4],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 5 => Float32x4, 8 => Float32],
         };
         let pos3 = wgpu::VertexBufferLayout {
             array_stride: 12,
@@ -3508,6 +3535,10 @@ mod tests {
                 v.color[3] == 0.0 || v.color[3] == 1.0,
                 "{name}[{k}] team weight must be 0 or 1"
             );
+            assert!(
+                v.detail == DETAIL_FLAT || v.detail == DETAIL_ROCK || v.detail == DETAIL_PLATE,
+                "{name}[{k}] bad detail selector"
+            );
         }
     }
 
@@ -3583,31 +3614,36 @@ mod tests {
                 .expect("decode detail")
                 .to_rgba8();
         let (dw, dh) = (det_img.width() as usize, det_img.height() as usize);
-        let det_lin: Vec<f32> = det_img
+        let det_lin: Vec<[f32; 2]> = det_img
             .pixels()
-            .map(|p| (p[0] as f32 / 255.0).powf(2.2))
+            .map(|p| {
+                [
+                    (p[0] as f32 / 255.0).powf(2.2),
+                    (p[1] as f32 / 255.0).powf(2.2),
+                ]
+            })
             .collect();
-        let det_sample = |u: f32, v: f32| -> f32 {
+        let det_sample = |u: f32, v: f32, ch: usize| -> f32 {
             let fx = u.rem_euclid(1.0) * dw as f32;
             let fy = v.rem_euclid(1.0) * dh as f32;
             let (x0, y0) = (fx as usize % dw, fy as usize % dh);
             let (x1, y1) = ((x0 + 1) % dw, (y0 + 1) % dh);
             let (tx, ty) = (fx.fract(), fy.fract());
-            let at = |x: usize, y: usize| det_lin[y * dw + x];
+            let at = |x: usize, y: usize| det_lin[y * dw + x][ch];
             let a = at(x0, y0) + (at(x1, y0) - at(x0, y0)) * tx;
             let b = at(x0, y1) + (at(x1, y1) - at(x0, y1)) * tx;
             a + (b - a) * ty
         };
-        let detail_at = |p: [f32; 3], n: [f32; 3]| -> f32 {
+        let detail_at = |p: [f32; 3], n: [f32; 3], ch: usize| -> f32 {
             let mut wgt = [n[0].abs().powi(4), n[1].abs().powi(4), n[2].abs().powi(4)];
             let sum = (wgt[0] + wgt[1] + wgt[2]).max(0.001);
             for v in &mut wgt {
                 *v /= sum;
             }
             let s = 0.45;
-            wgt[0] * det_sample(p[2] * s, p[1] * s)
-                + wgt[1] * det_sample(p[0] * s, p[2] * s)
-                + wgt[2] * det_sample(p[0] * s, p[1] * s)
+            wgt[0] * det_sample(p[2] * s, p[1] * s, ch)
+                + wgt[1] * det_sample(p[0] * s, p[2] * s, ch)
+                + wgt[2] * det_sample(p[0] * s, p[1] * s, ch)
         };
 
         let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([10, 14, 24, 255]));
@@ -3661,13 +3697,19 @@ mod tests {
                     if d > depth[i] {
                         depth[i] = d;
                         // Interpolate the model-space position and apply the
-                        // detail multiplier per pixel, like the shader.
-                        let pos = [
-                            w0 * tri[0].pos[0] + w1 * tri[1].pos[0] + w2 * tri[2].pos[0],
-                            w0 * tri[0].pos[1] + w1 * tri[1].pos[1] + w2 * tri[2].pos[1],
-                            w0 * tri[0].pos[2] + w1 * tri[1].pos[2] + w2 * tri[2].pos[2],
-                        ];
-                        let det = 0.70 + 1.40 * detail_at(pos, tri[0].normal);
+                        // selected detail channel per pixel, like the shader
+                        // (selector 0 stays flat shaded).
+                        let det = if tri[0].detail < 0.5 {
+                            1.0
+                        } else {
+                            let pos = [
+                                w0 * tri[0].pos[0] + w1 * tri[1].pos[0] + w2 * tri[2].pos[0],
+                                w0 * tri[0].pos[1] + w1 * tri[1].pos[1] + w2 * tri[2].pos[1],
+                                w0 * tri[0].pos[2] + w1 * tri[1].pos[2] + w2 * tri[2].pos[2],
+                            ];
+                            let ch = if tri[0].detail > 1.5 { 0 } else { 1 };
+                            0.70 + 1.40 * detail_at(pos, tri[0].normal, ch)
+                        };
                         let rgb = [
                             ((base[0] * shade * det).clamp(0.0, 1.0) * 255.0) as u8,
                             ((base[1] * shade * det).clamp(0.0, 1.0) * 255.0) as u8,
@@ -3688,7 +3730,11 @@ mod tests {
     #[ignore = "writes preview PNGs to target/previews; run on demand"]
     fn render_building_previews() {
         let team = [0.25, 0.55, 1.0]; // the player's blue
-        let jobs: [(&str, Vec<UnitVertex>); 8] = [
+        let mut ore = ore_node_mesh();
+        ore.extend(ore_crystal_mesh());
+        let mut carbon = carbon_node_mesh();
+        carbon.extend(carbon_pool_mesh());
+        let jobs: [(&str, Vec<UnitVertex>); 10] = [
             ("hq-spire-astromancer", hq_mesh_astro()),
             ("hq-command-hollowmen", hq_mesh_hollow()),
             ("barracks-astromancer", barracks_mesh_astro()),
@@ -3697,6 +3743,8 @@ mod tests {
             ("supply-depot", supply_mesh()),
             ("worker-acolyte", acolyte_mesh()),
             ("worker-engineer", engineer_mesh()),
+            ("ore-node", ore),
+            ("carbon-node", carbon),
         ];
         std::fs::create_dir_all("target/previews").unwrap();
         for (name, mesh) in jobs {
