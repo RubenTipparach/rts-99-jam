@@ -42,25 +42,83 @@ pub enum Kind {
     Turret,
     /// Supply depot: raises the owner's unit cap. Inert otherwise.
     Supply,
+    /// Astromancer evocation caster: short reach, high damage, fragile.
+    Pyromancer,
+    /// Astromancer tempest caster: long-reach bolts, slow between casts.
+    Stormcaller,
+    /// Hollowmen recon mech: very fast, cheap, weak.
+    Hound,
+    /// Hollowmen missile mech: long-reach fire support, armored.
+    Javelin,
+    /// Astromancer storm coil: static defense with exceptional reach.
+    StormWard,
+    /// Hollowmen blockhouse: cheap static defense, short-reach rapid fire.
+    Bunker,
     /// Ore crystals: harvested into the ore stockpile.
     OreNode,
     /// Carbon gas geyser: harvested into the carbon stockpile.
     CarbonNode,
 }
 
+/// Which faction a player fields. Unset players (the default) can use only
+/// the faction-neutral kinds; see `set_faction`. Part of the state hash.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Faction {
+    Astromancers = 1,
+    Hollowmen = 2,
+}
+
+/// The faction a unit kind is locked to (`None` = neutral, either side).
+fn unit_faction(k: UnitKind) -> Option<Faction> {
+    match k {
+        UnitKind::Pyromancer | UnitKind::Stormcaller => Some(Faction::Astromancers),
+        UnitKind::Hound | UnitKind::Javelin => Some(Faction::Hollowmen),
+        _ => None,
+    }
+}
+
+/// The faction a building kind is locked to (`None` = neutral).
+fn building_faction(k: BuildingKind) -> Option<Faction> {
+    match k {
+        BuildingKind::StormWard => Some(Faction::Astromancers),
+        BuildingKind::Bunker => Some(Faction::Hollowmen),
+        _ => None,
+    }
+}
+
 /// Mobile units: they path, take move orders, and obey the no-stacking rule.
 fn is_mobile(k: Kind) -> bool {
-    matches!(k, Kind::Infantry | Kind::Worker | Kind::Heavy)
+    matches!(
+        k,
+        Kind::Infantry
+            | Kind::Worker
+            | Kind::Heavy
+            | Kind::Pyromancer
+            | Kind::Stormcaller
+            | Kind::Hound
+            | Kind::Javelin
+    )
 }
 
 /// Combat units that auto-acquire and engage enemies (excludes workers).
 fn is_fighter(k: Kind) -> bool {
-    matches!(k, Kind::Infantry | Kind::Heavy)
+    matches!(
+        k,
+        Kind::Infantry
+            | Kind::Heavy
+            | Kind::Pyromancer
+            | Kind::Stormcaller
+            | Kind::Hound
+            | Kind::Javelin
+    )
 }
 
 /// A building (occupies a footprint, owned, can be a drop-off / target).
 fn is_building(k: Kind) -> bool {
-    matches!(k, Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply)
+    matches!(
+        k,
+        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply | Kind::StormWard | Kind::Bunker
+    )
 }
 
 /// Buildings that run a production queue (HQ makes workers, Barracks fighters).
@@ -196,6 +254,61 @@ fn stats(kind: Kind) -> Stats {
             attack_cd: Fx::ZERO,
             aggro2: Fx::ZERO,
         },
+        // Pyromancer: a glass flamer - melts what it can reach, dies fast.
+        Kind::Pyromancer => Stats {
+            max_hp: Fx::from_int(45),
+            speed: Fx::from_ratio(30, 100),
+            range: Fx::from_int(5),
+            damage: Fx::from_int(9),
+            attack_cd: Fx::from_int(10),
+            aggro2: Fx::from_int(256),
+        },
+        // Stormcaller: caster artillery - outranges everything mobile, slow
+        // between casts, folds in close.
+        Kind::Stormcaller => Stats {
+            max_hp: Fx::from_int(40),
+            speed: Fx::from_ratio(26, 100),
+            range: Fx::from_int(12),
+            damage: Fx::from_int(13),
+            attack_cd: Fx::from_int(24),
+            aggro2: Fx::from_int(400), // aggro 20
+        },
+        // Hound: a cheap, very fast raider/scout; numbers, not punch.
+        Kind::Hound => Stats {
+            max_hp: Fx::from_int(35),
+            speed: Fx::from_ratio(46, 100),
+            range: Fx::from_int(6),
+            damage: Fx::from_int(4),
+            attack_cd: Fx::from_int(10),
+            aggro2: Fx::from_int(256),
+        },
+        // Javelin: armored missile support - long reach, steady damage.
+        Kind::Javelin => Stats {
+            max_hp: Fx::from_int(95),
+            speed: Fx::from_ratio(24, 100),
+            range: Fx::from_int(11),
+            damage: Fx::from_int(8),
+            attack_cd: Fx::from_int(14),
+            aggro2: Fx::from_int(324),
+        },
+        // Storm-Ward: strikes from far beyond a Turret, but thinner walls.
+        Kind::StormWard => Stats {
+            max_hp: Fx::from_int(220),
+            speed: Fx::ZERO,
+            range: Fx::from_int(16),
+            damage: Fx::from_int(12),
+            attack_cd: Fx::from_int(18),
+            aggro2: Fx::from_int(256),
+        },
+        // Bunker: a tough short-reach blockhouse that chews what gets close.
+        Kind::Bunker => Stats {
+            max_hp: Fx::from_int(380),
+            speed: Fx::ZERO,
+            range: Fx::from_int(9),
+            damage: Fx::from_int(6),
+            attack_cd: Fx::from_int(8),
+            aggro2: Fx::from_int(100),
+        },
         // Resource nodes are inert: tons of "hp" so stray AoE can't pop them.
         Kind::OreNode | Kind::CarbonNode => Stats {
             max_hp: Fx::from_int(100000),
@@ -244,6 +357,10 @@ fn unit_cost(kind: UnitKind) -> (Fx, Fx) {
         UnitKind::Infantry => (Fx::from_int(TRAIN_COST), Fx::ZERO),
         UnitKind::Heavy => (Fx::from_int(120), Fx::from_int(60)),
         UnitKind::Worker => (Fx::from_int(WORKER_COST), Fx::ZERO),
+        UnitKind::Pyromancer => (Fx::from_int(60), Fx::from_int(20)),
+        UnitKind::Stormcaller => (Fx::from_int(75), Fx::from_int(40)),
+        UnitKind::Hound => (Fx::from_int(35), Fx::ZERO),
+        UnitKind::Javelin => (Fx::from_int(80), Fx::from_int(30)),
     }
 }
 
@@ -255,6 +372,8 @@ fn building_cost(kind: BuildingKind) -> (Fx, Fx) {
         BuildingKind::Barracks => (Fx::from_int(150), Fx::ZERO),
         BuildingKind::Turret => (Fx::from_int(90), Fx::from_int(50)),
         BuildingKind::Supply => (Fx::from_int(100), Fx::ZERO),
+        BuildingKind::StormWard => (Fx::from_int(110), Fx::from_int(60)),
+        BuildingKind::Bunker => (Fx::from_int(80), Fx::ZERO),
     }
 }
 
@@ -350,6 +469,8 @@ fn obstacle_radius(k: Kind) -> Option<Fx> {
         Kind::Barracks => Some(Fx::from_int(6)),
         Kind::Turret => Some(Fx::from_ratio(5, 2)), // 2.5
         Kind::Supply => Some(Fx::from_int(3)),      // small 5x5 tier
+        Kind::StormWard => Some(Fx::from_ratio(5, 2)), // 2.5, the Ward tier
+        Kind::Bunker => Some(Fx::from_int(3)),      // squat blockhouse
         Kind::OreNode | Kind::CarbonNode => Some(Fx::from_ratio(7, 2)), // 3.5
         _ => None,
     }
@@ -481,6 +602,8 @@ pub struct World {
     prod_kind: Vec<u8>,
     /// Per-player bot commander level (`Off` = human-driven).
     bot: Vec<BotLevel>,
+    /// Per-player faction (`None` = unset: only neutral kinds usable).
+    faction: Vec<Option<Faction>>,
     /// Facing per entity: the raw (un-normalized) direction it last moved,
     /// mined, or attacked toward. Part of the deterministic state (hashed);
     /// the renderer normalizes it into a yaw.
@@ -534,6 +657,7 @@ impl World {
             construct: Vec::new(),
             prod_kind: Vec::new(),
             bot: Vec::new(),
+            faction: Vec::new(),
             facing: Vec::new(),
             shots: Vec::new(),
             passable: Vec::new(),
@@ -542,6 +666,22 @@ impl World {
             pass_hash: 0,
             had_building: Vec::new(),
         }
+    }
+
+    /// Set a player's faction, unlocking that side's faction-locked units and
+    /// structures (training/building them is rejected while unset). Hashed
+    /// state: must be set identically on every peer at game setup.
+    pub fn set_faction(&mut self, player: PlayerId, faction: Faction) {
+        let i = player as usize;
+        while self.faction.len() <= i {
+            self.faction.push(None);
+        }
+        self.faction[i] = Some(faction);
+    }
+
+    /// A player's faction (`None` until `set_faction`).
+    pub fn faction(&self, player: PlayerId) -> Option<Faction> {
+        self.faction.get(player as usize).copied().flatten()
     }
 
     /// Set a player's bot commander level (the in-sim commander mines, builds,
@@ -1243,6 +1383,10 @@ impl World {
                         UnitKind::Infantry => Kind::Infantry,
                         UnitKind::Worker => Kind::Worker,
                         UnitKind::Heavy => Kind::Heavy,
+                        UnitKind::Pyromancer => Kind::Pyromancer,
+                        UnitKind::Stormcaller => Kind::Stormcaller,
+                        UnitKind::Hound => Kind::Hound,
+                        UnitKind::Javelin => Kind::Javelin,
                     };
                     self.spawn(k, owner, x, y);
                 }
@@ -1252,6 +1396,8 @@ impl World {
                         BuildingKind::Barracks => Kind::Barracks,
                         BuildingKind::Turret => Kind::Turret,
                         BuildingKind::Supply => Kind::Supply,
+                        BuildingKind::StormWard => Kind::StormWard,
+                        BuildingKind::Bunker => Kind::Bunker,
                     };
                     self.spawn(k, owner, x, y);
                 }
@@ -1288,8 +1434,14 @@ impl World {
                     }
                 }
                 Command::Build { unit, kind, x, y } => {
-                    if self.arena.alive_at(unit) && self.kind[unit as usize] == Kind::Worker {
-                        self.order[unit as usize] = Order::Build { kind, x, y };
+                    let u = unit as usize;
+                    // Faction-locked structures need the owner on that side.
+                    if self.arena.alive_at(unit)
+                        && self.kind[u] == Kind::Worker
+                        && building_faction(kind)
+                            .is_none_or(|f| self.faction(self.owner[u]) == Some(f))
+                    {
+                        self.order[u] = Order::Build { kind, x, y };
                     }
                 }
                 Command::Move { unit, x, y } => self.set_order(unit, Order::Move { x, y }),
@@ -1304,12 +1456,22 @@ impl World {
                 Command::Train { building, kind } => {
                     let b = building as usize;
                     // The HQ trains workers; the Barracks trains fighters.
+                    // Faction-locked kinds need the owner on that side.
                     let trainable = self.arena.alive_at(building)
                         && matches!(
                             (self.kind[b], kind),
-                            (Kind::Barracks, UnitKind::Infantry | UnitKind::Heavy)
-                                | (Kind::Hq, UnitKind::Worker)
-                        );
+                            (
+                                Kind::Barracks,
+                                UnitKind::Infantry
+                                    | UnitKind::Heavy
+                                    | UnitKind::Pyromancer
+                                    | UnitKind::Stormcaller
+                                    | UnitKind::Hound
+                                    | UnitKind::Javelin
+                            ) | (Kind::Hq, UnitKind::Worker)
+                        )
+                        && unit_faction(kind)
+                            .is_none_or(|f| self.faction(self.owner[b]) == Some(f));
                     let (ore, carbon) = unit_cost(kind);
                     if trainable
                         && self.construct[b] <= Fx::ZERO
@@ -1325,6 +1487,10 @@ impl World {
                             UnitKind::Infantry => 0,
                             UnitKind::Heavy => 1,
                             UnitKind::Worker => 2,
+                            UnitKind::Pyromancer => 3,
+                            UnitKind::Stormcaller => 4,
+                            UnitKind::Hound => 5,
+                            UnitKind::Javelin => 6,
                         };
                         if self.prod[b] <= Fx::ZERO {
                             self.prod[b] = Fx::from_int(PROD_TICKS);
@@ -1405,6 +1571,10 @@ impl World {
         let kind = match self.prod_kind[i] {
             1 => Kind::Heavy,
             2 => Kind::Worker,
+            3 => Kind::Pyromancer,
+            4 => Kind::Stormcaller,
+            5 => Kind::Hound,
+            6 => Kind::Javelin,
             _ => Kind::Infantry,
         };
         // Outward direction toward the rally (fallback: due south).
@@ -1622,6 +1792,8 @@ impl World {
                             BuildingKind::Barracks => Kind::Barracks,
                             BuildingKind::Turret => Kind::Turret,
                             BuildingKind::Supply => Kind::Supply,
+                            BuildingKind::StormWard => Kind::StormWard,
+                            BuildingKind::Bunker => Kind::Bunker,
                         };
                         let id = self.spawn(k, owner, x, y);
                         self.construct[id.index as usize] = Fx::from_int(CONSTRUCT_TICKS);
@@ -1958,6 +2130,12 @@ impl World {
                 Kind::Turret => 6,
                 Kind::Hq => 7,
                 Kind::Supply => 8,
+                Kind::Pyromancer => 9,
+                Kind::Stormcaller => 10,
+                Kind::Hound => 11,
+                Kind::Javelin => 12,
+                Kind::StormWard => 13,
+                Kind::Bunker => 14,
             });
             h.write_u32(self.owner[i] as u32);
             h.write_i64(self.pos[i].x.to_raw());
@@ -1994,6 +2172,9 @@ impl World {
         }
         for &b in &self.bot {
             h.write_u64(b as u64);
+        }
+        for &f in &self.faction {
+            h.write_u64(f.map(|f| f as u64).unwrap_or(0));
         }
         if self.pass_hash != 0 {
             h.write_u64(self.pass_hash);
@@ -2121,6 +2302,68 @@ mod tests {
             barracks_count(&w, 1) >= 1,
             "bot should have constructed a barracks"
         );
+    }
+
+    #[test]
+    fn faction_locks_training_and_building() {
+        // A Hollowmen player with a finished barracks and a worker (their
+        // first-wave kinds cost no carbon, which starts at zero).
+        let mut w = World::new(3);
+        w.set_faction(0, Faction::Hollowmen);
+        w.step(&[
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Barracks,
+                x: fx(0),
+                y: fx(0),
+            },
+            Command::SpawnBuilding {
+                owner: 0,
+                kind: BuildingKind::Hq,
+                x: fx(0),
+                y: fx(30),
+            },
+            Command::SpawnUnit {
+                owner: 0,
+                kind: UnitKind::Worker,
+                x: fx(10),
+                y: fx(0),
+            },
+        ]);
+        // The enemy faction's unit is rejected; the own faction's queues.
+        w.step(&[Command::Train {
+            building: 0,
+            kind: UnitKind::Pyromancer,
+        }]);
+        assert_eq!(
+            w.snapshot()[0].queued,
+            0,
+            "off-faction train must be rejected"
+        );
+        w.step(&[Command::Train {
+            building: 0,
+            kind: UnitKind::Hound,
+        }]);
+        assert_eq!(w.snapshot()[0].queued, 1, "own-faction train must queue");
+        // The enemy faction's structure is rejected (the worker never moves);
+        // the own faction's is accepted (the worker walks to the far site).
+        w.step(&[Command::Build {
+            unit: 2,
+            kind: BuildingKind::StormWard,
+            x: fx(60),
+            y: fx(2),
+        }]);
+        assert!(
+            !w.snapshot()[2].moving,
+            "off-faction build must be rejected"
+        );
+        w.step(&[Command::Build {
+            unit: 2,
+            kind: BuildingKind::Bunker,
+            x: fx(60),
+            y: fx(2),
+        }]);
+        assert!(w.snapshot()[2].moving, "own-faction build must be accepted");
     }
 
     #[test]
