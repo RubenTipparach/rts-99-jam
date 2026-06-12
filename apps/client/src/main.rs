@@ -372,7 +372,7 @@ impl App {
         App {
             window: None,
             gfx: None,
-            game: Game::new(1),
+            game: Game::new(1, sim::BotLevel::Normal),
             camera: Camera::default(),
             input: Input::default(),
             last_frame: Instant::now(),
@@ -668,6 +668,7 @@ impl App {
             menu::Click::SetFaction(f) => self.lobby.faction = f,
             menu::Click::AddBot => self.lobby.bots = (self.lobby.bots + 1).min(3),
             menu::Click::RemoveBot => self.lobby.bots = self.lobby.bots.saturating_sub(1).max(1),
+            menu::Click::CycleAi => self.lobby.ai = menu::next_ai(self.lobby.ai),
             menu::Click::OpenMap => {
                 self.lobby.map_open = true;
                 // Scroll so the current selection is visible.
@@ -689,7 +690,7 @@ impl App {
                 if let Some(g) = self.gfx.as_mut() {
                     g.set_world();
                 }
-                self.game = Game::new(self.lobby.bots);
+                self.game = Game::new(self.lobby.bots, self.lobby.ai);
                 self.game.set_player_faction(self.lobby.faction);
                 self.game.apply_terrain();
                 if let Some((hx, hz)) = self.game.player_hq() {
@@ -731,7 +732,7 @@ impl App {
     fn end_match_to_menu(&mut self) {
         self.outcome = None;
         self.build_mode = None;
-        self.game = Game::new(1);
+        self.game = Game::new(1, self.lobby.ai);
         self.game.apply_terrain();
         self.set_paused(false);
         #[cfg(target_arch = "wasm32")]

@@ -9,7 +9,7 @@ use crate::gfx::{
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
 use protocol::{BuildingKind, Command, UnitKind};
-use sim::{Kind, Snap, World};
+use sim::{BotLevel, Kind, Snap, World};
 use std::collections::{HashMap, HashSet};
 use web_time::Instant;
 
@@ -261,14 +261,15 @@ pub struct Game {
 
 impl Default for Game {
     fn default() -> Self {
-        Self::new(1)
+        Self::new(1, BotLevel::Normal)
     }
 }
 
 impl Game {
-    /// Start a match against `bots` bot commanders (1-3). Standard maps
-    /// carry four spawns; only the active players' entities spawn.
-    pub fn new(bots: u8) -> Self {
+    /// Start a match against `bots` bot commanders (1-3) at difficulty `ai`.
+    /// Standard maps carry four spawns; only the active players' entities
+    /// spawn.
+    pub fn new(bots: u8, ai: BotLevel) -> Self {
         // The whole starting layout (bases, garrisons, and the resource
         // clusters) is baked into the active battlefield's map file: each
         // voxel world carries the skirmish template fitted onto its own
@@ -307,9 +308,9 @@ impl Game {
             yaw_time: 0.0,
         };
         // Every enemy is driven by an in-sim bot commander (mines, builds,
-        // trains), one per spawned bot player.
+        // trains), one per spawned bot player, at the lobby's difficulty.
         for b in 1..=bots {
-            g.world.set_bot(b, true);
+            g.world.set_bot(b, ai);
         }
         g.apply_terrain();
         g.step_now();

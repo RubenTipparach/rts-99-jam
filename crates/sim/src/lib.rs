@@ -265,10 +265,80 @@ const CONSTRUCT_TICKS: i32 = 80;
 const BUILD_RANGE2: Fx = Fx::from_int(64); // worker builds within range 8 of the site
 const BUILD_CLEAR2: Fx = Fx::from_int(196); // sites must be >= 14 from other buildings
 
-// Bot commander tuning.
-const BOT_THINK_TICKS: u64 = 15; // re-plan cadence (every ~0.75s at 20 Hz)
-const BOT_MAX_BUILDINGS: usize = 3; // production/defense structures (HQ and depots excluded)
-const BOT_TARGET_WORKERS: usize = 6; // staff the mining crew up to this
+/// Bot commander difficulty. `Off` means the player is human-driven; the
+/// other levels tune the in-sim commander's economy, tempo, and aggression
+/// (see `bot_tuning`). Levels are part of the state hash, so all peers must
+/// agree on them at game setup.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum BotLevel {
+    #[default]
+    Off = 0,
+    /// Full economy and defense, but never attacks: a sandbox sparring
+    /// partner for testing.
+    Passive = 1,
+    Easy = 2,
+    Normal = 3,
+    Hard = 4,
+}
+
+/// Per-level bot commander tuning. `Normal` is the long-standing baseline.
+struct BotTuning {
+    /// Re-plan cadence in ticks (15 is ~0.75s at 20 Hz).
+    think: u64,
+    /// Staff the mining crew up to this many workers.
+    workers: usize,
+    /// Production/defense structure cap (HQ and depots excluded).
+    buildings: usize,
+    /// Production line: barracks built before turrets.
+    barracks: usize,
+    /// Idle army size that triggers a push (`usize::MAX` = never attack).
+    attack_at: usize,
+    /// Push cadence, in think-cycles.
+    waves: u64,
+    /// Queue a unit at every barracks per think, not just one.
+    multi_train: bool,
+}
+
+fn bot_tuning(level: BotLevel) -> BotTuning {
+    match level {
+        BotLevel::Off | BotLevel::Passive => BotTuning {
+            think: 15,
+            workers: 6,
+            buildings: 3,
+            barracks: 2,
+            attack_at: usize::MAX,
+            waves: 12,
+            multi_train: false,
+        },
+        BotLevel::Easy => BotTuning {
+            think: 30,
+            workers: 4,
+            buildings: 2,
+            barracks: 1,
+            attack_at: 8,
+            waves: 16,
+            multi_train: false,
+        },
+        BotLevel::Normal => BotTuning {
+            think: 15,
+            workers: 6,
+            buildings: 3,
+            barracks: 2,
+            attack_at: 12,
+            waves: 12,
+            multi_train: false,
+        },
+        BotLevel::Hard => BotTuning {
+            think: 10,
+            workers: 9,
+            buildings: 6,
+            barracks: 3,
+            attack_at: 14,
+            waves: 8,
+            multi_train: true,
+        },
+    }
+}
 
 // Obstacle avoidance: mobile units are pushed out of these static footprints so
 // they path around structures instead of through them. Radii are world units.
@@ -409,8 +479,8 @@ pub struct World {
     /// Producers only: which unit kind the building is currently producing
     /// (0 = Infantry, 1 = Heavy, 2 = Worker).
     prod_kind: Vec<u8>,
-    /// Per-player flag: this player is driven by the in-sim bot commander.
-    bot: Vec<bool>,
+    /// Per-player bot commander level (`Off` = human-driven).
+    bot: Vec<BotLevel>,
     /// Facing per entity: the raw (un-normalized) direction it last moved,
     /// mined, or attacked toward. Part of the deterministic state (hashed);
     /// the renderer normalizes it into a yaw.
@@ -474,14 +544,15 @@ impl World {
         }
     }
 
-    /// Mark a player as bot-controlled (the in-sim commander mines, builds, and
-    /// trains for them). Must be set identically on every peer.
-    pub fn set_bot(&mut self, player: PlayerId, on: bool) {
+    /// Set a player's bot commander level (the in-sim commander mines, builds,
+    /// and trains for them; `BotLevel::Off` returns the player to direct
+    /// control). Hashed state: must be set identically on every peer.
+    pub fn set_bot(&mut self, player: PlayerId, level: BotLevel) {
         let i = player as usize;
         while self.bot.len() <= i {
-            self.bot.push(false);
+            self.bot.push(BotLevel::Off);
         }
-        self.bot[i] = on;
+        self.bot[i] = level;
     }
 
     /// Feed the terrain passability grid (must be identical on every peer):
@@ -920,15 +991,20 @@ impl World {
     /// Deterministic bot commander: each bot player's intents for this tick, as
     /// ordinary `Command`s (so they flow through the same validated path as a
     /// human's). Mines with idle workers, builds up to a cap, trains a surplus
-    /// into units, and pushes a massed army at the enemy. Throttled by tick.
+    /// into units, and pushes a massed army at the enemy. Cadence, caps, and
+    /// aggression come from the player's `BotLevel` (see `bot_tuning`).
     fn ai_commands(&self) -> Vec<Command> {
         let mut out = Vec::new();
-        if self.bot.iter().all(|&b| !b) || !self.tick.is_multiple_of(BOT_THINK_TICKS) {
+        if self.bot.iter().all(|&b| b == BotLevel::Off) {
             return out;
         }
         let cap = self.arena.capacity();
         for p in 0..self.bot.len() {
-            if !self.bot[p] {
+            if self.bot[p] == BotLevel::Off {
+                continue;
+            }
+            let t = bot_tuning(self.bot[p]);
+            if !self.tick.is_multiple_of(t.think) {
                 continue;
             }
             let owner = p as PlayerId;
@@ -987,11 +1063,11 @@ impl World {
             let ore = self.ore(owner);
             let carbon = self.carbon(owner);
             // Supply first when the cap is close; otherwise production up to
-            // two Barracks, then sprinkle Turrets.
+            // the level's barracks line, then sprinkle Turrets.
             let supply_tight = self.supply_used(owner) + 3 >= self.supply_cap(owner);
             let next_build = if supply_tight {
                 BuildingKind::Supply
-            } else if barracks.len() < 2 {
+            } else if barracks.len() < t.barracks {
                 BuildingKind::Barracks
             } else {
                 BuildingKind::Turret
@@ -1001,7 +1077,7 @@ impl World {
             // 1) Construct: when flush and under the cap (depots are exempt
             // from the cap: the bot always builds out of a supply block).
             let mut builder: Option<u32> = None;
-            if (supply_tight || building_count < BOT_MAX_BUILDINGS)
+            if (supply_tight || building_count < t.buildings)
                 && !worker_building
                 && ore >= build_ore + Fx::from_int(60)
                 && carbon >= build_carbon
@@ -1009,12 +1085,16 @@ impl World {
                 builder = idle_workers.first().copied().or(any_worker);
                 if let (Some(w), Some(bp)) = (builder, base) {
                     // Depots fill their own row behind the production line, a
-                    // slot per depot built, so sites never collide.
+                    // slot per depot built, so sites never collide. Structures
+                    // fill rows of three, each row a step further out.
                     let (off, dy) = if next_build == BuildingKind::Supply {
                         let slot = (self.supply_cap(owner) / SUPPLY_PER_DEPOT) as i32 % 5;
                         ((slot - 2) * 14, 44)
                     } else {
-                        (((building_count % 3) as i32 - 1) * 24, 26)
+                        (
+                            ((building_count % 3) as i32 - 1) * 24,
+                            26 + (building_count / 3) as i32 * 18,
+                        )
                     };
                     out.push(Command::Build {
                         unit: w,
@@ -1037,7 +1117,7 @@ impl World {
 
             // 3) Staff the economy: train workers at the HQ until the mining
             // crew is full (they pay for themselves quickly).
-            if worker_count < BOT_TARGET_WORKERS {
+            if worker_count < t.workers {
                 let (wo, wc) = unit_cost(UnitKind::Worker);
                 for &h in &hqs {
                     if self.queue[h as usize] < MAX_QUEUE && ore >= wo && carbon >= wc {
@@ -1050,37 +1130,50 @@ impl World {
                 }
             }
 
-            // 4) Train: spend surplus ore (keeping a build reserve) on one unit;
-            // upgrade to a Heavy when the bot has banked enough carbon.
-            let reserve = if building_count < BOT_MAX_BUILDINGS {
+            // 4) Train: spend surplus ore (keeping a build reserve) on units;
+            // upgrade to a Heavy when the bot has banked enough carbon. Most
+            // levels queue at one barracks per think; `multi_train` levels
+            // keep every line running, budgeting the bank across them.
+            let reserve = if building_count < t.buildings {
                 build_ore
             } else {
                 Fx::ZERO
             };
-            let want = if carbon >= unit_cost(UnitKind::Heavy).1 {
-                UnitKind::Heavy
-            } else {
-                UnitKind::Infantry
-            };
-            let (uo, uc) = unit_cost(want);
+            let mut ore_left = ore - reserve;
+            let mut carbon_left = carbon;
             for &b in &barracks {
-                if self.queue[b as usize] < MAX_QUEUE && ore >= reserve + uo && carbon >= uc {
-                    out.push(Command::Train {
-                        building: b,
-                        kind: want,
-                    });
+                if self.queue[b as usize] >= MAX_QUEUE {
+                    continue;
+                }
+                let want = if carbon_left >= unit_cost(UnitKind::Heavy).1 {
+                    UnitKind::Heavy
+                } else {
+                    UnitKind::Infantry
+                };
+                let (uo, uc) = unit_cost(want);
+                if ore_left < uo || carbon_left < uc {
                     break;
                 }
+                out.push(Command::Train {
+                    building: b,
+                    kind: want,
+                });
+                if !t.multi_train {
+                    break;
+                }
+                ore_left -= uo;
+                carbon_left -= uc;
             }
 
-            // 5) Attack: once a force has massed, push idle infantry at the foe.
-            if infantry_count >= 12 && self.tick.is_multiple_of(BOT_THINK_TICKS * 12) {
-                if let Some(t) = self.nearest_enemy_building(owner, base) {
+            // 5) Attack: once a force has massed, push idle infantry at the
+            // foe (Passive never does).
+            if infantry_count >= t.attack_at && self.tick.is_multiple_of(t.think * t.waves) {
+                if let Some(at) = self.nearest_enemy_building(owner, base) {
                     for &u in &idle_infantry {
                         out.push(Command::AttackMove {
                             unit: u,
-                            x: t.x,
-                            y: t.y,
+                            x: at.x,
+                            y: at.y,
                         });
                     }
                 }
@@ -1992,7 +2085,7 @@ mod tests {
         // else. With no passive income, everything the bot builds must be
         // funded by mining.
         let mut w = World::new(11);
-        w.set_bot(1, true);
+        w.set_bot(1, BotLevel::Normal);
         w.step(&[
             Command::SpawnBuilding {
                 owner: 1,
@@ -2028,6 +2121,20 @@ mod tests {
             barracks_count(&w, 1) >= 1,
             "bot should have constructed a barracks"
         );
+    }
+
+    #[test]
+    fn bot_level_is_part_of_the_hash() {
+        // Peers must agree on bot difficulty: two otherwise identical worlds
+        // with different levels (or a different on/off split) may not hash
+        // alike, or a mismatched lobby would silently desync later.
+        let world = |level: BotLevel| {
+            let mut w = World::new(7);
+            w.set_bot(1, level);
+            w.state_hash()
+        };
+        assert_ne!(world(BotLevel::Easy), world(BotLevel::Hard));
+        assert_ne!(world(BotLevel::Off), world(BotLevel::Passive));
     }
 
     #[test]

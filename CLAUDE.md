@@ -89,8 +89,11 @@ it. "Commands in, snapshots out." See `docs/ARCHITECTURE.md`.
   from a node back to the HQ - the only drop-off (`is_dropoff`); buildings
   never generate income on their own. See `STARTING_ORE`/`TRAIN_COST` in
   `crates/sim`. The player drives production from the HUD command card; the
-  enemy is static until an AI issues `Train`. Ore is part of the state
-  hash, so tuning it re-pins the golden value.
+  enemy is driven by the in-sim bot commander (`ai_commands`), whose tempo,
+  caps, and aggression come from a per-player `BotLevel` picked in the lobby
+  (Passive/Easy/Normal/Hard; `bot_tuning` in `crates/sim`). Bot levels and
+  ore are part of the state hash, so changing either re-pins the golden
+  value.
 
 ## Maps and spawn sites
 
