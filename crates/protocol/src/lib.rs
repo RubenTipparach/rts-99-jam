@@ -54,6 +54,30 @@ pub enum BuildingKind {
     /// Hollowmen blockhouse: cheap, tough, short-reach rapid fire.
     /// Faction-locked.
     Bunker,
+    /// Astromancer caster college: trains the Pyromancer and Stormcaller.
+    Athenaeum,
+    /// Astromancer forge (tier 2 tech shell). Faction-locked.
+    Crucible,
+    /// Astromancer research dome (tech shell). Faction-locked.
+    Conservatory,
+    /// Astromancer air roost (tech shell). Faction-locked.
+    Aerie,
+    /// Astromancer superweapon site (tech shell). Faction-locked.
+    LeyNexus,
+    /// Hollowmen mech line: trains the Hound and Javelin.
+    MachineShop,
+    /// Hollowmen munitions plant (tech shell). Faction-locked.
+    Arsenal,
+    /// Hollowmen detection mast (tech shell). Faction-locked.
+    RadarArray,
+    /// Hollowmen air pad (tech shell). Faction-locked.
+    Starport,
+    /// Hollowmen power plant (tech shell). Faction-locked.
+    FusionReactor,
+    /// Hollowmen capital yard (tech shell). Faction-locked.
+    Drydock,
+    /// Hollowmen nuke site (tech shell). Faction-locked.
+    MissileSilo,
 }
 
 /// Harvestable resource nodes.

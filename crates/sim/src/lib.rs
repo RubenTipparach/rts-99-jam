@@ -54,6 +54,20 @@ pub enum Kind {
     StormWard,
     /// Hollowmen blockhouse: cheap static defense, short-reach rapid fire.
     Bunker,
+    /// Astromancer caster college: trains the casters.
+    Athenaeum,
+    Crucible,
+    Conservatory,
+    Aerie,
+    LeyNexus,
+    /// Hollowmen mech line: trains the mechs.
+    MachineShop,
+    Arsenal,
+    RadarArray,
+    Starport,
+    FusionReactor,
+    Drydock,
+    MissileSilo,
     /// Ore crystals: harvested into the ore stockpile.
     OreNode,
     /// Carbon gas geyser: harvested into the carbon stockpile.
@@ -80,9 +94,81 @@ fn unit_faction(k: UnitKind) -> Option<Faction> {
 /// The faction a building kind is locked to (`None` = neutral).
 fn building_faction(k: BuildingKind) -> Option<Faction> {
     match k {
-        BuildingKind::StormWard => Some(Faction::Astromancers),
-        BuildingKind::Bunker => Some(Faction::Hollowmen),
+        BuildingKind::StormWard
+        | BuildingKind::Athenaeum
+        | BuildingKind::Crucible
+        | BuildingKind::Conservatory
+        | BuildingKind::Aerie
+        | BuildingKind::LeyNexus => Some(Faction::Astromancers),
+        BuildingKind::Bunker
+        | BuildingKind::MachineShop
+        | BuildingKind::Arsenal
+        | BuildingKind::RadarArray
+        | BuildingKind::Starport
+        | BuildingKind::FusionReactor
+        | BuildingKind::Drydock
+        | BuildingKind::MissileSilo => Some(Faction::Hollowmen),
         _ => None,
+    }
+}
+
+/// Every tech-tier structure kind, sim and wire form side by side (used by
+/// the building <-> kind mappings below).
+const TECH_BUILDINGS: [(Kind, BuildingKind); 12] = [
+    (Kind::Athenaeum, BuildingKind::Athenaeum),
+    (Kind::Crucible, BuildingKind::Crucible),
+    (Kind::Conservatory, BuildingKind::Conservatory),
+    (Kind::Aerie, BuildingKind::Aerie),
+    (Kind::LeyNexus, BuildingKind::LeyNexus),
+    (Kind::MachineShop, BuildingKind::MachineShop),
+    (Kind::Arsenal, BuildingKind::Arsenal),
+    (Kind::RadarArray, BuildingKind::RadarArray),
+    (Kind::Starport, BuildingKind::Starport),
+    (Kind::FusionReactor, BuildingKind::FusionReactor),
+    (Kind::Drydock, BuildingKind::Drydock),
+    (Kind::MissileSilo, BuildingKind::MissileSilo),
+];
+
+/// Sim kind for a wire building kind.
+fn building_kind_to_kind(k: BuildingKind) -> Kind {
+    match k {
+        BuildingKind::Hq => Kind::Hq,
+        BuildingKind::Barracks => Kind::Barracks,
+        BuildingKind::Turret => Kind::Turret,
+        BuildingKind::Supply => Kind::Supply,
+        BuildingKind::StormWard => Kind::StormWard,
+        BuildingKind::Bunker => Kind::Bunker,
+        _ => TECH_BUILDINGS
+            .iter()
+            .find(|(_, b)| *b == k)
+            .map(|(s, _)| *s)
+            .expect("tech building mapping"),
+    }
+}
+
+/// Wire code for a unit kind in a production queue (also how `Snap` encodes
+/// `queue_kinds` for the HUD).
+pub fn unit_kind_code(k: UnitKind) -> u8 {
+    match k {
+        UnitKind::Infantry => 0,
+        UnitKind::Heavy => 1,
+        UnitKind::Worker => 2,
+        UnitKind::Pyromancer => 3,
+        UnitKind::Stormcaller => 4,
+        UnitKind::Hound => 5,
+        UnitKind::Javelin => 6,
+    }
+}
+
+fn code_to_kind(c: u8) -> Kind {
+    match c {
+        1 => Kind::Heavy,
+        2 => Kind::Worker,
+        3 => Kind::Pyromancer,
+        4 => Kind::Stormcaller,
+        5 => Kind::Hound,
+        6 => Kind::Javelin,
+        _ => Kind::Infantry,
     }
 }
 
@@ -117,13 +203,33 @@ fn is_fighter(k: Kind) -> bool {
 fn is_building(k: Kind) -> bool {
     matches!(
         k,
-        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply | Kind::StormWard | Kind::Bunker
+        Kind::Hq
+            | Kind::Barracks
+            | Kind::Turret
+            | Kind::Supply
+            | Kind::StormWard
+            | Kind::Bunker
+            | Kind::Athenaeum
+            | Kind::Crucible
+            | Kind::Conservatory
+            | Kind::Aerie
+            | Kind::LeyNexus
+            | Kind::MachineShop
+            | Kind::Arsenal
+            | Kind::RadarArray
+            | Kind::Starport
+            | Kind::FusionReactor
+            | Kind::Drydock
+            | Kind::MissileSilo
     )
 }
 
 /// Buildings that run a production queue (HQ makes workers, Barracks fighters).
 fn is_producer(k: Kind) -> bool {
-    matches!(k, Kind::Hq | Kind::Barracks)
+    matches!(
+        k,
+        Kind::Hq | Kind::Barracks | Kind::Athenaeum | Kind::MachineShop
+    )
 }
 
 /// Workers deposit their load at these. Only the HQ takes deliveries:
@@ -309,6 +415,40 @@ fn stats(kind: Kind) -> Stats {
             attack_cd: Fx::from_int(8),
             aggro2: Fx::from_int(100),
         },
+        // The production halls: roomy but unarmed.
+        Kind::Athenaeum | Kind::MachineShop => Stats {
+            max_hp: Fx::from_int(450),
+            speed: Fx::ZERO,
+            range: Fx::ZERO,
+            damage: Fx::ZERO,
+            attack_cd: Fx::ZERO,
+            aggro2: Fx::ZERO,
+        },
+        // Tech-tier shells: tougher the deeper the tier, all unarmed.
+        Kind::Crucible | Kind::Conservatory | Kind::Arsenal | Kind::RadarArray => Stats {
+            max_hp: Fx::from_int(400),
+            speed: Fx::ZERO,
+            range: Fx::ZERO,
+            damage: Fx::ZERO,
+            attack_cd: Fx::ZERO,
+            aggro2: Fx::ZERO,
+        },
+        Kind::Aerie | Kind::Starport | Kind::FusionReactor => Stats {
+            max_hp: Fx::from_int(550),
+            speed: Fx::ZERO,
+            range: Fx::ZERO,
+            damage: Fx::ZERO,
+            attack_cd: Fx::ZERO,
+            aggro2: Fx::ZERO,
+        },
+        Kind::LeyNexus | Kind::Drydock | Kind::MissileSilo => Stats {
+            max_hp: Fx::from_int(650),
+            speed: Fx::ZERO,
+            range: Fx::ZERO,
+            damage: Fx::ZERO,
+            attack_cd: Fx::ZERO,
+            aggro2: Fx::ZERO,
+        },
         // Resource nodes are inert: tons of "hp" so stray AoE can't pop them.
         Kind::OreNode | Kind::CarbonNode => Stats {
             max_hp: Fx::from_int(100000),
@@ -374,6 +514,18 @@ fn building_cost(kind: BuildingKind) -> (Fx, Fx) {
         BuildingKind::Supply => (Fx::from_int(100), Fx::ZERO),
         BuildingKind::StormWard => (Fx::from_int(110), Fx::from_int(60)),
         BuildingKind::Bunker => (Fx::from_int(80), Fx::ZERO),
+        BuildingKind::Athenaeum => (Fx::from_int(180), Fx::from_int(40)),
+        BuildingKind::Crucible => (Fx::from_int(200), Fx::from_int(50)),
+        BuildingKind::Conservatory => (Fx::from_int(150), Fx::from_int(50)),
+        BuildingKind::Aerie => (Fx::from_int(200), Fx::from_int(75)),
+        BuildingKind::LeyNexus => (Fx::from_int(300), Fx::from_int(100)),
+        BuildingKind::MachineShop => (Fx::from_int(180), Fx::from_int(40)),
+        BuildingKind::Arsenal => (Fx::from_int(150), Fx::from_int(40)),
+        BuildingKind::RadarArray => (Fx::from_int(150), Fx::ZERO),
+        BuildingKind::Starport => (Fx::from_int(200), Fx::from_int(75)),
+        BuildingKind::FusionReactor => (Fx::from_int(250), Fx::from_int(50)),
+        BuildingKind::Drydock => (Fx::from_int(300), Fx::from_int(100)),
+        BuildingKind::MissileSilo => (Fx::from_int(400), Fx::from_int(50)),
     }
 }
 
@@ -471,6 +623,16 @@ fn obstacle_radius(k: Kind) -> Option<Fx> {
         Kind::Supply => Some(Fx::from_int(3)),      // small 5x5 tier
         Kind::StormWard => Some(Fx::from_ratio(5, 2)), // 2.5, the Ward tier
         Kind::Bunker => Some(Fx::from_int(3)),      // squat blockhouse
+        // Tech-tier structures: production-hall footprints.
+        Kind::Athenaeum | Kind::MachineShop | Kind::Crucible | Kind::Conservatory => {
+            Some(Fx::from_int(5))
+        }
+        Kind::Aerie | Kind::RadarArray | Kind::Arsenal | Kind::FusionReactor => {
+            Some(Fx::from_int(5))
+        }
+        Kind::Starport | Kind::Drydock | Kind::LeyNexus | Kind::MissileSilo => {
+            Some(Fx::from_int(6))
+        }
         Kind::OreNode | Kind::CarbonNode => Some(Fx::from_ratio(7, 2)), // 3.5
         _ => None,
     }
@@ -501,6 +663,8 @@ pub struct Snap {
     pub moving: bool,
     /// Workers only, display-only: actively mining a node this tick.
     pub mining: bool,
+    /// Display-only: engaging a target this tick (drives attack animation).
+    pub fighting: bool,
     /// Workers only, display-only: actively welding a building this tick.
     pub repairing: bool,
     /// Workers only, display-only: what the worker is hauling
@@ -511,6 +675,8 @@ pub struct Snap {
     /// Buildings only: units queued for production and the current unit's
     /// build progress (0..1). Display-only; not part of the state hash.
     pub queued: u32,
+    /// The FIFO of queued kinds (codes from `unit_kind_code`), `queued` long.
+    pub queue_kinds: [u8; MAX_QUEUE as usize],
     pub build_frac: Fx,
     /// Buildings only: construction progress, 1.0 once functional. Below 1.0 the
     /// structure is still being raised (display-only fraction).
@@ -593,17 +759,24 @@ pub struct World {
     carry_kind: Vec<u8>,
     /// Workers only, display-only: actively mining a node this tick.
     mining: Vec<bool>,
+    /// Display-only: actively engaging a target this tick (drives the
+    /// client's attack animation). Never hashed.
+    fighting: Vec<bool>,
     /// Workers only, display-only: actively repairing this tick.
     repairing: Vec<bool>,
     /// Buildings only: ticks of construction remaining (0 = functional).
     construct: Vec<Fx>,
-    /// Producers only: which unit kind the building is currently producing
-    /// (0 = Infantry, 1 = Heavy, 2 = Worker).
-    prod_kind: Vec<u8>,
+    /// Producers only: the FIFO of queued unit kinds (codes from
+    /// `unit_kind_code`), valid up to `queue[i]` entries, zeroed beyond.
+    queue_kinds: Vec<[u8; MAX_QUEUE as usize]>,
     /// Per-player bot commander level (`Off` = human-driven).
     bot: Vec<BotLevel>,
     /// Per-player faction (`None` = unset: only neutral kinds usable).
     faction: Vec<Option<Faction>>,
+    /// Committed go-around direction while skirting a building (+1 / -1
+    /// tangent sign, 0 = none): keeps a blocked unit walking one way around
+    /// a footprint instead of flip-flopping. Part of the hashed state.
+    dodge: Vec<i8>,
     /// Facing per entity: the raw (un-normalized) direction it last moved,
     /// mined, or attacked toward. Part of the deterministic state (hashed);
     /// the renderer normalizes it into a yaw.
@@ -653,11 +826,13 @@ impl World {
             carried: Vec::new(),
             carry_kind: Vec::new(),
             mining: Vec::new(),
+            fighting: Vec::new(),
             repairing: Vec::new(),
             construct: Vec::new(),
-            prod_kind: Vec::new(),
+            queue_kinds: Vec::new(),
             bot: Vec::new(),
             faction: Vec::new(),
+            dodge: Vec::new(),
             facing: Vec::new(),
             shots: Vec::new(),
             passable: Vec::new(),
@@ -796,9 +971,58 @@ impl World {
     fn try_move(&mut self, i: usize, nx: Fx, ny: Fx) {
         let cur = self.pos[i];
         if self.spot_free(cur, nx, ny) {
+            self.dodge[i] = 0;
             self.pos[i].x = nx;
             self.pos[i].y = ny;
             return;
+        }
+        // A building in the way: skirt its footprint FIRST (axis slides jam
+        // into corners), committing to one go-around direction so the unit
+        // doesn't flip-flop at the obstacle's far side.
+        if let Some(c) = self.blocking_obstacle(cur, nx, ny) {
+            let rx = cur.x - c.x;
+            let ry = cur.y - c.y;
+            let rl = (rx * rx + ry * ry).sqrt();
+            if rl > Fx::ZERO {
+                let (mvx, mvy) = (nx - cur.x, ny - cur.y);
+                let step = (mvx * mvx + mvy * mvy).sqrt();
+                // Tangent (-ry, rx); the committed sign wins, otherwise pick
+                // the side that agrees with the intended move and remember it.
+                let (mut tx, mut ty) = (-ry / rl, rx / rl);
+                let sign = if self.dodge[i] != 0 {
+                    self.dodge[i]
+                } else if tx * mvx + ty * mvy < Fx::ZERO {
+                    -1
+                } else {
+                    1
+                };
+                if sign < 0 {
+                    tx = -tx;
+                    ty = -ty;
+                }
+                // Bias slightly outward so the arc peels off the wall.
+                let (cx_, cy_) = (
+                    cur.x + (tx + rx / rl / Fx::from_int(4)) * step,
+                    cur.y + (ty + ry / rl / Fx::from_int(4)) * step,
+                );
+                if self.spot_free(cur, cx_, cy_) {
+                    self.dodge[i] = sign;
+                    self.pos[i].x = cx_;
+                    self.pos[i].y = cy_;
+                    return;
+                }
+                // This way is walled too: try the other way around once.
+                let (cx2, cy2) = (
+                    cur.x + (-tx + rx / rl / Fx::from_int(4)) * step,
+                    cur.y + (-ty + ry / rl / Fx::from_int(4)) * step,
+                );
+                if self.spot_free(cur, cx2, cy2) {
+                    self.dodge[i] = -sign;
+                    self.pos[i].x = cx2;
+                    self.pos[i].y = cy2;
+                    return;
+                }
+            }
         }
         if self.spot_free(cur, nx, cur.y) {
             self.pos[i].x = nx;
@@ -806,28 +1030,6 @@ impl World {
         }
         if self.spot_free(cur, cur.x, ny) {
             self.pos[i].y = ny;
-            return;
-        }
-        if let Some(c) = self.blocking_obstacle(cur, nx, ny) {
-            let rx = cur.x - c.x;
-            let ry = cur.y - c.y;
-            let rl = (rx * rx + ry * ry).sqrt();
-            if rl <= Fx::ZERO {
-                return;
-            }
-            let (mvx, mvy) = (nx - cur.x, ny - cur.y);
-            let step = (mvx * mvx + mvy * mvy).sqrt();
-            // Tangent (-ry, rx), flipped to agree with the intended move.
-            let (mut tx, mut ty) = (-ry / rl, rx / rl);
-            if tx * mvx + ty * mvy < Fx::ZERO {
-                tx = -tx;
-                ty = -ty;
-            }
-            let (cx_, cy_) = (cur.x + tx * step, cur.y + ty * step);
-            if self.spot_free(cur, cx_, cy_) {
-                self.pos[i].x = cx_;
-                self.pos[i].y = cy_;
-            }
         }
     }
 
@@ -887,10 +1089,12 @@ impl World {
             self.carried.push(Fx::ZERO);
             self.carry_kind.push(0);
             self.mining.push(false);
+            self.fighting.push(false);
             self.repairing.push(false);
             self.construct.push(Fx::ZERO);
-            self.prod_kind.push(0);
+            self.queue_kinds.push([0; MAX_QUEUE as usize]);
             // Face "north" (toward -y) until the first move/attack.
+            self.dodge.push(0);
             self.facing.push(Vec2::new(Fx::ZERO, Fx::from_int(-1)));
         }
     }
@@ -913,10 +1117,12 @@ impl World {
         self.carry_kind[i] = 0;
         self.mining[i] = false;
         self.repairing[i] = false;
+        self.fighting[i] = false;
         // Scenario / production spawns are instant; the Build path overrides this
         // to ramp construction up over CONSTRUCT_TICKS.
         self.construct[i] = Fx::ZERO;
-        self.prod_kind[i] = 0;
+        self.queue_kinds[i] = [0; MAX_QUEUE as usize];
+        self.dodge[i] = 0;
         self.facing[i] = Vec2::new(Fx::ZERO, Fx::from_int(-1));
         if owner != NEUTRAL {
             let _ = self.ore_mut(owner); // materialize the owner's stockpile
@@ -1391,15 +1597,7 @@ impl World {
                     self.spawn(k, owner, x, y);
                 }
                 Command::SpawnBuilding { owner, kind, x, y } => {
-                    let k = match kind {
-                        BuildingKind::Hq => Kind::Hq,
-                        BuildingKind::Barracks => Kind::Barracks,
-                        BuildingKind::Turret => Kind::Turret,
-                        BuildingKind::Supply => Kind::Supply,
-                        BuildingKind::StormWard => Kind::StormWard,
-                        BuildingKind::Bunker => Kind::Bunker,
-                    };
-                    self.spawn(k, owner, x, y);
+                    self.spawn(building_kind_to_kind(kind), owner, x, y);
                 }
                 Command::SpawnResource { kind, x, y } => {
                     let k = match kind {
@@ -1460,15 +1658,13 @@ impl World {
                     let trainable = self.arena.alive_at(building)
                         && matches!(
                             (self.kind[b], kind),
-                            (
-                                Kind::Barracks,
-                                UnitKind::Infantry
-                                    | UnitKind::Heavy
-                                    | UnitKind::Pyromancer
-                                    | UnitKind::Stormcaller
-                                    | UnitKind::Hound
-                                    | UnitKind::Javelin
-                            ) | (Kind::Hq, UnitKind::Worker)
+                            (Kind::Barracks, UnitKind::Infantry | UnitKind::Heavy)
+                                | (Kind::Hq, UnitKind::Worker)
+                                | (
+                                    Kind::Athenaeum,
+                                    UnitKind::Pyromancer | UnitKind::Stormcaller
+                                )
+                                | (Kind::MachineShop, UnitKind::Hound | UnitKind::Javelin)
                         )
                         && unit_faction(kind)
                             .is_none_or(|f| self.faction(self.owner[b]) == Some(f));
@@ -1482,16 +1678,8 @@ impl World {
                         let owner = self.owner[b];
                         *self.ore_mut(owner) -= ore;
                         *self.carbon_mut(owner) -= carbon;
+                        self.queue_kinds[b][self.queue[b] as usize] = unit_kind_code(kind);
                         self.queue[b] += 1;
-                        self.prod_kind[b] = match kind {
-                            UnitKind::Infantry => 0,
-                            UnitKind::Heavy => 1,
-                            UnitKind::Worker => 2,
-                            UnitKind::Pyromancer => 3,
-                            UnitKind::Stormcaller => 4,
-                            UnitKind::Hound => 5,
-                            UnitKind::Javelin => 6,
-                        };
                         if self.prod[b] <= Fx::ZERO {
                             self.prod[b] = Fx::from_int(PROD_TICKS);
                         }
@@ -1510,6 +1698,8 @@ impl World {
     fn set_order(&mut self, unit: u32, order: Order) {
         if self.arena.alive_at(unit) && is_mobile(self.kind[unit as usize]) {
             self.order[unit as usize] = order;
+            // A fresh order forgets any committed go-around direction.
+            self.dodge[unit as usize] = 0;
         }
     }
 
@@ -1568,15 +1758,10 @@ impl World {
         let owner = self.owner[i];
         let p = self.pos[i];
         let rally = self.rally[i];
-        let kind = match self.prod_kind[i] {
-            1 => Kind::Heavy,
-            2 => Kind::Worker,
-            3 => Kind::Pyromancer,
-            4 => Kind::Stormcaller,
-            5 => Kind::Hound,
-            6 => Kind::Javelin,
-            _ => Kind::Infantry,
-        };
+        // Pop the queue front: this unit's kind, then shift the FIFO down.
+        let kind = code_to_kind(self.queue_kinds[i][0]);
+        self.queue_kinds[i].rotate_left(1);
+        self.queue_kinds[i][MAX_QUEUE as usize - 1] = 0;
         // Outward direction toward the rally (fallback: due south).
         let dx = rally.x - p.x;
         let dy = rally.y - p.y;
@@ -1614,10 +1799,46 @@ impl World {
                 return;
             }
         }
+        // Spread arrivals: each unit takes its own spot in a small ring
+        // around the rally, so a stream of production settles instead of
+        // every unit grinding toward one shared point.
+        const DIRS: [(i64, i64); 8] = [
+            (10000, 0),
+            (7071, 7071),
+            (0, 10000),
+            (-7071, 7071),
+            (-10000, 0),
+            (-7071, -7071),
+            (0, -10000),
+            (7071, -7071),
+        ];
+        let (jc, js) = DIRS[self.rng.range_u32(8) as usize];
+        let (jc, js) = (Fx::from_ratio(jc, 10000), Fx::from_ratio(js, 10000));
+        let jr = Fx::from_int(self.rng.range_u32(4) as i32 + 1);
         self.order[u] = Order::Move {
-            x: rally.x,
-            y: rally.y,
+            x: rally.x + jc * jr,
+            y: rally.y + js * jr,
         };
+    }
+
+    /// True when a move target sits inside a building's footprint and `i`
+    /// already stands at that footprint's rim: the point can never be
+    /// reached, so stop instead of grinding against the wall forever.
+    fn blocked_arrival(&self, i: usize, x: Fx, y: Fx) -> bool {
+        for j in 0..self.arena.capacity() {
+            if !self.arena.alive[j] || j == i {
+                continue;
+            }
+            let Some(r) = obstacle_radius(self.kind[j]) else {
+                continue;
+            };
+            let c = self.pos[j];
+            if dist2(c, x, y) < r * r {
+                let rim = r + UNIT_RADIUS + Fx::from_int(2);
+                return dist2(self.pos[i], c.x, c.y) <= rim * rim;
+            }
+        }
+        false
     }
 
     /// True when at least two other mobile units press within separation range
@@ -1670,6 +1891,7 @@ impl World {
             let me = self.pos[i];
             self.mining[i] = false;
             self.repairing[i] = false;
+            self.fighting[i] = false;
 
             // Harvest is a self-contained cycle (mine the node, then return to
             // the nearest base and deposit), handled before the combat orders.
@@ -1787,15 +2009,7 @@ impl World {
                     {
                         *self.ore_mut(owner) -= ore;
                         *self.carbon_mut(owner) -= carbon;
-                        let k = match kind {
-                            BuildingKind::Hq => Kind::Hq,
-                            BuildingKind::Barracks => Kind::Barracks,
-                            BuildingKind::Turret => Kind::Turret,
-                            BuildingKind::Supply => Kind::Supply,
-                            BuildingKind::StormWard => Kind::StormWard,
-                            BuildingKind::Bunker => Kind::Bunker,
-                        };
-                        let id = self.spawn(k, owner, x, y);
+                        let id = self.spawn(building_kind_to_kind(kind), owner, x, y);
                         self.construct[id.index as usize] = Fx::from_int(CONSTRUCT_TICKS);
                     }
                     self.order[i] = Order::Idle;
@@ -1818,9 +2032,12 @@ impl World {
                 Order::Move { x, y } => {
                     let d2t = dist2(me, x, y);
                     // Arrived - or near enough while the spot is already
-                    // crowded (don't grind into an occupied destination).
+                    // crowded (don't grind into an occupied destination), or
+                    // as close as a target tucked inside a building footprint
+                    // allows.
                     if d2t <= Fx::from_ratio(4, 10)
-                        || (d2t <= Fx::from_int(49) && self.crowded_near(i))
+                        || (d2t <= Fx::from_int(100) && self.crowded_near(i))
+                        || self.blocked_arrival(i, x, y)
                     {
                         self.order[i] = Order::Idle;
                     } else {
@@ -1852,7 +2069,8 @@ impl World {
                     } else {
                         let d2t = dist2(me, x, y);
                         if d2t <= Fx::from_ratio(4, 10)
-                            || (d2t <= Fx::from_int(49) && self.crowded_near(i))
+                            || (d2t <= Fx::from_int(100) && self.crowded_near(i))
+                            || self.blocked_arrival(i, x, y)
                         {
                             self.order[i] = Order::Idle;
                         } else {
@@ -1866,6 +2084,7 @@ impl World {
             if let Some(t) = attack {
                 // Square up to the target even between shots.
                 self.face(i, self.pos[t].x, self.pos[t].y);
+                self.fighting[i] = true;
                 if self.cooldown[i] <= Fx::ZERO {
                     damage[t] += inf.damage;
                     self.cooldown[i] = inf.attack_cd;
@@ -2058,7 +2277,7 @@ impl World {
                 continue;
             }
             // Build progress of the current unit (display-only).
-            let build_frac = if self.kind[i] == Kind::Barracks && self.prod[i] > Fx::ZERO {
+            let build_frac = if is_producer(self.kind[i]) && self.prod[i] > Fx::ZERO {
                 (Fx::from_int(PROD_TICKS) - self.prod[i]) / Fx::from_int(PROD_TICKS)
             } else {
                 Fx::ZERO
@@ -2088,6 +2307,7 @@ impl World {
                 max_hp: stats(self.kind[i]).max_hp,
                 moving: !matches!(self.order[i], Order::Idle),
                 mining: self.mining[i],
+                fighting: self.fighting[i],
                 repairing: self.repairing[i],
                 carry: if self.carried[i] > Fx::ZERO {
                     if self.carry_kind[i] == 1 {
@@ -2100,6 +2320,7 @@ impl World {
                 },
                 resource_frac,
                 queued: self.queue[i],
+                queue_kinds: self.queue_kinds[i],
                 build_frac,
                 construct_frac,
                 rally: self.rally[i],
@@ -2136,19 +2357,34 @@ impl World {
                 Kind::Javelin => 12,
                 Kind::StormWard => 13,
                 Kind::Bunker => 14,
+                Kind::Athenaeum => 15,
+                Kind::Crucible => 16,
+                Kind::Conservatory => 17,
+                Kind::Aerie => 18,
+                Kind::LeyNexus => 19,
+                Kind::MachineShop => 20,
+                Kind::Arsenal => 21,
+                Kind::RadarArray => 22,
+                Kind::Starport => 23,
+                Kind::FusionReactor => 24,
+                Kind::Drydock => 25,
+                Kind::MissileSilo => 26,
             });
             h.write_u32(self.owner[i] as u32);
             h.write_i64(self.pos[i].x.to_raw());
             h.write_i64(self.pos[i].y.to_raw());
             h.write_i64(self.hp[i].to_raw());
             h.write_i64(self.cooldown[i].to_raw());
+            h.write_u64(self.dodge[i] as u64);
             h.write_i64(self.prod[i].to_raw());
             h.write_u32(self.queue[i]);
             h.write_i64(self.amount[i].to_raw());
             h.write_i64(self.carried[i].to_raw());
             h.write_u64(self.carry_kind[i] as u64);
             h.write_i64(self.construct[i].to_raw());
-            h.write_u64(self.prod_kind[i] as u64);
+            for &qk in &self.queue_kinds[i] {
+                h.write_u64(qk as u64);
+            }
             h.write_i64(self.facing[i].x.to_raw());
             h.write_i64(self.facing[i].y.to_raw());
             let (tag, a, b) = match self.order[i] {
@@ -2306,14 +2542,14 @@ mod tests {
 
     #[test]
     fn faction_locks_training_and_building() {
-        // A Hollowmen player with a finished barracks and a worker (their
-        // first-wave kinds cost no carbon, which starts at zero).
+        // A player with a (scenario-spawned) mech line and a worker. The
+        // Hound costs no carbon, which starts at zero.
         let mut w = World::new(3);
-        w.set_faction(0, Faction::Hollowmen);
+        w.set_faction(0, Faction::Astromancers);
         w.step(&[
             Command::SpawnBuilding {
                 owner: 0,
-                kind: BuildingKind::Barracks,
+                kind: BuildingKind::MachineShop,
                 x: fx(0),
                 y: fx(0),
             },
@@ -2330,16 +2566,18 @@ mod tests {
                 y: fx(0),
             },
         ]);
-        // The enemy faction's unit is rejected; the own faction's queues.
+        // The right hall but the wrong faction: rejected. Switch the player
+        // to the Hollowmen and the same order queues.
         w.step(&[Command::Train {
             building: 0,
-            kind: UnitKind::Pyromancer,
+            kind: UnitKind::Hound,
         }]);
         assert_eq!(
             w.snapshot()[0].queued,
             0,
             "off-faction train must be rejected"
         );
+        w.set_faction(0, Faction::Hollowmen);
         w.step(&[Command::Train {
             building: 0,
             kind: UnitKind::Hound,

@@ -1990,6 +1990,26 @@ fn supply_mesh_astro() -> Vec<UnitVertex> {
 /// Walk-cycle frames baked per walking unit (one full gait cycle).
 const WALK_FRAMES: usize = 8;
 
+/// Attack-cycle frames baked per combat unit (one strike or recoil cycle).
+const ATTACK_FRAMES: usize = 4;
+
+/// Bake one attack frame: the upper body (above the waist, y > 0.9) thrusts
+/// along +z (a lunge / jab) or recoils along -z for `amp < 0` (gunfire),
+/// easing out and back across the cycle. The whole-mesh snapshots are
+/// ordinary OBJ assets, editable per frame in Blender like the walk cycles.
+fn bake_attack_frame(mesh: &[UnitVertex], frame: usize, amp: f32) -> Vec<UnitVertex> {
+    let t = (frame as f32 + 1.0) / (ATTACK_FRAMES as f32 + 1.0);
+    let push = (std::f32::consts::PI * t).sin() * amp;
+    mesh.iter()
+        .map(|v| {
+            let body = ((v.pos[1] - 0.9) / 0.6).clamp(0.0, 1.0);
+            let mut p = v.pos;
+            p[2] += push * body;
+            UnitVertex { pos: p, ..*v }
+        })
+        .collect()
+}
+
 /// Bake one walk frame by applying the gait pose to the idle mesh: geometry
 /// near the ground (below y of about 1.3) swings fore-aft along z, the two
 /// sides (sign of x) in counter-phase, with a small lift on the stepping
@@ -2201,6 +2221,37 @@ fn main() {
                 &format!("{name}-walk-{f}"),
                 name,
                 &bake_walk_frame(base, f, amp),
+            );
+            n += 1;
+        }
+    }
+    // Attack-cycle keyframes for everything that fights: a +z lunge for
+    // melee/casters, a -z recoil (negative amplitude) for gunnery.
+    for (name, amp) in [
+        ("infantry", 0.34_f32),
+        ("heavy", -0.20),
+        ("engineer", 0.28),
+        ("acolyte", 0.26),
+        ("pyromancer", 0.30),
+        ("stormcaller", 0.30),
+        ("hound", -0.16),
+        ("javelin", -0.18),
+        ("wrecker", 0.40),
+    ] {
+        if !want(name) {
+            continue;
+        }
+        let base = &jobs
+            .iter()
+            .find(|(j, _)| *j == name)
+            .expect("attack base")
+            .1;
+        for f in 0..ATTACK_FRAMES {
+            write_model(
+                &dir,
+                &format!("{name}-attack-{f}"),
+                name,
+                &bake_attack_frame(base, f, amp),
             );
             n += 1;
         }

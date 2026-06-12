@@ -25,6 +25,13 @@ pub const WALK_FRAMES: usize = 8;
 /// Instance buckets per walking kind: the idle base model plus each
 /// walk keyframe. Instances snap to the nearest frame (no interpolation).
 pub const WALK_BUCKETS: usize = WALK_FRAMES + 1;
+/// Baked attack-cycle keyframes per combat unit
+/// (`assets/models/<unit>-attack-<k>.obj`).
+pub const ATTACK_FRAMES: usize = 4;
+/// Buckets for a walking combat kind: idle + walk frames + attack frames.
+pub const ANIM_BUCKETS: usize = WALK_BUCKETS + ATTACK_FRAMES;
+/// Buckets for a hovering caster kind (no walk frames): idle + attack.
+pub const CASTER_BUCKETS: usize = 1 + ATTACK_FRAMES;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -159,6 +166,48 @@ macro_rules! model {
             include_str!(concat!("../../../assets/models/", $name, ".mtl")),
         )
     };
+}
+
+/// Load a unit's attack keyframes (sharing the base model's MTL).
+macro_rules! attack_models {
+    ($name:literal) => {
+        vec![
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-attack-0.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-attack-1.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-attack-2.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+            crate::model::load(
+                include_str!(concat!("../../../assets/models/", $name, "-attack-3.obj")),
+                include_str!(concat!("../../../assets/models/", $name, ".mtl")),
+            ),
+        ]
+    };
+}
+
+/// Load a walking combat kind's full animation set: idle + walk + attack.
+macro_rules! anim_models {
+    ($name:literal) => {{
+        let mut v = walk_models!($name);
+        v.extend(attack_models!($name));
+        v
+    }};
+}
+
+/// Load a hovering caster's animation set: idle + attack keyframes.
+macro_rules! caster_models {
+    ($name:literal) => {{
+        let mut v = vec![model!($name)];
+        v.extend(attack_models!($name));
+        v
+    }};
 }
 
 /// Load a walking unit's animation set: the idle base model followed by its
@@ -477,11 +526,11 @@ fn shadow_decals(shadows: &[RingRaw]) -> Vec<RingVertex> {
 /// total never exceeds the kind's (possibly clamped) instance total.
 fn frame_draws<'b>(
     bufs: &'b [(wgpu::Buffer, u32)],
-    counts: &[u32; WALK_BUCKETS],
+    counts: &[u32],
     total: usize,
 ) -> Vec<(&'b wgpu::Buffer, u32, usize)> {
     let mut left = total as u32;
-    let mut out = Vec::with_capacity(WALK_BUCKETS);
+    let mut out = Vec::with_capacity(bufs.len());
     for (k, (buf, vlen)) in bufs.iter().enumerate() {
         let c = counts.get(k).copied().unwrap_or(0).min(left);
         left -= c;
@@ -581,8 +630,7 @@ pub struct Gfx {
     hq_astro_len: u32,
     hq_hollow_buf: wgpu::Buffer,
     hq_hollow_len: u32,
-    acolyte_buf: wgpu::Buffer,
-    acolyte_len: u32,
+    acolyte_bufs: Vec<(wgpu::Buffer, u32)>,
     engineer_bufs: Vec<(wgpu::Buffer, u32)>,
     ore_node_buf: wgpu::Buffer,
     ore_node_len: u32,
@@ -605,16 +653,38 @@ pub struct Gfx {
     particle_buf: wgpu::Buffer,
     particle_len: u32,
     heavy_bufs: Vec<(wgpu::Buffer, u32)>,
-    pyromancer_buf: wgpu::Buffer,
-    pyromancer_len: u32,
-    stormcaller_buf: wgpu::Buffer,
-    stormcaller_len: u32,
+    pyromancer_bufs: Vec<(wgpu::Buffer, u32)>,
+    stormcaller_bufs: Vec<(wgpu::Buffer, u32)>,
     hound_bufs: Vec<(wgpu::Buffer, u32)>,
     javelin_bufs: Vec<(wgpu::Buffer, u32)>,
     storm_ward_buf: wgpu::Buffer,
     storm_ward_len: u32,
     bunker_buf: wgpu::Buffer,
     bunker_len: u32,
+    athenaeum_buf: wgpu::Buffer,
+    athenaeum_len: u32,
+    crucible_buf: wgpu::Buffer,
+    crucible_len: u32,
+    conservatory_buf: wgpu::Buffer,
+    conservatory_len: u32,
+    aerie_buf: wgpu::Buffer,
+    aerie_len: u32,
+    ley_nexus_buf: wgpu::Buffer,
+    ley_nexus_len: u32,
+    machine_shop_buf: wgpu::Buffer,
+    machine_shop_len: u32,
+    arsenal_buf: wgpu::Buffer,
+    arsenal_len: u32,
+    radar_array_buf: wgpu::Buffer,
+    radar_array_len: u32,
+    starport_buf: wgpu::Buffer,
+    starport_len: u32,
+    fusion_reactor_buf: wgpu::Buffer,
+    fusion_reactor_len: u32,
+    drydock_buf: wgpu::Buffer,
+    drydock_len: u32,
+    missile_silo_buf: wgpu::Buffer,
+    missile_silo_len: u32,
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
@@ -1176,23 +1246,13 @@ impl Gfx {
                 })
                 .collect()
         };
-        let infantry_bufs = mkframes("infantry", walk_models!("infantry"));
-        let engineer_bufs = mkframes("engineer", walk_models!("engineer"));
-        let heavy_bufs = mkframes("heavy", walk_models!("heavy"));
-        let hound_bufs = mkframes("hound", walk_models!("hound"));
-        let javelin_bufs = mkframes("javelin", walk_models!("javelin"));
-        let pyromancer = model!("pyromancer");
-        let pyromancer_buf = mkbuf(
-            "pyromancer",
-            bytemuck::cast_slice(&pyromancer),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
-        let stormcaller = model!("stormcaller");
-        let stormcaller_buf = mkbuf(
-            "stormcaller",
-            bytemuck::cast_slice(&stormcaller),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
+        let infantry_bufs = mkframes("infantry", anim_models!("infantry"));
+        let engineer_bufs = mkframes("engineer", anim_models!("engineer"));
+        let heavy_bufs = mkframes("heavy", anim_models!("heavy"));
+        let hound_bufs = mkframes("hound", anim_models!("hound"));
+        let javelin_bufs = mkframes("javelin", anim_models!("javelin"));
+        let pyromancer_bufs = mkframes("pyromancer", caster_models!("pyromancer"));
+        let stormcaller_bufs = mkframes("stormcaller", caster_models!("stormcaller"));
         let storm_ward = model!("storm-ward");
         let storm_ward_buf = mkbuf(
             "storm-ward",
@@ -1203,6 +1263,78 @@ impl Gfx {
         let bunker_buf = mkbuf(
             "bunker",
             bytemuck::cast_slice(&bunker),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let athenaeum = model!("athenaeum");
+        let athenaeum_buf = mkbuf(
+            "athenaeum",
+            bytemuck::cast_slice(&athenaeum),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let crucible = model!("crucible");
+        let crucible_buf = mkbuf(
+            "crucible",
+            bytemuck::cast_slice(&crucible),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let conservatory = model!("conservatory");
+        let conservatory_buf = mkbuf(
+            "conservatory",
+            bytemuck::cast_slice(&conservatory),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let aerie = model!("aerie");
+        let aerie_buf = mkbuf(
+            "aerie",
+            bytemuck::cast_slice(&aerie),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let ley_nexus = model!("ley-nexus");
+        let ley_nexus_buf = mkbuf(
+            "ley-nexus",
+            bytemuck::cast_slice(&ley_nexus),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let machine_shop = model!("machine-shop");
+        let machine_shop_buf = mkbuf(
+            "machine-shop",
+            bytemuck::cast_slice(&machine_shop),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let arsenal = model!("arsenal");
+        let arsenal_buf = mkbuf(
+            "arsenal",
+            bytemuck::cast_slice(&arsenal),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let radar_array = model!("radar-array");
+        let radar_array_buf = mkbuf(
+            "radar-array",
+            bytemuck::cast_slice(&radar_array),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let starport = model!("starport");
+        let starport_buf = mkbuf(
+            "starport",
+            bytemuck::cast_slice(&starport),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let fusion_reactor = model!("fusion-reactor");
+        let fusion_reactor_buf = mkbuf(
+            "fusion-reactor",
+            bytemuck::cast_slice(&fusion_reactor),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let drydock = model!("drydock");
+        let drydock_buf = mkbuf(
+            "drydock",
+            bytemuck::cast_slice(&drydock),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let missile_silo = model!("missile-silo");
+        let missile_silo_buf = mkbuf(
+            "missile-silo",
+            bytemuck::cast_slice(&missile_silo),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
         let barracks_astro = model!("barracks-astro");
@@ -1229,12 +1361,7 @@ impl Gfx {
             bytemuck::cast_slice(&hq_hollow),
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         );
-        let acolyte = model!("acolyte");
-        let acolyte_buf = mkbuf(
-            "acolyte",
-            bytemuck::cast_slice(&acolyte),
-            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        );
+        let acolyte_bufs = mkframes("acolyte", caster_models!("acolyte"));
         let ore_node = model!("ore-node");
         let ore_node_buf = mkbuf(
             "ore-node",
@@ -1354,8 +1481,7 @@ impl Gfx {
             hq_astro_len: hq_astro.len() as u32,
             hq_hollow_buf,
             hq_hollow_len: hq_hollow.len() as u32,
-            acolyte_buf,
-            acolyte_len: acolyte.len() as u32,
+            acolyte_bufs,
             engineer_bufs,
             ore_node_buf,
             ore_node_len: ore_node.len() as u32,
@@ -1378,16 +1504,38 @@ impl Gfx {
             particle_buf,
             particle_len: particle.len() as u32,
             heavy_bufs,
-            pyromancer_buf,
-            pyromancer_len: pyromancer.len() as u32,
-            stormcaller_buf,
-            stormcaller_len: stormcaller.len() as u32,
+            pyromancer_bufs,
+            stormcaller_bufs,
             hound_bufs,
             javelin_bufs,
             storm_ward_buf,
             storm_ward_len: storm_ward.len() as u32,
             bunker_buf,
             bunker_len: bunker.len() as u32,
+            athenaeum_buf,
+            athenaeum_len: athenaeum.len() as u32,
+            crucible_buf,
+            crucible_len: crucible.len() as u32,
+            conservatory_buf,
+            conservatory_len: conservatory.len() as u32,
+            aerie_buf,
+            aerie_len: aerie.len() as u32,
+            ley_nexus_buf,
+            ley_nexus_len: ley_nexus.len() as u32,
+            machine_shop_buf,
+            machine_shop_len: machine_shop.len() as u32,
+            arsenal_buf,
+            arsenal_len: arsenal.len() as u32,
+            radar_array_buf,
+            radar_array_len: radar_array.len() as u32,
+            starport_buf,
+            starport_len: starport.len() as u32,
+            fusion_reactor_buf,
+            fusion_reactor_len: fusion_reactor.len() as u32,
+            drydock_buf,
+            drydock_len: drydock.len() as u32,
+            missile_silo_buf,
+            missile_silo_len: missile_silo.len() as u32,
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
@@ -1558,26 +1706,41 @@ impl Gfx {
     pub fn render(
         &mut self,
         infantry: &[InstanceRaw],
-        infantry_frames: &[u32; WALK_BUCKETS],
+        infantry_frames: &[u32; ANIM_BUCKETS],
         barracks_astro: &[InstanceRaw],
         barracks_hollow: &[InstanceRaw],
         hq_astro: &[InstanceRaw],
         hq_hollow: &[InstanceRaw],
         acolytes: &[InstanceRaw],
+        acolyte_frames: &[u32; CASTER_BUCKETS],
         engineers: &[InstanceRaw],
-        engineer_frames: &[u32; WALK_BUCKETS],
+        engineer_frames: &[u32; ANIM_BUCKETS],
         ore_nodes: &[InstanceRaw],
         carbon_nodes: &[InstanceRaw],
         heavies: &[InstanceRaw],
-        heavy_frames: &[u32; WALK_BUCKETS],
+        heavy_frames: &[u32; ANIM_BUCKETS],
         pyromancers: &[InstanceRaw],
+        pyromancer_frames: &[u32; CASTER_BUCKETS],
         stormcallers: &[InstanceRaw],
+        stormcaller_frames: &[u32; CASTER_BUCKETS],
         hounds: &[InstanceRaw],
-        hound_frames: &[u32; WALK_BUCKETS],
+        hound_frames: &[u32; ANIM_BUCKETS],
         javelins: &[InstanceRaw],
-        javelin_frames: &[u32; WALK_BUCKETS],
+        javelin_frames: &[u32; ANIM_BUCKETS],
         storm_wards: &[InstanceRaw],
         bunkers: &[InstanceRaw],
+        athenaeum: &[InstanceRaw],
+        crucible: &[InstanceRaw],
+        conservatory: &[InstanceRaw],
+        aerie: &[InstanceRaw],
+        ley_nexus: &[InstanceRaw],
+        machine_shop: &[InstanceRaw],
+        arsenal: &[InstanceRaw],
+        radar_array: &[InstanceRaw],
+        starport: &[InstanceRaw],
+        fusion_reactor: &[InstanceRaw],
+        drydock: &[InstanceRaw],
+        missile_silo: &[InstanceRaw],
         turrets: &[InstanceRaw],
         supplies: &[InstanceRaw],
         wards_astro: &[InstanceRaw],
@@ -1616,6 +1779,18 @@ impl Gfx {
             javelins.len(),
             storm_wards.len(),
             bunkers.len(),
+            athenaeum.len(),
+            crucible.len(),
+            conservatory.len(),
+            aerie.len(),
+            ley_nexus.len(),
+            machine_shop.len(),
+            arsenal.len(),
+            radar_array.len(),
+            starport.len(),
+            fusion_reactor.len(),
+            drydock.len(),
+            missile_silo.len(),
             turrets.len(),
             supplies.len(),
             wards_astro.len(),
@@ -1626,13 +1801,13 @@ impl Gfx {
             carbon_pools.len(),
         ];
         // Clamp each group's count so the running total never exceeds the buffer.
-        let mut counts = [0usize; 24];
+        let mut counts = [0usize; 36];
         let mut used = 0usize;
         for (c, &g) in counts.iter_mut().zip(groups.iter()) {
             *c = g.min(MAX_INSTANCES - used);
             used += *c;
         }
-        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, npy, nsc, nhd, njv, nsw, nbk, ntr, nsp, nwa, nsa, nbr, npt, noc, ncp] =
+        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, npy, nsc, nhd, njv, nsw, nbk, nt0, nt1, nt2, nt3, nt4, nt5, nt6, nt7, nt8, nt9, nt10, nt11, ntr, nsp, nwa, nsa, nbr, npt, noc, ncp] =
             counts;
         // Blob shadows draw first (under the rings) through the ring decal
         // pipeline: soft radial fans on the terrain.
@@ -1697,6 +1872,18 @@ impl Gfx {
             &javelins[..njv],
             &storm_wards[..nsw],
             &bunkers[..nbk],
+            &athenaeum[..nt0],
+            &crucible[..nt1],
+            &conservatory[..nt2],
+            &aerie[..nt3],
+            &ley_nexus[..nt4],
+            &machine_shop[..nt5],
+            &arsenal[..nt6],
+            &radar_array[..nt7],
+            &starport[..nt8],
+            &fusion_reactor[..nt9],
+            &drydock[..nt10],
+            &missile_silo[..nt11],
             &turrets[..ntr],
             &supplies[..nsp],
             &wards_astro[..nwa],
@@ -1809,7 +1996,11 @@ impl Gfx {
                 meshes.push((&self.barracks_hollow_buf, self.barracks_hollow_len, nh));
                 meshes.push((&self.hq_astro_buf, self.hq_astro_len, nqa));
                 meshes.push((&self.hq_hollow_buf, self.hq_hollow_len, nqh));
-                meshes.push((&self.acolyte_buf, self.acolyte_len, nac));
+                meshes.extend(frame_draws(
+                    self.acolyte_bufs.as_slice(),
+                    acolyte_frames,
+                    nac,
+                ));
                 meshes.extend(frame_draws(
                     self.engineer_bufs.as_slice(),
                     engineer_frames,
@@ -1818,8 +2009,16 @@ impl Gfx {
                 meshes.push((&self.ore_node_buf, self.ore_node_len, nor));
                 meshes.push((&self.carbon_node_buf, self.carbon_node_len, ncar));
                 meshes.extend(frame_draws(self.heavy_bufs.as_slice(), heavy_frames, nhv));
-                meshes.push((&self.pyromancer_buf, self.pyromancer_len, npy));
-                meshes.push((&self.stormcaller_buf, self.stormcaller_len, nsc));
+                meshes.extend(frame_draws(
+                    self.pyromancer_bufs.as_slice(),
+                    pyromancer_frames,
+                    npy,
+                ));
+                meshes.extend(frame_draws(
+                    self.stormcaller_bufs.as_slice(),
+                    stormcaller_frames,
+                    nsc,
+                ));
                 meshes.extend(frame_draws(self.hound_bufs.as_slice(), hound_frames, nhd));
                 meshes.extend(frame_draws(
                     self.javelin_bufs.as_slice(),
@@ -1828,6 +2027,18 @@ impl Gfx {
                 ));
                 meshes.push((&self.storm_ward_buf, self.storm_ward_len, nsw));
                 meshes.push((&self.bunker_buf, self.bunker_len, nbk));
+                meshes.push((&self.athenaeum_buf, self.athenaeum_len, nt0));
+                meshes.push((&self.crucible_buf, self.crucible_len, nt1));
+                meshes.push((&self.conservatory_buf, self.conservatory_len, nt2));
+                meshes.push((&self.aerie_buf, self.aerie_len, nt3));
+                meshes.push((&self.ley_nexus_buf, self.ley_nexus_len, nt4));
+                meshes.push((&self.machine_shop_buf, self.machine_shop_len, nt5));
+                meshes.push((&self.arsenal_buf, self.arsenal_len, nt6));
+                meshes.push((&self.radar_array_buf, self.radar_array_len, nt7));
+                meshes.push((&self.starport_buf, self.starport_len, nt8));
+                meshes.push((&self.fusion_reactor_buf, self.fusion_reactor_len, nt9));
+                meshes.push((&self.drydock_buf, self.drydock_len, nt10));
+                meshes.push((&self.missile_silo_buf, self.missile_silo_len, nt11));
                 meshes.push((&self.turret_buf, self.turret_len, ntr));
                 meshes.push((&self.supply_buf, self.supply_len, nsp));
                 meshes.push((&self.ward_astro_buf, self.ward_astro_len, nwa));

@@ -437,6 +437,7 @@ impl App {
                 &rd.hq_astro,
                 &rd.hq_hollow,
                 &rd.acolytes,
+                &rd.acolyte_frames,
                 &rd.engineers,
                 &rd.engineer_frames,
                 &rd.ore_nodes,
@@ -444,13 +445,27 @@ impl App {
                 &rd.heavies,
                 &rd.heavy_frames,
                 &rd.pyromancers,
+                &rd.pyromancer_frames,
                 &rd.stormcallers,
+                &rd.stormcaller_frames,
                 &rd.hounds,
                 &rd.hound_frames,
                 &rd.javelins,
                 &rd.javelin_frames,
                 &rd.storm_wards,
                 &rd.bunkers,
+                &rd.athenaeums,
+                &rd.crucibles,
+                &rd.conservatories,
+                &rd.aeries,
+                &rd.ley_nexuses,
+                &rd.machine_shops,
+                &rd.arsenals,
+                &rd.radar_arrays,
+                &rd.starports,
+                &rd.fusion_reactors,
+                &rd.drydocks,
+                &rd.missile_silos,
                 &rd.turrets,
                 &rd.supplies,
                 &rd.wards_astro,
@@ -878,18 +893,68 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
                         KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
                         KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
-                        // T trains the selected building's unit: a Worker at the
-                        // HQ, Infantry at a Barracks.
+                        // T / H train the selected hall's first / second unit
+                        // (Worker at the HQ; Infantry/Heavy at a Barracks;
+                        // the specialists at their tech halls).
                         KeyCode::KeyT if down => {
-                            let kind = if self.game.selected_hq().is_some() {
-                                protocol::UnitKind::Worker
-                            } else {
-                                protocol::UnitKind::Infantry
+                            let kind = match self.game.selected_producer_kind() {
+                                Some(sim::Kind::Hq) => protocol::UnitKind::Worker,
+                                Some(sim::Kind::Athenaeum) => protocol::UnitKind::Pyromancer,
+                                Some(sim::Kind::MachineShop) => protocol::UnitKind::Hound,
+                                _ => protocol::UnitKind::Infantry,
                             };
                             self.game.train_selected(kind)
                         }
                         KeyCode::KeyH if down => {
-                            self.game.train_selected(protocol::UnitKind::Heavy)
+                            let kind = match self.game.selected_producer_kind() {
+                                Some(sim::Kind::Athenaeum) => protocol::UnitKind::Stormcaller,
+                                Some(sim::Kind::MachineShop) => protocol::UnitKind::Javelin,
+                                _ => protocol::UnitKind::Heavy,
+                            };
+                            self.game.train_selected(kind)
+                        }
+                        // Worker build kit, faction tech tier: Q/E/R/F/C
+                        // (+ Z/M for the Hollowmen), matching the card labels.
+                        // These arms sit before the train arms so a selected
+                        // worker wins the shared F/C keys.
+                        KeyCode::KeyQ
+                        | KeyCode::KeyE
+                        | KeyCode::KeyR
+                        | KeyCode::KeyZ
+                        | KeyCode::KeyM
+                            if down && self.game.has_worker_selected() =>
+                        {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            let kind = match (code, astro) {
+                                (KeyCode::KeyQ, true) => Some(protocol::BuildingKind::Athenaeum),
+                                (KeyCode::KeyE, true) => Some(protocol::BuildingKind::Crucible),
+                                (KeyCode::KeyR, true) => Some(protocol::BuildingKind::Conservatory),
+                                (KeyCode::KeyQ, false) => Some(protocol::BuildingKind::MachineShop),
+                                (KeyCode::KeyE, false) => Some(protocol::BuildingKind::Arsenal),
+                                (KeyCode::KeyR, false) => Some(protocol::BuildingKind::RadarArray),
+                                (KeyCode::KeyZ, false) => Some(protocol::BuildingKind::Drydock),
+                                (KeyCode::KeyM, false) => Some(protocol::BuildingKind::MissileSilo),
+                                _ => None,
+                            };
+                            if let Some(kind) = kind {
+                                self.arm_build(kind)
+                            }
+                        }
+                        KeyCode::KeyF if down && self.game.has_worker_selected() => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.arm_build(if astro {
+                                protocol::BuildingKind::Aerie
+                            } else {
+                                protocol::BuildingKind::Starport
+                            })
+                        }
+                        KeyCode::KeyC if down && self.game.has_worker_selected() => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.arm_build(if astro {
+                                protocol::BuildingKind::LeyNexus
+                            } else {
+                                protocol::BuildingKind::FusionReactor
+                            })
                         }
                         // F / C train the faction's first-wave specialists.
                         KeyCode::KeyF if down => {
