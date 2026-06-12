@@ -442,6 +442,36 @@ fn ring_decals(rings: &[RingRaw]) -> Vec<RingVertex> {
     out
 }
 
+/// WC3-style blob shadows: each entry becomes a soft dark disc draped on the
+/// terrain, built as a triangle fan whose rim alpha fades to zero (the ring
+/// pipeline's per-vertex color interpolation does the radial gradient).
+fn shadow_decals(shadows: &[RingRaw]) -> Vec<RingVertex> {
+    const SEGS: usize = 12;
+    let mut out = Vec::with_capacity(shadows.len() * SEGS * 3);
+    for sh in shadows {
+        let (cx, cz) = (sh.center[0], sh.center[2]);
+        let center = RingVertex {
+            pos: [cx, terrain::height(cx, cz) + 0.35, cz],
+            color: sh.color,
+        };
+        let rim = |k: usize| {
+            let a = k as f32 / SEGS as f32 * std::f32::consts::TAU;
+            let (s, c) = a.sin_cos();
+            let (x, z) = (cx + c * sh.radius, cz + s * sh.radius);
+            RingVertex {
+                pos: [x, terrain::height(x, z) + 0.35, z],
+                color: [sh.color[0], sh.color[1], sh.color[2], 0.0],
+            }
+        };
+        for k in 0..SEGS {
+            out.push(center);
+            out.push(rim(k));
+            out.push(rim(k + 1));
+        }
+    }
+    out
+}
+
 /// Expand one walking kind into its per-frame sub-draws: each bucket's
 /// vertex buffer with that bucket's instance count, clamped so the running
 /// total never exceeds the kind's (possibly clamped) instance total.
@@ -575,6 +605,16 @@ pub struct Gfx {
     particle_buf: wgpu::Buffer,
     particle_len: u32,
     heavy_bufs: Vec<(wgpu::Buffer, u32)>,
+    pyromancer_buf: wgpu::Buffer,
+    pyromancer_len: u32,
+    stormcaller_buf: wgpu::Buffer,
+    stormcaller_len: u32,
+    hound_bufs: Vec<(wgpu::Buffer, u32)>,
+    javelin_bufs: Vec<(wgpu::Buffer, u32)>,
+    storm_ward_buf: wgpu::Buffer,
+    storm_ward_len: u32,
+    bunker_buf: wgpu::Buffer,
+    bunker_len: u32,
     walls_buf: wgpu::Buffer,
     walls_len: u32,
     wall_inst_buf: wgpu::Buffer,
@@ -1139,6 +1179,32 @@ impl Gfx {
         let infantry_bufs = mkframes("infantry", walk_models!("infantry"));
         let engineer_bufs = mkframes("engineer", walk_models!("engineer"));
         let heavy_bufs = mkframes("heavy", walk_models!("heavy"));
+        let hound_bufs = mkframes("hound", walk_models!("hound"));
+        let javelin_bufs = mkframes("javelin", walk_models!("javelin"));
+        let pyromancer = model!("pyromancer");
+        let pyromancer_buf = mkbuf(
+            "pyromancer",
+            bytemuck::cast_slice(&pyromancer),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let stormcaller = model!("stormcaller");
+        let stormcaller_buf = mkbuf(
+            "stormcaller",
+            bytemuck::cast_slice(&stormcaller),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let storm_ward = model!("storm-ward");
+        let storm_ward_buf = mkbuf(
+            "storm-ward",
+            bytemuck::cast_slice(&storm_ward),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
+        let bunker = model!("bunker");
+        let bunker_buf = mkbuf(
+            "bunker",
+            bytemuck::cast_slice(&bunker),
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        );
         let barracks_astro = model!("barracks-astro");
         let barracks_astro_buf = mkbuf(
             "barracks-astro",
@@ -1312,6 +1378,16 @@ impl Gfx {
             particle_buf,
             particle_len: particle.len() as u32,
             heavy_bufs,
+            pyromancer_buf,
+            pyromancer_len: pyromancer.len() as u32,
+            stormcaller_buf,
+            stormcaller_len: stormcaller.len() as u32,
+            hound_bufs,
+            javelin_bufs,
+            storm_ward_buf,
+            storm_ward_len: storm_ward.len() as u32,
+            bunker_buf,
+            bunker_len: bunker.len() as u32,
             walls_buf,
             walls_len: walls.len() as u32,
             wall_inst_buf,
@@ -1494,6 +1570,14 @@ impl Gfx {
         carbon_nodes: &[InstanceRaw],
         heavies: &[InstanceRaw],
         heavy_frames: &[u32; WALK_BUCKETS],
+        pyromancers: &[InstanceRaw],
+        stormcallers: &[InstanceRaw],
+        hounds: &[InstanceRaw],
+        hound_frames: &[u32; WALK_BUCKETS],
+        javelins: &[InstanceRaw],
+        javelin_frames: &[u32; WALK_BUCKETS],
+        storm_wards: &[InstanceRaw],
+        bunkers: &[InstanceRaw],
         turrets: &[InstanceRaw],
         supplies: &[InstanceRaw],
         wards_astro: &[InstanceRaw],
@@ -1504,6 +1588,7 @@ impl Gfx {
         carbon_pools: &[InstanceRaw],
         fx_lights: &[FxLight],
         rings: &[RingRaw],
+        shadows: &[RingRaw],
         fow: &[u8],
         view_proj: [[f32; 4]; 4],
         eye: [f32; 3],
@@ -1525,6 +1610,12 @@ impl Gfx {
             ore_nodes.len(),
             carbon_nodes.len(),
             heavies.len(),
+            pyromancers.len(),
+            stormcallers.len(),
+            hounds.len(),
+            javelins.len(),
+            storm_wards.len(),
+            bunkers.len(),
             turrets.len(),
             supplies.len(),
             wards_astro.len(),
@@ -1535,15 +1626,18 @@ impl Gfx {
             carbon_pools.len(),
         ];
         // Clamp each group's count so the running total never exceeds the buffer.
-        let mut counts = [0usize; 18];
+        let mut counts = [0usize; 24];
         let mut used = 0usize;
         for (c, &g) in counts.iter_mut().zip(groups.iter()) {
             *c = g.min(MAX_INSTANCES - used);
             used += *c;
         }
-        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, ntr, nsp, nwa, nsa, nbr, npt, noc, ncp] =
+        let [ni, na, nh, nqa, nqh, nac, nen, nor, ncar, nhv, npy, nsc, nhd, njv, nsw, nbk, ntr, nsp, nwa, nsa, nbr, npt, noc, ncp] =
             counts;
-        let ring_verts = ring_decals(rings);
+        // Blob shadows draw first (under the rings) through the ring decal
+        // pipeline: soft radial fans on the terrain.
+        let mut ring_verts = shadow_decals(shadows);
+        ring_verts.extend(ring_decals(rings));
         let nrv = ring_verts.len().min(MAX_RING_VERTS);
         let mut light_pos = [[0.0f32; 4]; MAX_LIGHTS];
         let mut light_col = [[0.0f32; 4]; MAX_LIGHTS];
@@ -1597,6 +1691,12 @@ impl Gfx {
             &ore_nodes[..nor],
             &carbon_nodes[..ncar],
             &heavies[..nhv],
+            &pyromancers[..npy],
+            &stormcallers[..nsc],
+            &hounds[..nhd],
+            &javelins[..njv],
+            &storm_wards[..nsw],
+            &bunkers[..nbk],
             &turrets[..ntr],
             &supplies[..nsp],
             &wards_astro[..nwa],
@@ -1718,6 +1818,16 @@ impl Gfx {
                 meshes.push((&self.ore_node_buf, self.ore_node_len, nor));
                 meshes.push((&self.carbon_node_buf, self.carbon_node_len, ncar));
                 meshes.extend(frame_draws(self.heavy_bufs.as_slice(), heavy_frames, nhv));
+                meshes.push((&self.pyromancer_buf, self.pyromancer_len, npy));
+                meshes.push((&self.stormcaller_buf, self.stormcaller_len, nsc));
+                meshes.extend(frame_draws(self.hound_bufs.as_slice(), hound_frames, nhd));
+                meshes.extend(frame_draws(
+                    self.javelin_bufs.as_slice(),
+                    javelin_frames,
+                    njv,
+                ));
+                meshes.push((&self.storm_ward_buf, self.storm_ward_len, nsw));
+                meshes.push((&self.bunker_buf, self.bunker_len, nbk));
                 meshes.push((&self.turret_buf, self.turret_len, ntr));
                 meshes.push((&self.supply_buf, self.supply_len, nsp));
                 meshes.push((&self.ward_astro_buf, self.ward_astro_len, nwa));

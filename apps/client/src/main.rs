@@ -443,6 +443,14 @@ impl App {
                 &rd.carbon_nodes,
                 &rd.heavies,
                 &rd.heavy_frames,
+                &rd.pyromancers,
+                &rd.stormcallers,
+                &rd.hounds,
+                &rd.hound_frames,
+                &rd.javelins,
+                &rd.javelin_frames,
+                &rd.storm_wards,
+                &rd.bunkers,
                 &rd.turrets,
                 &rd.supplies,
                 &rd.wards_astro,
@@ -453,6 +461,7 @@ impl App {
                 &rd.carbon_pools,
                 &fx_lights,
                 &rd.rings,
+                &rd.shadows,
                 &fow,
                 vp,
                 self.camera.eye(),
@@ -881,6 +890,32 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         KeyCode::KeyH if down => {
                             self.game.train_selected(protocol::UnitKind::Heavy)
+                        }
+                        // F / C train the faction's first-wave specialists.
+                        KeyCode::KeyF if down => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.game.train_selected(if astro {
+                                protocol::UnitKind::Pyromancer
+                            } else {
+                                protocol::UnitKind::Hound
+                            })
+                        }
+                        KeyCode::KeyC if down => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.game.train_selected(if astro {
+                                protocol::UnitKind::Stormcaller
+                            } else {
+                                protocol::UnitKind::Javelin
+                            })
+                        }
+                        // X = the faction's own static defense.
+                        KeyCode::KeyX if down && self.game.has_worker_selected() => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.arm_build(if astro {
+                                protocol::BuildingKind::StormWard
+                            } else {
+                                protocol::BuildingKind::Bunker
+                            })
                         }
                         // Worker build: B = barracks, V = turret, N = a new HQ
                         // (founds an expansion) -> placement mode (refused

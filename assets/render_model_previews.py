@@ -162,6 +162,20 @@ def render_sheet(out_name, names, title):
     print("wrote", path, fw, "x", fh)
 
 
+def render_icon(name, size):
+    """A bare square render for the HUD command card (assets/icons/)."""
+    px = size * SS
+    cv = Canvas(px, px)
+    gradient_bg(cv)
+    faces = load_obj(name)
+    wide = max(max(abs(p[0]), abs(p[2])) for f in faces for p in f[0])
+    paint(cv, faces, px // 2, px // 2 + 3 * SS, px, 0.92, wide * 0.55 + 0.4)
+    fw, fh, out = downsample(cv)
+    path = os.path.join(ASSETS, "icons", name + ".png")
+    write_png(path, fw, fh, out)
+    print("wrote", path, fw, "x", fh)
+
+
 def main():
     args = sys.argv[1:]
     if not args:
@@ -170,6 +184,9 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     if args[0] == "--sheet":
         render_sheet(args[1], args[2:], "MODEL PREVIEWS  -  " + args[1].upper())
+    elif args[0] == "--icon":
+        for name in args[2:]:
+            render_icon(name, int(args[1]))
     else:
         for name in args:
             render_sheet("model-" + name + ".png", [name], "MODEL PREVIEW")

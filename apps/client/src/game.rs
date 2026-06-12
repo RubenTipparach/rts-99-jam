@@ -161,6 +161,8 @@ fn building_height(kind: Kind) -> f32 {
         Kind::Barracks => 12.0,
         Kind::Turret => 4.5,
         Kind::Supply => 3.5,
+        Kind::StormWard => 7.5,
+        Kind::Bunker => 3.0,
         _ => 0.0,
     }
 }
@@ -170,8 +172,8 @@ fn pad_radius(kind: BuildingKind) -> f32 {
     match kind {
         BuildingKind::Hq => 9.0,
         BuildingKind::Barracks => 8.0,
-        BuildingKind::Turret => 4.0,
-        BuildingKind::Supply => 4.5,
+        BuildingKind::Turret | BuildingKind::StormWard => 4.0,
+        BuildingKind::Supply | BuildingKind::Bunker => 4.5,
     }
 }
 
@@ -194,6 +196,14 @@ pub struct RenderData {
     pub carbon_nodes: Vec<InstanceRaw>,
     pub heavies: Vec<InstanceRaw>,
     pub heavy_frames: [u32; WALK_BUCKETS],
+    pub pyromancers: Vec<InstanceRaw>,
+    pub stormcallers: Vec<InstanceRaw>,
+    pub hounds: Vec<InstanceRaw>,
+    pub hound_frames: [u32; WALK_BUCKETS],
+    pub javelins: Vec<InstanceRaw>,
+    pub javelin_frames: [u32; WALK_BUCKETS],
+    pub storm_wards: Vec<InstanceRaw>,
+    pub bunkers: Vec<InstanceRaw>,
     pub turrets: Vec<InstanceRaw>,
     pub supplies: Vec<InstanceRaw>,
     pub wards_astro: Vec<InstanceRaw>,
@@ -202,6 +212,9 @@ pub struct RenderData {
     pub ore_crystals: Vec<InstanceRaw>,
     pub carbon_pools: Vec<InstanceRaw>,
     pub rings: Vec<RingRaw>,
+    /// Soft blob shadows under mobile units (WC3-style fake decals): one
+    /// disc per unit, drawn as a radial-gradient fan on the terrain.
+    pub shadows: Vec<RingRaw>,
 }
 
 #[derive(Clone, Copy)]
@@ -312,6 +325,7 @@ impl Game {
         for b in 1..=bots {
             g.world.set_bot(b, ai);
         }
+        g.sync_sim_factions();
         g.apply_terrain();
         g.step_now();
         g.prev = g.curr.clone();
@@ -343,7 +357,12 @@ impl Game {
                 s.owner == 0
                     && matches!(
                         s.kind,
-                        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                        Kind::Hq
+                            | Kind::Barracks
+                            | Kind::Turret
+                            | Kind::Supply
+                            | Kind::StormWard
+                            | Kind::Bunker
                     )
                     && (f(s.pos.x) - pb.wx).hypot(f(s.pos.y) - pb.wz) < 5.0
             });
@@ -430,7 +449,12 @@ impl Game {
                 let organic = matches!(p.kind, Kind::Infantry | Kind::Worker);
                 let big = matches!(
                     p.kind,
-                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    Kind::Hq
+                        | Kind::Barracks
+                        | Kind::Turret
+                        | Kind::Supply
+                        | Kind::StormWard
+                        | Kind::Bunker
                 );
                 let seen = p.owner == 0 || self.cell_visible(f(p.pos.x), f(p.pos.y));
                 if !seen {
@@ -460,7 +484,12 @@ impl Game {
             .filter(|s| {
                 matches!(
                     s.kind,
-                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    Kind::Hq
+                        | Kind::Barracks
+                        | Kind::Turret
+                        | Kind::Supply
+                        | Kind::StormWard
+                        | Kind::Bunker
                 ) && s.construct_frac < Fx::ONE
             })
             .filter(|s| s.owner == 0 || self.cell_visible(f(s.pos.x), f(s.pos.y)))
@@ -507,7 +536,12 @@ impl Game {
             .filter(|s| {
                 matches!(
                     s.kind,
-                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    Kind::Hq
+                        | Kind::Barracks
+                        | Kind::Turret
+                        | Kind::Supply
+                        | Kind::StormWard
+                        | Kind::Bunker
                 )
             })
             .filter(|s| s.owner == 0 || self.cell_visible(f(s.pos.x), f(s.pos.y)))
@@ -603,7 +637,12 @@ impl Game {
                 // An Astromancer structure mid-summons: the gate itself is a
                 // light source, washing the pad in aether while the shell
                 // descends through it.
-                Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                Kind::Hq
+                | Kind::Barracks
+                | Kind::Turret
+                | Kind::Supply
+                | Kind::StormWard
+                | Kind::Bunker
                     if f(s.construct_frac) < 0.999
                         && self.faction_of(s.owner) == Faction::Astromancer =>
                 {
@@ -617,7 +656,12 @@ impl Game {
                 // wall lamps just outside the footprint corners, hugging the
                 // ground so the pool lands on the terrain vertices around
                 // the pad (Earth 2150 style), never on the building's roof.
-                Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                Kind::Hq
+                | Kind::Barracks
+                | Kind::Turret
+                | Kind::Supply
+                | Kind::StormWard
+                | Kind::Bunker
                     if f(s.construct_frac) >= 0.999 =>
                 {
                     let r = match s.kind {
@@ -917,6 +961,22 @@ impl Game {
             Faction::Astromancer => Faction::Hollowmen,
             Faction::Hollowmen => Faction::Astromancer,
         };
+        self.sync_sim_factions();
+    }
+
+    /// Mirror the client-side faction assignment into the sim, which gates
+    /// faction-locked units and structures (and hashes the assignment).
+    /// Covers every possible player slot: standard maps carry four spawns.
+    fn sync_sim_factions(&mut self) {
+        for p in 0..4u16 {
+            self.world.set_faction(
+                p,
+                match self.faction_of(p) {
+                    Faction::Astromancer => sim::Faction::Astromancers,
+                    Faction::Hollowmen => sim::Faction::Hollowmen,
+                },
+            );
+        }
     }
 
     /// Instances for each mesh - infantry, the two faction barracks (Astromancer,
@@ -946,6 +1006,13 @@ impl Game {
         let mut ore_nodes = Vec::new();
         let mut carbon_nodes = Vec::new();
         let mut heavies_b: [Vec<InstanceRaw>; WALK_BUCKETS] = Default::default();
+        let mut pyromancers = Vec::new();
+        let mut stormcallers = Vec::new();
+        let mut hounds_b: [Vec<InstanceRaw>; WALK_BUCKETS] = Default::default();
+        let mut javelins_b: [Vec<InstanceRaw>; WALK_BUCKETS] = Default::default();
+        let mut storm_wards = Vec::new();
+        let mut bunkers = Vec::new();
+        let mut shadows = Vec::new();
         let mut turrets = Vec::new();
         let mut supplies = Vec::new();
         let mut wards_astro = Vec::new();
@@ -961,6 +1028,24 @@ impl Game {
             }
             let ground = terrain::height(wx, wz);
             let tint = team_color(s.owner);
+            // WC3-style fake shadow: every mobile unit drops a soft dark
+            // blob on the ground (cheap, and it seats the silhouette).
+            let shadow_r = match s.kind {
+                Kind::Heavy => 1.9,
+                Kind::Javelin => 1.6,
+                Kind::Hound => 1.25,
+                Kind::Infantry | Kind::Worker => 1.15,
+                Kind::Pyromancer | Kind::Stormcaller => 1.3,
+                _ => 0.0,
+            };
+            if shadow_r > 0.0 {
+                shadows.push(RingRaw {
+                    center: [wx, ground, wz],
+                    radius: shadow_r,
+                    color: [0.0, 0.0, 0.0, 0.42],
+                    inner: 0.0,
+                });
+            }
             if matches!(s.kind, Kind::OreNode | Kind::CarbonNode) {
                 // Nodes shrink as they deplete (resource_frac runs 1 -> 0).
                 // The rock pedestal draws opaque; the crystal shards / gas
@@ -981,7 +1066,12 @@ impl Game {
                 }
             } else if matches!(
                 s.kind,
-                Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                Kind::Hq
+                    | Kind::Barracks
+                    | Kind::Turret
+                    | Kind::Supply
+                    | Kind::StormWard
+                    | Kind::Bunker
             ) {
                 // Construction, two ways. Hollowmen structures rise out of
                 // the ground (construct_frac scales height). Astromancer
@@ -1042,6 +1132,8 @@ impl Game {
                 // The Earth 2150-style floodlight pooling under the building
                 // is a real point light now: see `world_lights`.
                 match s.kind {
+                    Kind::StormWard => storm_wards.push(inst),
+                    Kind::Bunker => bunkers.push(inst),
                     Kind::Turret => {
                         if astro {
                             wards_astro.push(inst)
@@ -1166,6 +1258,58 @@ impl Game {
                         inner: RING,
                     });
                 }
+            } else if matches!(s.kind, Kind::Pyromancer | Kind::Stormcaller) {
+                // Casters hover like the Acolyte: a slow bob, no walk cycle.
+                let phase = s.index as f32 * 1.3;
+                let y = ground + 0.9 + ((self.time * 2.2) + phase).sin() * 0.16;
+                let inst = InstanceRaw {
+                    offset: [wx, y, wz],
+                    scale: [1.0, 1.0, 1.0],
+                    color: tint,
+                    rot: smooth_rot(&mut yaw, s, 10.0, dt),
+                };
+                if s.kind == Kind::Pyromancer {
+                    pyromancers.push(inst);
+                } else {
+                    stormcallers.push(inst);
+                }
+                if sel.contains(&s.index) {
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: 2.2,
+                        color: [0.4, 1.0, 0.5, 0.95],
+                        inner: RING,
+                    });
+                }
+            } else if matches!(s.kind, Kind::Hound | Kind::Javelin) {
+                // Mechs march on their baked walk frames, like the Engineer.
+                let hound = s.kind == Kind::Hound;
+                let phase = s.index as f32 * 1.3;
+                let gait = if hound { 11.0 } else { 7.0 };
+                let mut y = ground;
+                if s.moving {
+                    y += ((self.time * gait) + phase).sin() * if hound { 0.10 } else { 0.07 };
+                }
+                let inst = InstanceRaw {
+                    offset: [wx, y, wz],
+                    scale: [1.0, 1.0, 1.0],
+                    color: tint,
+                    rot: smooth_rot(&mut yaw, s, if hound { 12.0 } else { 7.0 }, dt),
+                };
+                let bucket = walk_bucket(s.moving, self.time * gait + phase);
+                if hound {
+                    hounds_b[bucket].push(inst);
+                } else {
+                    javelins_b[bucket].push(inst);
+                }
+                if sel.contains(&s.index) {
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: if hound { 2.0 } else { 2.6 },
+                        color: [0.4, 1.0, 0.5, 0.95],
+                        inner: RING,
+                    });
+                }
             } else {
                 // Infantry or Heavy: a combat unit with a march bob. Heavy reads
                 // larger and gets a bigger selection ring.
@@ -1226,8 +1370,8 @@ impl Game {
             let radius = match kind {
                 BuildingKind::Hq => 9.0,
                 BuildingKind::Barracks => 8.0,
-                BuildingKind::Turret => 4.0,
-                BuildingKind::Supply => 4.5,
+                BuildingKind::Turret | BuildingKind::StormWard => 4.0,
+                BuildingKind::Supply | BuildingKind::Bunker => 4.5,
             };
             match kind {
                 BuildingKind::Hq => match self.faction_of(0) {
@@ -1246,6 +1390,8 @@ impl Game {
                     Faction::Astromancer => supplies_astro.push(inst),
                     Faction::Hollowmen => supplies.push(inst),
                 },
+                BuildingKind::StormWard => storm_wards.push(inst),
+                BuildingKind::Bunker => bunkers.push(inst),
             }
             rings.push(RingRaw {
                 center: [gx, ground, gz],
@@ -1302,6 +1448,8 @@ impl Game {
                     Faction::Astromancer => supplies_astro.push(inst),
                     Faction::Hollowmen => supplies.push(inst),
                 },
+                BuildingKind::StormWard => storm_wards.push(inst),
+                BuildingKind::Bunker => bunkers.push(inst),
             }
         }
 
@@ -1334,6 +1482,8 @@ impl Game {
         let (infantry, infantry_frames) = flatten_walk(infantry_b);
         let (engineers, engineer_frames) = flatten_walk(engineers_b);
         let (heavies, heavy_frames) = flatten_walk(heavies_b);
+        let (hounds, hound_frames) = flatten_walk(hounds_b);
+        let (javelins, javelin_frames) = flatten_walk(javelins_b);
         let live: HashSet<u32> = self.curr.iter().map(|s| s.index).collect();
         yaw.retain(|k, _| live.contains(k));
         self.yaw = yaw;
@@ -1352,6 +1502,14 @@ impl Game {
             carbon_nodes,
             heavies,
             heavy_frames,
+            pyromancers,
+            stormcallers,
+            hounds,
+            hound_frames,
+            javelins,
+            javelin_frames,
+            storm_wards,
+            bunkers,
             turrets,
             supplies,
             wards_astro,
@@ -1360,6 +1518,7 @@ impl Game {
             ore_crystals,
             carbon_pools,
             rings,
+            shadows,
         }
     }
 
@@ -1393,7 +1552,16 @@ impl Game {
             return false;
         }
         for s in &self.curr {
-            if matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
+            if matches!(
+                s.kind,
+                Kind::Infantry
+                    | Kind::Worker
+                    | Kind::Heavy
+                    | Kind::Pyromancer
+                    | Kind::Stormcaller
+                    | Kind::Hound
+                    | Kind::Javelin
+            ) {
                 let (ex, ez) = (f(s.pos.x), f(s.pos.y));
                 if (ex - wx).hypot(ez - wz) < r + 1.5 {
                     return false;
@@ -1426,7 +1594,12 @@ impl Game {
         let (wx, wz) = self.lerped(s);
         let barracks = matches!(
             s.kind,
-            Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+            Kind::Hq
+                | Kind::Barracks
+                | Kind::Turret
+                | Kind::Supply
+                | Kind::StormWard
+                | Kind::Bunker
         );
         let radius = match s.kind {
             Kind::Hq => 9.0,
@@ -1443,9 +1616,15 @@ impl Game {
             (Kind::Turret, Faction::Astromancer) => "WARD",
             (Kind::Turret, Faction::Hollowmen) => "TURRET",
             (Kind::Supply, _) => "DEPOT",
+            (Kind::StormWard, _) => "STORM-WARD",
+            (Kind::Bunker, _) => "BUNKER",
             (Kind::Worker, Faction::Astromancer) => "ACOLYTE",
             (Kind::Worker, Faction::Hollowmen) => "ENGINEER",
             (Kind::Heavy, _) => "HEAVY",
+            (Kind::Pyromancer, _) => "PYROMANCER",
+            (Kind::Stormcaller, _) => "STORMCALLER",
+            (Kind::Hound, _) => "HOUND",
+            (Kind::Javelin, _) => "JAVELIN",
             _ => "INFANTRY",
         };
         UnitInfo {
@@ -1473,7 +1652,12 @@ impl Game {
             .filter(|s| {
                 matches!(
                     s.kind,
-                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    Kind::Hq
+                        | Kind::Barracks
+                        | Kind::Turret
+                        | Kind::Supply
+                        | Kind::StormWard
+                        | Kind::Bunker
                 ) && s.hp < s.max_hp
             })
             .filter(|s| {
@@ -1514,7 +1698,17 @@ impl Game {
         self.curr
             .iter()
             .filter(|s| {
-                s.owner == 0 && matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy)
+                s.owner == 0
+                    && matches!(
+                        s.kind,
+                        Kind::Infantry
+                            | Kind::Worker
+                            | Kind::Heavy
+                            | Kind::Pyromancer
+                            | Kind::Stormcaller
+                            | Kind::Hound
+                            | Kind::Javelin
+                    )
             })
             .map(|s| self.info(s))
             .collect()
@@ -1568,7 +1762,18 @@ impl Game {
         // Nearest selectable unit within a click radius.
         let unit_r = (h * 0.03).max(18.0);
         for s in &self.curr {
-            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
+            if s.owner != 0
+                || !matches!(
+                    s.kind,
+                    Kind::Infantry
+                        | Kind::Worker
+                        | Kind::Heavy
+                        | Kind::Pyromancer
+                        | Kind::Stormcaller
+                        | Kind::Hound
+                        | Kind::Javelin
+                )
+            {
                 continue;
             }
             let (wx, wz) = self.lerped(s);
@@ -1590,7 +1795,12 @@ impl Game {
                 if s.owner != 0
                     || !matches!(
                         s.kind,
-                        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                        Kind::Hq
+                            | Kind::Barracks
+                            | Kind::Turret
+                            | Kind::Supply
+                            | Kind::StormWard
+                            | Kind::Bunker
                     )
                 {
                     continue;
@@ -1747,6 +1957,8 @@ impl Game {
             BuildingKind::Turret => (90, 50),
             BuildingKind::Supply => (100, 0),
             BuildingKind::Hq => (400, 0),
+            BuildingKind::StormWard => (110, 60),
+            BuildingKind::Bunker => (80, 0),
         }
     }
 
@@ -1757,6 +1969,10 @@ impl Game {
             UnitKind::Worker => (40, 0),
             UnitKind::Infantry => (50, 0),
             UnitKind::Heavy => (120, 60),
+            UnitKind::Pyromancer => (60, 20),
+            UnitKind::Stormcaller => (75, 40),
+            UnitKind::Hound => (35, 0),
+            UnitKind::Javelin => (80, 30),
         }
     }
 
@@ -1825,7 +2041,18 @@ impl Game {
             self.selected.clear();
         }
         for s in &self.curr {
-            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
+            if s.owner != 0
+                || !matches!(
+                    s.kind,
+                    Kind::Infantry
+                        | Kind::Worker
+                        | Kind::Heavy
+                        | Kind::Pyromancer
+                        | Kind::Stormcaller
+                        | Kind::Hound
+                        | Kind::Javelin
+                )
+            {
                 continue;
             }
             let (wx, wz) = self.lerped(s);
@@ -1878,7 +2105,12 @@ impl Game {
                     units = true;
                     workers = true;
                 }
-                Kind::Infantry | Kind::Heavy => units = true,
+                Kind::Infantry
+                | Kind::Heavy
+                | Kind::Pyromancer
+                | Kind::Stormcaller
+                | Kind::Hound
+                | Kind::Javelin => units = true,
                 _ => {}
             }
         }
@@ -1943,7 +2175,12 @@ impl Game {
                 s.owner == 0
                     && matches!(
                         s.kind,
-                        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                        Kind::Hq
+                            | Kind::Barracks
+                            | Kind::Turret
+                            | Kind::Supply
+                            | Kind::StormWard
+                            | Kind::Bunker
                     )
                     && f(s.hp) < f(s.max_hp) - 0.5
                     && {
