@@ -679,12 +679,17 @@ mod web {
                 let _ = ctx.fill_text(&format!("BOTS: {}", lobby.bots), rx + 70.0 * s, 278.0 * s);
                 let mi = lobby.map as usize % crate::voxel::MAP_COUNT;
                 let map = crate::voxel::MAP_NAMES[mi];
+                // The map block sits below the AI difficulty button (ends at
+                // 346): name first, then the preview. The preview image fits
+                // a 2a x 2b box around its center, so with b = 80 it spans
+                // 382..542, clear of the name above and SELECT MAP (548)
+                // below.
                 let _ = ctx.fill_text(
                     &format!("MAP:  {map}   ({}/{})", mi + 1, crate::voxel::MAP_COUNT),
                     rx,
-                    372.0 * s,
+                    370.0 * s,
                 );
-                draw_map_preview(&ctx, rx + 190.0 * s, 432.0 * s, 180.0 * s, 100.0 * s, mi);
+                draw_map_preview(&ctx, rx + 190.0 * s, 462.0 * s, 150.0 * s, 80.0 * s, mi);
             }
             Screen::InGame => {}
         }
