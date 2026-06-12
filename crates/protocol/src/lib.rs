@@ -21,6 +21,17 @@ pub enum UnitKind {
     /// Heavy assault unit (Astromancer Golem, Hollowmen War-Mech): slow, tanky,
     /// hits hard. Costs ore and carbon.
     Heavy,
+    /// Astromancer evocation caster: short reach, burns through packed
+    /// infantry fast, fragile. Faction-locked.
+    Pyromancer,
+    /// Astromancer tempest caster: long-reach bolts that hit hard but slowly.
+    /// Faction-locked.
+    Stormcaller,
+    /// Hollowmen light recon mech: very fast, cheap, weak. Faction-locked.
+    Hound,
+    /// Hollowmen missile mech: long-reach fire support with real armor.
+    /// Faction-locked.
+    Javelin,
 }
 
 /// Kinds of structure.
@@ -37,6 +48,36 @@ pub enum BuildingKind {
     /// Supply depot: raises the owner's unit cap (the HQ provides a base
     /// amount; each depot adds more). Builds nothing and has no weapon.
     Supply,
+    /// Astromancer storm coil: pricier than a Ward but strikes from much
+    /// further out. Faction-locked.
+    StormWard,
+    /// Hollowmen blockhouse: cheap, tough, short-reach rapid fire.
+    /// Faction-locked.
+    Bunker,
+    /// Astromancer caster college: trains the Pyromancer and Stormcaller.
+    Athenaeum,
+    /// Astromancer forge (tier 2 tech shell). Faction-locked.
+    Crucible,
+    /// Astromancer research dome (tech shell). Faction-locked.
+    Conservatory,
+    /// Astromancer air roost (tech shell). Faction-locked.
+    Aerie,
+    /// Astromancer superweapon site (tech shell). Faction-locked.
+    LeyNexus,
+    /// Hollowmen mech line: trains the Hound and Javelin.
+    MachineShop,
+    /// Hollowmen munitions plant (tech shell). Faction-locked.
+    Arsenal,
+    /// Hollowmen detection mast (tech shell). Faction-locked.
+    RadarArray,
+    /// Hollowmen air pad (tech shell). Faction-locked.
+    Starport,
+    /// Hollowmen power plant (tech shell). Faction-locked.
+    FusionReactor,
+    /// Hollowmen capital yard (tech shell). Faction-locked.
+    Drydock,
+    /// Hollowmen nuke site (tech shell). Faction-locked.
+    MissileSilo,
 }
 
 /// Harvestable resource nodes.

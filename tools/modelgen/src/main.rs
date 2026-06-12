@@ -7,9 +7,13 @@
 //! them, so only run it to scaffold a brand-new model, never to "refresh"
 //! one that may have hand edits.
 //!
-//! Run: `cargo run -p modelgen`
+//! Run: `cargo run -p modelgen` scaffolds every model; pass names
+//! (`cargo run -p modelgen -- hound javelin`) to scaffold only those and
+//! leave every other checked-in (possibly hand-edited) asset untouched.
 //!
 //! This is a dev tool, not part of the deterministic sim: floats are fine.
+
+mod roster;
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -1986,6 +1990,26 @@ fn supply_mesh_astro() -> Vec<UnitVertex> {
 /// Walk-cycle frames baked per walking unit (one full gait cycle).
 const WALK_FRAMES: usize = 8;
 
+/// Attack-cycle frames baked per combat unit (one strike or recoil cycle).
+const ATTACK_FRAMES: usize = 4;
+
+/// Bake one attack frame: the upper body (above the waist, y > 0.9) thrusts
+/// along +z (a lunge / jab) or recoils along -z for `amp < 0` (gunfire),
+/// easing out and back across the cycle. The whole-mesh snapshots are
+/// ordinary OBJ assets, editable per frame in Blender like the walk cycles.
+fn bake_attack_frame(mesh: &[UnitVertex], frame: usize, amp: f32) -> Vec<UnitVertex> {
+    let t = (frame as f32 + 1.0) / (ATTACK_FRAMES as f32 + 1.0);
+    let push = (std::f32::consts::PI * t).sin() * amp;
+    mesh.iter()
+        .map(|v| {
+            let body = ((v.pos[1] - 0.9) / 0.6).clamp(0.0, 1.0);
+            let mut p = v.pos;
+            p[2] += push * body;
+            UnitVertex { pos: p, ..*v }
+        })
+        .collect()
+}
+
 /// Bake one walk frame by applying the gait pose to the idle mesh: geometry
 /// near the ground (below y of about 1.3) swings fore-aft along z, the two
 /// sides (sign of x) in counter-phase, with a small lift on the stepping
@@ -2109,7 +2133,7 @@ fn write_model(dir: &Path, name: &str, mtllib: &str, mesh: &[UnitVertex]) {
 fn main() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/models");
     fs::create_dir_all(&dir).expect("create assets/models");
-    let jobs: [(&str, Vec<UnitVertex>); 17] = [
+    let jobs: Vec<(&str, Vec<UnitVertex>)> = vec![
         ("infantry", infantry_mesh()),
         ("heavy", heavy_mesh()),
         ("acolyte", acolyte_mesh()),
@@ -2127,14 +2151,69 @@ fn main() {
         ("carbon-node", carbon_node_mesh()),
         ("carbon-pool", carbon_pool_mesh()),
         ("barrel", barrel_mesh()),
+        // Roster expansion (assets/concepts/roster_*.png).
+        ("pyromancer", roster::pyromancer_mesh()),
+        ("stormcaller", roster::stormcaller_mesh()),
+        ("hex-witch", roster::hex_witch_mesh()),
+        ("druid", roster::druid_mesh()),
+        ("evoker", roster::evoker_mesh()),
+        ("chronomancer", roster::chronomancer_mesh()),
+        ("seer", roster::seer_mesh()),
+        ("wisp", roster::wisp_mesh()),
+        ("tempest-dais", roster::tempest_dais_mesh()),
+        ("hound", roster::hound_mesh()),
+        ("javelin", roster::javelin_mesh()),
+        ("wrecker", roster::wrecker_mesh()),
+        ("bulwark", roster::bulwark_mesh()),
+        ("earthshaker", roster::earthshaker_mesh()),
+        ("hailstorm", roster::hailstorm_mesh()),
+        ("interceptor", roster::interceptor_mesh()),
+        ("vulture", roster::vulture_mesh()),
+        ("athenaeum", roster::athenaeum_mesh()),
+        ("storm-ward", roster::storm_ward_mesh()),
+        ("crucible", roster::crucible_mesh()),
+        ("conservatory", roster::conservatory_mesh()),
+        ("aerie", roster::aerie_mesh()),
+        ("ley-nexus", roster::ley_nexus_mesh()),
+        ("arsenal", roster::arsenal_mesh()),
+        ("bunker", roster::bunker_mesh()),
+        ("flak-tower", roster::flak_tower_mesh()),
+        ("machine-shop", roster::machine_shop_mesh()),
+        ("radar-array", roster::radar_array_mesh()),
+        ("starport", roster::starport_mesh()),
+        ("fusion-reactor", roster::fusion_reactor_mesh()),
+        ("drydock", roster::drydock_mesh()),
+        ("missile-silo", roster::missile_silo_mesh()),
     ];
-    let mut n = jobs.len();
+    // Optional name filter: scaffold only the requested models so existing
+    // (possibly hand-edited) assets are never overwritten by accident.
+    let filter: Vec<String> = std::env::args().skip(1).collect();
+    for f in &filter {
+        assert!(jobs.iter().any(|(n, _)| n == f), "unknown model name: {f}");
+    }
+    let want = |name: &str| filter.is_empty() || filter.iter().any(|f| f == name);
+    let mut n = 0;
     for (name, mesh) in &jobs {
-        write_model(&dir, name, name, mesh);
+        if want(name) {
+            write_model(&dir, name, name, mesh);
+            n += 1;
+        }
     }
     // Walk-cycle keyframes for the walking units, sharing the base MTL.
-    // (name, gait amplitude) - the heavy stomps wider and slower.
-    for (name, amp) in [("infantry", 0.32_f32), ("engineer", 0.30), ("heavy", 0.5)] {
+    // (name, gait amplitude) - the heavy stomps wider and slower. The
+    // Bulwark walks too but its barrier spans x = 0, which the naive bake
+    // would shear, so its frames are authored by hand instead.
+    for (name, amp) in [
+        ("infantry", 0.32_f32),
+        ("engineer", 0.30),
+        ("heavy", 0.5),
+        ("hound", 0.30),
+        ("javelin", 0.36),
+        ("wrecker", 0.42),
+    ] {
+        if !want(name) {
+            continue;
+        }
         let base = &jobs.iter().find(|(j, _)| *j == name).expect("walk base").1;
         for f in 0..WALK_FRAMES {
             write_model(
@@ -2142,6 +2221,37 @@ fn main() {
                 &format!("{name}-walk-{f}"),
                 name,
                 &bake_walk_frame(base, f, amp),
+            );
+            n += 1;
+        }
+    }
+    // Attack-cycle keyframes for everything that fights: a +z lunge for
+    // melee/casters, a -z recoil (negative amplitude) for gunnery.
+    for (name, amp) in [
+        ("infantry", 0.34_f32),
+        ("heavy", -0.20),
+        ("engineer", 0.28),
+        ("acolyte", 0.26),
+        ("pyromancer", 0.30),
+        ("stormcaller", 0.30),
+        ("hound", -0.16),
+        ("javelin", -0.18),
+        ("wrecker", 0.40),
+    ] {
+        if !want(name) {
+            continue;
+        }
+        let base = &jobs
+            .iter()
+            .find(|(j, _)| *j == name)
+            .expect("attack base")
+            .1;
+        for f in 0..ATTACK_FRAMES {
+            write_model(
+                &dir,
+                &format!("{name}-attack-{f}"),
+                name,
+                &bake_attack_frame(base, f, amp),
             );
             n += 1;
         }

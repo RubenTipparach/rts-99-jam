@@ -4,12 +4,13 @@
 use crate::camera::Camera;
 use crate::fx::Fx as FxSystem;
 use crate::gfx::{
-    FxLight, InstanceRaw, RingRaw, FOW_RES, RING, ROT_NONE, WALK_BUCKETS, WALK_FRAMES,
+    FxLight, InstanceRaw, RingRaw, ANIM_BUCKETS, ATTACK_FRAMES, CASTER_BUCKETS, FOW_RES, RING,
+    ROT_NONE, WALK_BUCKETS, WALK_FRAMES,
 };
 use crate::terrain;
 use math::{Fx, FRAC_BITS};
 use protocol::{BuildingKind, Command, UnitKind};
-use sim::{Kind, Snap, World};
+use sim::{BotLevel, Kind, Snap, World};
 use std::collections::{HashMap, HashSet};
 use web_time::Instant;
 
@@ -69,12 +70,34 @@ fn walk_bucket(moving: bool, phase: f32) -> usize {
     }
 }
 
+/// Attack-cycle frame for the given phase (0..ATTACK_FRAMES).
+fn attack_frame(phase: f32) -> usize {
+    ((phase / std::f32::consts::TAU).rem_euclid(1.0) * ATTACK_FRAMES as f32) as usize
+        % ATTACK_FRAMES
+}
+
+/// Bucket for a walking combat kind: attack frames win over the gait.
+fn anim_bucket(fighting: bool, moving: bool, phase: f32) -> usize {
+    if fighting {
+        WALK_BUCKETS + attack_frame(phase)
+    } else {
+        walk_bucket(moving, phase)
+    }
+}
+
+/// Bucket for a hovering caster kind (idle + attack frames only).
+fn caster_bucket(fighting: bool, phase: f32) -> usize {
+    if fighting {
+        1 + attack_frame(phase)
+    } else {
+        0
+    }
+}
+
 /// Flatten per-frame instance buckets into one packed list plus the
 /// per-bucket counts the renderer draws sub-ranges with.
-fn flatten_walk(
-    buckets: [Vec<InstanceRaw>; WALK_BUCKETS],
-) -> (Vec<InstanceRaw>, [u32; WALK_BUCKETS]) {
-    let mut counts = [0u32; WALK_BUCKETS];
+fn flatten_walk<const N: usize>(buckets: [Vec<InstanceRaw>; N]) -> (Vec<InstanceRaw>, [u32; N]) {
+    let mut counts = [0u32; N];
     let mut flat = Vec::new();
     for (k, b) in buckets.into_iter().enumerate() {
         counts[k] = b.len() as u32;
@@ -161,6 +184,13 @@ fn building_height(kind: Kind) -> f32 {
         Kind::Barracks => 12.0,
         Kind::Turret => 4.5,
         Kind::Supply => 3.5,
+        Kind::StormWard => 7.5,
+        Kind::Bunker => 3.0,
+        Kind::Athenaeum | Kind::Crucible | Kind::Conservatory | Kind::MachineShop => 9.0,
+        Kind::Aerie => 13.0,
+        Kind::Arsenal | Kind::RadarArray | Kind::FusionReactor => 7.0,
+        Kind::Starport | Kind::Drydock => 8.5,
+        Kind::LeyNexus | Kind::MissileSilo => 9.5,
         _ => 0.0,
     }
 }
@@ -170,8 +200,20 @@ fn pad_radius(kind: BuildingKind) -> f32 {
     match kind {
         BuildingKind::Hq => 9.0,
         BuildingKind::Barracks => 8.0,
-        BuildingKind::Turret => 4.0,
-        BuildingKind::Supply => 4.5,
+        BuildingKind::Turret | BuildingKind::StormWard => 4.0,
+        BuildingKind::Supply | BuildingKind::Bunker => 4.5,
+        BuildingKind::Athenaeum
+        | BuildingKind::Crucible
+        | BuildingKind::Conservatory
+        | BuildingKind::MachineShop
+        | BuildingKind::Aerie
+        | BuildingKind::RadarArray
+        | BuildingKind::Arsenal
+        | BuildingKind::FusionReactor => 7.0,
+        BuildingKind::Starport
+        | BuildingKind::Drydock
+        | BuildingKind::LeyNexus
+        | BuildingKind::MissileSilo => 8.0,
     }
 }
 
@@ -182,18 +224,42 @@ fn pad_radius(kind: BuildingKind) -> f32 {
 pub struct RenderData {
     pub infantry: Vec<InstanceRaw>,
     /// Per walk-bucket counts (idle + each baked frame) into `infantry`.
-    pub infantry_frames: [u32; WALK_BUCKETS],
+    pub infantry_frames: [u32; ANIM_BUCKETS],
     pub barracks_astro: Vec<InstanceRaw>,
     pub barracks_hollow: Vec<InstanceRaw>,
     pub hq_astro: Vec<InstanceRaw>,
     pub hq_hollow: Vec<InstanceRaw>,
     pub acolytes: Vec<InstanceRaw>,
+    pub acolyte_frames: [u32; CASTER_BUCKETS],
     pub engineers: Vec<InstanceRaw>,
-    pub engineer_frames: [u32; WALK_BUCKETS],
+    pub engineer_frames: [u32; ANIM_BUCKETS],
     pub ore_nodes: Vec<InstanceRaw>,
     pub carbon_nodes: Vec<InstanceRaw>,
     pub heavies: Vec<InstanceRaw>,
-    pub heavy_frames: [u32; WALK_BUCKETS],
+    pub heavy_frames: [u32; ANIM_BUCKETS],
+    pub pyromancers: Vec<InstanceRaw>,
+    pub pyromancer_frames: [u32; CASTER_BUCKETS],
+    pub stormcallers: Vec<InstanceRaw>,
+    pub stormcaller_frames: [u32; CASTER_BUCKETS],
+    pub hounds: Vec<InstanceRaw>,
+    pub hound_frames: [u32; ANIM_BUCKETS],
+    pub javelins: Vec<InstanceRaw>,
+    pub javelin_frames: [u32; ANIM_BUCKETS],
+    pub storm_wards: Vec<InstanceRaw>,
+    pub bunkers: Vec<InstanceRaw>,
+    pub athenaeums: Vec<InstanceRaw>,
+    pub crucibles: Vec<InstanceRaw>,
+    pub conservatories: Vec<InstanceRaw>,
+    pub aeries: Vec<InstanceRaw>,
+    pub ley_nexuses: Vec<InstanceRaw>,
+    pub machine_shops: Vec<InstanceRaw>,
+    pub arsenals: Vec<InstanceRaw>,
+    pub radar_arrays: Vec<InstanceRaw>,
+    pub starports: Vec<InstanceRaw>,
+    pub fusion_reactors: Vec<InstanceRaw>,
+    pub drydocks: Vec<InstanceRaw>,
+    pub missile_silos: Vec<InstanceRaw>,
+
     pub turrets: Vec<InstanceRaw>,
     pub supplies: Vec<InstanceRaw>,
     pub wards_astro: Vec<InstanceRaw>,
@@ -202,6 +268,9 @@ pub struct RenderData {
     pub ore_crystals: Vec<InstanceRaw>,
     pub carbon_pools: Vec<InstanceRaw>,
     pub rings: Vec<RingRaw>,
+    /// Soft blob shadows under mobile units (WC3-style fake decals): one
+    /// disc per unit, drawn as a radial-gradient fan on the terrain.
+    pub shadows: Vec<RingRaw>,
 }
 
 #[derive(Clone, Copy)]
@@ -261,14 +330,15 @@ pub struct Game {
 
 impl Default for Game {
     fn default() -> Self {
-        Self::new(1)
+        Self::new(1, BotLevel::Normal)
     }
 }
 
 impl Game {
-    /// Start a match against `bots` bot commanders (1-3). Standard maps
-    /// carry four spawns; only the active players' entities spawn.
-    pub fn new(bots: u8) -> Self {
+    /// Start a match against `bots` bot commanders (1-3) at difficulty `ai`.
+    /// Standard maps carry four spawns; only the active players' entities
+    /// spawn.
+    pub fn new(bots: u8, ai: BotLevel) -> Self {
         // The whole starting layout (bases, garrisons, and the resource
         // clusters) is baked into the active battlefield's map file: each
         // voxel world carries the skirmish template fitted onto its own
@@ -307,10 +377,11 @@ impl Game {
             yaw_time: 0.0,
         };
         // Every enemy is driven by an in-sim bot commander (mines, builds,
-        // trains), one per spawned bot player.
+        // trains), one per spawned bot player, at the lobby's difficulty.
         for b in 1..=bots {
-            g.world.set_bot(b, true);
+            g.world.set_bot(b, ai);
         }
+        g.sync_sim_factions();
         g.apply_terrain();
         g.step_now();
         g.prev = g.curr.clone();
@@ -342,7 +413,24 @@ impl Game {
                 s.owner == 0
                     && matches!(
                         s.kind,
-                        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                        Kind::Hq
+                            | Kind::Barracks
+                            | Kind::Turret
+                            | Kind::Supply
+                            | Kind::StormWard
+                            | Kind::Bunker
+                            | Kind::Athenaeum
+                            | Kind::Crucible
+                            | Kind::Conservatory
+                            | Kind::Aerie
+                            | Kind::LeyNexus
+                            | Kind::MachineShop
+                            | Kind::Arsenal
+                            | Kind::RadarArray
+                            | Kind::Starport
+                            | Kind::FusionReactor
+                            | Kind::Drydock
+                            | Kind::MissileSilo
                     )
                     && (f(s.pos.x) - pb.wx).hypot(f(s.pos.y) - pb.wz) < 5.0
             });
@@ -429,7 +517,24 @@ impl Game {
                 let organic = matches!(p.kind, Kind::Infantry | Kind::Worker);
                 let big = matches!(
                     p.kind,
-                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    Kind::Hq
+                        | Kind::Barracks
+                        | Kind::Turret
+                        | Kind::Supply
+                        | Kind::StormWard
+                        | Kind::Bunker
+                        | Kind::Athenaeum
+                        | Kind::Crucible
+                        | Kind::Conservatory
+                        | Kind::Aerie
+                        | Kind::LeyNexus
+                        | Kind::MachineShop
+                        | Kind::Arsenal
+                        | Kind::RadarArray
+                        | Kind::Starport
+                        | Kind::FusionReactor
+                        | Kind::Drydock
+                        | Kind::MissileSilo
                 );
                 let seen = p.owner == 0 || self.cell_visible(f(p.pos.x), f(p.pos.y));
                 if !seen {
@@ -459,7 +564,24 @@ impl Game {
             .filter(|s| {
                 matches!(
                     s.kind,
-                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    Kind::Hq
+                        | Kind::Barracks
+                        | Kind::Turret
+                        | Kind::Supply
+                        | Kind::StormWard
+                        | Kind::Bunker
+                        | Kind::Athenaeum
+                        | Kind::Crucible
+                        | Kind::Conservatory
+                        | Kind::Aerie
+                        | Kind::LeyNexus
+                        | Kind::MachineShop
+                        | Kind::Arsenal
+                        | Kind::RadarArray
+                        | Kind::Starport
+                        | Kind::FusionReactor
+                        | Kind::Drydock
+                        | Kind::MissileSilo
                 ) && s.construct_frac < Fx::ONE
             })
             .filter(|s| s.owner == 0 || self.cell_visible(f(s.pos.x), f(s.pos.y)))
@@ -506,7 +628,24 @@ impl Game {
             .filter(|s| {
                 matches!(
                     s.kind,
-                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    Kind::Hq
+                        | Kind::Barracks
+                        | Kind::Turret
+                        | Kind::Supply
+                        | Kind::StormWard
+                        | Kind::Bunker
+                        | Kind::Athenaeum
+                        | Kind::Crucible
+                        | Kind::Conservatory
+                        | Kind::Aerie
+                        | Kind::LeyNexus
+                        | Kind::MachineShop
+                        | Kind::Arsenal
+                        | Kind::RadarArray
+                        | Kind::Starport
+                        | Kind::FusionReactor
+                        | Kind::Drydock
+                        | Kind::MissileSilo
                 )
             })
             .filter(|s| s.owner == 0 || self.cell_visible(f(s.pos.x), f(s.pos.y)))
@@ -602,7 +741,24 @@ impl Game {
                 // An Astromancer structure mid-summons: the gate itself is a
                 // light source, washing the pad in aether while the shell
                 // descends through it.
-                Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                Kind::Hq
+                | Kind::Barracks
+                | Kind::Turret
+                | Kind::Supply
+                | Kind::StormWard
+                | Kind::Bunker
+                | Kind::Athenaeum
+                | Kind::Crucible
+                | Kind::Conservatory
+                | Kind::Aerie
+                | Kind::LeyNexus
+                | Kind::MachineShop
+                | Kind::Arsenal
+                | Kind::RadarArray
+                | Kind::Starport
+                | Kind::FusionReactor
+                | Kind::Drydock
+                | Kind::MissileSilo
                     if f(s.construct_frac) < 0.999
                         && self.faction_of(s.owner) == Faction::Astromancer =>
                 {
@@ -616,7 +772,24 @@ impl Game {
                 // wall lamps just outside the footprint corners, hugging the
                 // ground so the pool lands on the terrain vertices around
                 // the pad (Earth 2150 style), never on the building's roof.
-                Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                Kind::Hq
+                | Kind::Barracks
+                | Kind::Turret
+                | Kind::Supply
+                | Kind::StormWard
+                | Kind::Bunker
+                | Kind::Athenaeum
+                | Kind::Crucible
+                | Kind::Conservatory
+                | Kind::Aerie
+                | Kind::LeyNexus
+                | Kind::MachineShop
+                | Kind::Arsenal
+                | Kind::RadarArray
+                | Kind::Starport
+                | Kind::FusionReactor
+                | Kind::Drydock
+                | Kind::MissileSilo
                     if f(s.construct_frac) >= 0.999 =>
                 {
                     let r = match s.kind {
@@ -916,6 +1089,22 @@ impl Game {
             Faction::Astromancer => Faction::Hollowmen,
             Faction::Hollowmen => Faction::Astromancer,
         };
+        self.sync_sim_factions();
+    }
+
+    /// Mirror the client-side faction assignment into the sim, which gates
+    /// faction-locked units and structures (and hashes the assignment).
+    /// Covers every possible player slot: standard maps carry four spawns.
+    fn sync_sim_factions(&mut self) {
+        for p in 0..4u16 {
+            self.world.set_faction(
+                p,
+                match self.faction_of(p) {
+                    Faction::Astromancer => sim::Faction::Astromancers,
+                    Faction::Hollowmen => sim::Faction::Hollowmen,
+                },
+            );
+        }
     }
 
     /// Instances for each mesh - infantry, the two faction barracks (Astromancer,
@@ -935,16 +1124,36 @@ impl Game {
         let mut yaw = std::mem::take(&mut self.yaw);
         let dt = (self.time - self.yaw_time).clamp(0.0, 0.1);
         self.yaw_time = self.time;
-        let mut infantry_b: [Vec<InstanceRaw>; WALK_BUCKETS] = Default::default();
+        let mut infantry_b: [Vec<InstanceRaw>; ANIM_BUCKETS] = Default::default();
         let mut barracks_astro = Vec::new();
         let mut barracks_hollow = Vec::new();
         let mut hq_astro = Vec::new();
         let mut hq_hollow = Vec::new();
-        let mut acolytes = Vec::new();
-        let mut engineers_b: [Vec<InstanceRaw>; WALK_BUCKETS] = Default::default();
+        let mut acolytes_b: [Vec<InstanceRaw>; CASTER_BUCKETS] = Default::default();
+        let mut engineers_b: [Vec<InstanceRaw>; ANIM_BUCKETS] = Default::default();
         let mut ore_nodes = Vec::new();
         let mut carbon_nodes = Vec::new();
-        let mut heavies_b: [Vec<InstanceRaw>; WALK_BUCKETS] = Default::default();
+        let mut heavies_b: [Vec<InstanceRaw>; ANIM_BUCKETS] = Default::default();
+        let mut pyromancers_b: [Vec<InstanceRaw>; CASTER_BUCKETS] = Default::default();
+        let mut stormcallers_b: [Vec<InstanceRaw>; CASTER_BUCKETS] = Default::default();
+        let mut hounds_b: [Vec<InstanceRaw>; ANIM_BUCKETS] = Default::default();
+        let mut javelins_b: [Vec<InstanceRaw>; ANIM_BUCKETS] = Default::default();
+        let mut storm_wards = Vec::new();
+        let mut bunkers = Vec::new();
+        let mut athenaeums = Vec::new();
+        let mut crucibles = Vec::new();
+        let mut conservatories = Vec::new();
+        let mut aeries = Vec::new();
+        let mut ley_nexuses = Vec::new();
+        let mut machine_shops = Vec::new();
+        let mut arsenals = Vec::new();
+        let mut radar_arrays = Vec::new();
+        let mut starports = Vec::new();
+        let mut fusion_reactors = Vec::new();
+        let mut drydocks = Vec::new();
+        let mut missile_silos = Vec::new();
+
+        let mut shadows = Vec::new();
         let mut turrets = Vec::new();
         let mut supplies = Vec::new();
         let mut wards_astro = Vec::new();
@@ -960,6 +1169,24 @@ impl Game {
             }
             let ground = terrain::height(wx, wz);
             let tint = team_color(s.owner);
+            // WC3-style fake shadow: every mobile unit drops a soft dark
+            // blob on the ground (cheap, and it seats the silhouette).
+            let shadow_r = match s.kind {
+                Kind::Heavy => 1.9,
+                Kind::Javelin => 1.6,
+                Kind::Hound => 1.25,
+                Kind::Infantry | Kind::Worker => 1.15,
+                Kind::Pyromancer | Kind::Stormcaller => 1.3,
+                _ => 0.0,
+            };
+            if shadow_r > 0.0 {
+                shadows.push(RingRaw {
+                    center: [wx, ground, wz],
+                    radius: shadow_r,
+                    color: [0.0, 0.0, 0.0, 0.42],
+                    inner: 0.0,
+                });
+            }
             if matches!(s.kind, Kind::OreNode | Kind::CarbonNode) {
                 // Nodes shrink as they deplete (resource_frac runs 1 -> 0).
                 // The rock pedestal draws opaque; the crystal shards / gas
@@ -980,7 +1207,24 @@ impl Game {
                 }
             } else if matches!(
                 s.kind,
-                Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                Kind::Hq
+                    | Kind::Barracks
+                    | Kind::Turret
+                    | Kind::Supply
+                    | Kind::StormWard
+                    | Kind::Bunker
+                    | Kind::Athenaeum
+                    | Kind::Crucible
+                    | Kind::Conservatory
+                    | Kind::Aerie
+                    | Kind::LeyNexus
+                    | Kind::MachineShop
+                    | Kind::Arsenal
+                    | Kind::RadarArray
+                    | Kind::Starport
+                    | Kind::FusionReactor
+                    | Kind::Drydock
+                    | Kind::MissileSilo
             ) {
                 // Construction, two ways. Hollowmen structures rise out of
                 // the ground (construct_frac scales height). Astromancer
@@ -1041,6 +1285,21 @@ impl Game {
                 // The Earth 2150-style floodlight pooling under the building
                 // is a real point light now: see `world_lights`.
                 match s.kind {
+                    Kind::StormWard => storm_wards.push(inst),
+                    Kind::Bunker => bunkers.push(inst),
+                    Kind::Athenaeum => athenaeums.push(inst),
+                    Kind::Crucible => crucibles.push(inst),
+                    Kind::Conservatory => conservatories.push(inst),
+                    Kind::Aerie => aeries.push(inst),
+                    Kind::LeyNexus => ley_nexuses.push(inst),
+                    Kind::MachineShop => machine_shops.push(inst),
+                    Kind::Arsenal => arsenals.push(inst),
+                    Kind::RadarArray => radar_arrays.push(inst),
+                    Kind::Starport => starports.push(inst),
+                    Kind::FusionReactor => fusion_reactors.push(inst),
+                    Kind::Drydock => drydocks.push(inst),
+                    Kind::MissileSilo => missile_silos.push(inst),
+
                     Kind::Turret => {
                         if astro {
                             wards_astro.push(inst)
@@ -1121,11 +1380,15 @@ impl Game {
                     }
                 };
                 match self.faction_of(s.owner) {
-                    Faction::Astromancer => acolytes.push(inst),
+                    Faction::Astromancer => {
+                        acolytes_b[caster_bucket(s.fighting, self.time * 10.0 + phase)].push(inst)
+                    }
                     Faction::Hollowmen => {
-                        // Engineers play their baked walk frames while moving.
+                        // Engineers play their baked walk frames while moving
+                        // and their tool-jab frames when scrapping.
                         let walking = s.moving && !s.mining && !s.repairing;
-                        engineers_b[walk_bucket(walking, self.time * 9.0 + phase)].push(inst)
+                        engineers_b[anim_bucket(s.fighting, walking, self.time * 9.0 + phase)]
+                            .push(inst)
                     }
                 }
                 // The hauled load rides visibly on the worker: a little
@@ -1165,6 +1428,59 @@ impl Game {
                         inner: RING,
                     });
                 }
+            } else if matches!(s.kind, Kind::Pyromancer | Kind::Stormcaller) {
+                // Casters hover like the Acolyte: a slow bob, no walk cycle.
+                let phase = s.index as f32 * 1.3;
+                let y = ground + 0.9 + ((self.time * 2.2) + phase).sin() * 0.16;
+                let inst = InstanceRaw {
+                    offset: [wx, y, wz],
+                    scale: [1.0, 1.0, 1.0],
+                    color: tint,
+                    rot: smooth_rot(&mut yaw, s, 10.0, dt),
+                };
+                let bucket = caster_bucket(s.fighting, self.time * 10.0 + phase);
+                if s.kind == Kind::Pyromancer {
+                    pyromancers_b[bucket].push(inst);
+                } else {
+                    stormcallers_b[bucket].push(inst);
+                }
+                if sel.contains(&s.index) {
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: 2.2,
+                        color: [0.4, 1.0, 0.5, 0.95],
+                        inner: RING,
+                    });
+                }
+            } else if matches!(s.kind, Kind::Hound | Kind::Javelin) {
+                // Mechs march on their baked walk frames, like the Engineer.
+                let hound = s.kind == Kind::Hound;
+                let phase = s.index as f32 * 1.3;
+                let gait = if hound { 11.0 } else { 7.0 };
+                let mut y = ground;
+                if s.moving {
+                    y += ((self.time * gait) + phase).sin() * if hound { 0.10 } else { 0.07 };
+                }
+                let inst = InstanceRaw {
+                    offset: [wx, y, wz],
+                    scale: [1.0, 1.0, 1.0],
+                    color: tint,
+                    rot: smooth_rot(&mut yaw, s, if hound { 12.0 } else { 7.0 }, dt),
+                };
+                let bucket = anim_bucket(s.fighting, s.moving, self.time * gait + phase);
+                if hound {
+                    hounds_b[bucket].push(inst);
+                } else {
+                    javelins_b[bucket].push(inst);
+                }
+                if sel.contains(&s.index) {
+                    rings.push(RingRaw {
+                        center: [wx, ground, wz],
+                        radius: if hound { 2.0 } else { 2.6 },
+                        color: [0.4, 1.0, 0.5, 0.95],
+                        inner: RING,
+                    });
+                }
             } else {
                 // Infantry or Heavy: a combat unit with a march bob. Heavy reads
                 // larger and gets a bigger selection ring.
@@ -1186,7 +1502,11 @@ impl Game {
                 };
                 // March cycle: pick the baked walk frame for this gait phase.
                 let gait = if heavy { 5.5 } else { 9.0 };
-                let bucket = walk_bucket(s.moving, self.time * gait + s.index as f32 * 1.3);
+                let bucket = anim_bucket(
+                    s.fighting,
+                    s.moving,
+                    self.time * gait + s.index as f32 * 1.3,
+                );
                 if heavy {
                     heavies_b[bucket].push(inst);
                 } else {
@@ -1222,12 +1542,7 @@ impl Game {
                 color: holo,
                 rot: ROT_NONE,
             };
-            let radius = match kind {
-                BuildingKind::Hq => 9.0,
-                BuildingKind::Barracks => 8.0,
-                BuildingKind::Turret => 4.0,
-                BuildingKind::Supply => 4.5,
-            };
+            let radius = pad_radius(kind);
             match kind {
                 BuildingKind::Hq => match self.faction_of(0) {
                     Faction::Astromancer => hq_astro.push(inst),
@@ -1245,6 +1560,20 @@ impl Game {
                     Faction::Astromancer => supplies_astro.push(inst),
                     Faction::Hollowmen => supplies.push(inst),
                 },
+                BuildingKind::StormWard => storm_wards.push(inst),
+                BuildingKind::Bunker => bunkers.push(inst),
+                BuildingKind::Athenaeum => athenaeums.push(inst),
+                BuildingKind::Crucible => crucibles.push(inst),
+                BuildingKind::Conservatory => conservatories.push(inst),
+                BuildingKind::Aerie => aeries.push(inst),
+                BuildingKind::LeyNexus => ley_nexuses.push(inst),
+                BuildingKind::MachineShop => machine_shops.push(inst),
+                BuildingKind::Arsenal => arsenals.push(inst),
+                BuildingKind::RadarArray => radar_arrays.push(inst),
+                BuildingKind::Starport => starports.push(inst),
+                BuildingKind::FusionReactor => fusion_reactors.push(inst),
+                BuildingKind::Drydock => drydocks.push(inst),
+                BuildingKind::MissileSilo => missile_silos.push(inst),
             }
             rings.push(RingRaw {
                 center: [gx, ground, gz],
@@ -1301,6 +1630,20 @@ impl Game {
                     Faction::Astromancer => supplies_astro.push(inst),
                     Faction::Hollowmen => supplies.push(inst),
                 },
+                BuildingKind::StormWard => storm_wards.push(inst),
+                BuildingKind::Bunker => bunkers.push(inst),
+                BuildingKind::Athenaeum => athenaeums.push(inst),
+                BuildingKind::Crucible => crucibles.push(inst),
+                BuildingKind::Conservatory => conservatories.push(inst),
+                BuildingKind::Aerie => aeries.push(inst),
+                BuildingKind::LeyNexus => ley_nexuses.push(inst),
+                BuildingKind::MachineShop => machine_shops.push(inst),
+                BuildingKind::Arsenal => arsenals.push(inst),
+                BuildingKind::RadarArray => radar_arrays.push(inst),
+                BuildingKind::Starport => starports.push(inst),
+                BuildingKind::FusionReactor => fusion_reactors.push(inst),
+                BuildingKind::Drydock => drydocks.push(inst),
+                BuildingKind::MissileSilo => missile_silos.push(inst),
             }
         }
 
@@ -1333,6 +1676,11 @@ impl Game {
         let (infantry, infantry_frames) = flatten_walk(infantry_b);
         let (engineers, engineer_frames) = flatten_walk(engineers_b);
         let (heavies, heavy_frames) = flatten_walk(heavies_b);
+        let (hounds, hound_frames) = flatten_walk(hounds_b);
+        let (javelins, javelin_frames) = flatten_walk(javelins_b);
+        let (acolytes, acolyte_frames) = flatten_walk(acolytes_b);
+        let (pyromancers, pyromancer_frames) = flatten_walk(pyromancers_b);
+        let (stormcallers, stormcaller_frames) = flatten_walk(stormcallers_b);
         let live: HashSet<u32> = self.curr.iter().map(|s| s.index).collect();
         yaw.retain(|k, _| live.contains(k));
         self.yaw = yaw;
@@ -1345,12 +1693,36 @@ impl Game {
             hq_astro,
             hq_hollow,
             acolytes,
+            acolyte_frames,
             engineers,
             engineer_frames,
             ore_nodes,
             carbon_nodes,
             heavies,
             heavy_frames,
+            pyromancers,
+            pyromancer_frames,
+            stormcallers,
+            stormcaller_frames,
+            hounds,
+            hound_frames,
+            javelins,
+            javelin_frames,
+            storm_wards,
+            bunkers,
+            athenaeums,
+            crucibles,
+            conservatories,
+            aeries,
+            ley_nexuses,
+            machine_shops,
+            arsenals,
+            radar_arrays,
+            starports,
+            fusion_reactors,
+            drydocks,
+            missile_silos,
+
             turrets,
             supplies,
             wards_astro,
@@ -1359,6 +1731,7 @@ impl Game {
             ore_crystals,
             carbon_pools,
             rings,
+            shadows,
         }
     }
 
@@ -1392,7 +1765,16 @@ impl Game {
             return false;
         }
         for s in &self.curr {
-            if matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
+            if matches!(
+                s.kind,
+                Kind::Infantry
+                    | Kind::Worker
+                    | Kind::Heavy
+                    | Kind::Pyromancer
+                    | Kind::Stormcaller
+                    | Kind::Hound
+                    | Kind::Javelin
+            ) {
                 let (ex, ez) = (f(s.pos.x), f(s.pos.y));
                 if (ex - wx).hypot(ez - wz) < r + 1.5 {
                     return false;
@@ -1425,7 +1807,24 @@ impl Game {
         let (wx, wz) = self.lerped(s);
         let barracks = matches!(
             s.kind,
-            Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+            Kind::Hq
+                | Kind::Barracks
+                | Kind::Turret
+                | Kind::Supply
+                | Kind::StormWard
+                | Kind::Bunker
+                | Kind::Athenaeum
+                | Kind::Crucible
+                | Kind::Conservatory
+                | Kind::Aerie
+                | Kind::LeyNexus
+                | Kind::MachineShop
+                | Kind::Arsenal
+                | Kind::RadarArray
+                | Kind::Starport
+                | Kind::FusionReactor
+                | Kind::Drydock
+                | Kind::MissileSilo
         );
         let radius = match s.kind {
             Kind::Hq => 9.0,
@@ -1442,9 +1841,27 @@ impl Game {
             (Kind::Turret, Faction::Astromancer) => "WARD",
             (Kind::Turret, Faction::Hollowmen) => "TURRET",
             (Kind::Supply, _) => "DEPOT",
+            (Kind::StormWard, _) => "STORM-WARD",
+            (Kind::Bunker, _) => "BUNKER",
+            (Kind::Athenaeum, _) => "ATHENAEUM",
+            (Kind::Crucible, _) => "CRUCIBLE",
+            (Kind::Conservatory, _) => "CONSERVATORY",
+            (Kind::Aerie, _) => "AERIE",
+            (Kind::LeyNexus, _) => "LEY NEXUS",
+            (Kind::MachineShop, _) => "MACHINE SHOP",
+            (Kind::Arsenal, _) => "ARSENAL",
+            (Kind::RadarArray, _) => "RADAR ARRAY",
+            (Kind::Starport, _) => "STARPORT",
+            (Kind::FusionReactor, _) => "FUSION REACTOR",
+            (Kind::Drydock, _) => "DRYDOCK",
+            (Kind::MissileSilo, _) => "MISSILE SILO",
             (Kind::Worker, Faction::Astromancer) => "ACOLYTE",
             (Kind::Worker, Faction::Hollowmen) => "ENGINEER",
             (Kind::Heavy, _) => "HEAVY",
+            (Kind::Pyromancer, _) => "PYROMANCER",
+            (Kind::Stormcaller, _) => "STORMCALLER",
+            (Kind::Hound, _) => "HOUND",
+            (Kind::Javelin, _) => "JAVELIN",
             _ => "INFANTRY",
         };
         UnitInfo {
@@ -1472,7 +1889,24 @@ impl Game {
             .filter(|s| {
                 matches!(
                     s.kind,
-                    Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                    Kind::Hq
+                        | Kind::Barracks
+                        | Kind::Turret
+                        | Kind::Supply
+                        | Kind::StormWard
+                        | Kind::Bunker
+                        | Kind::Athenaeum
+                        | Kind::Crucible
+                        | Kind::Conservatory
+                        | Kind::Aerie
+                        | Kind::LeyNexus
+                        | Kind::MachineShop
+                        | Kind::Arsenal
+                        | Kind::RadarArray
+                        | Kind::Starport
+                        | Kind::FusionReactor
+                        | Kind::Drydock
+                        | Kind::MissileSilo
                 ) && s.hp < s.max_hp
             })
             .filter(|s| {
@@ -1513,7 +1947,17 @@ impl Game {
         self.curr
             .iter()
             .filter(|s| {
-                s.owner == 0 && matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy)
+                s.owner == 0
+                    && matches!(
+                        s.kind,
+                        Kind::Infantry
+                            | Kind::Worker
+                            | Kind::Heavy
+                            | Kind::Pyromancer
+                            | Kind::Stormcaller
+                            | Kind::Hound
+                            | Kind::Javelin
+                    )
             })
             .map(|s| self.info(s))
             .collect()
@@ -1567,7 +2011,18 @@ impl Game {
         // Nearest selectable unit within a click radius.
         let unit_r = (h * 0.03).max(18.0);
         for s in &self.curr {
-            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
+            if s.owner != 0
+                || !matches!(
+                    s.kind,
+                    Kind::Infantry
+                        | Kind::Worker
+                        | Kind::Heavy
+                        | Kind::Pyromancer
+                        | Kind::Stormcaller
+                        | Kind::Hound
+                        | Kind::Javelin
+                )
+            {
                 continue;
             }
             let (wx, wz) = self.lerped(s);
@@ -1589,7 +2044,24 @@ impl Game {
                 if s.owner != 0
                     || !matches!(
                         s.kind,
-                        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                        Kind::Hq
+                            | Kind::Barracks
+                            | Kind::Turret
+                            | Kind::Supply
+                            | Kind::StormWard
+                            | Kind::Bunker
+                            | Kind::Athenaeum
+                            | Kind::Crucible
+                            | Kind::Conservatory
+                            | Kind::Aerie
+                            | Kind::LeyNexus
+                            | Kind::MachineShop
+                            | Kind::Arsenal
+                            | Kind::RadarArray
+                            | Kind::Starport
+                            | Kind::FusionReactor
+                            | Kind::Drydock
+                            | Kind::MissileSilo
                     )
                 {
                     continue;
@@ -1651,19 +2123,12 @@ impl Game {
             .map(|s| (s.index, s.kind))
     }
 
-    /// The selected entity if it is exactly one of the player's barracks.
+    /// The selected production building's sim kind, if exactly one of the
+    /// player's producers is selected (drives the HUD's train card and the
+    /// T/H train hotkeys).
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub fn selected_barracks(&self) -> Option<u32> {
-        self.selected_producer()
-            .filter(|&(_, k)| k == Kind::Barracks)
-            .map(|(i, _)| i)
-    }
-
-    /// The selected entity if it is exactly one of the player's HQs.
-    pub fn selected_hq(&self) -> Option<u32> {
-        self.selected_producer()
-            .filter(|&(_, k)| k == Kind::Hq)
-            .map(|(i, _)| i)
+    pub fn selected_producer_kind(&self) -> Option<Kind> {
+        self.selected_producer().map(|(_, k)| k)
     }
 
     /// Queue a unit of `kind` at the selected production building (the sim
@@ -1746,6 +2211,20 @@ impl Game {
             BuildingKind::Turret => (90, 50),
             BuildingKind::Supply => (100, 0),
             BuildingKind::Hq => (400, 0),
+            BuildingKind::StormWard => (110, 60),
+            BuildingKind::Bunker => (80, 0),
+            BuildingKind::Athenaeum => (180, 40),
+            BuildingKind::Crucible => (200, 50),
+            BuildingKind::Conservatory => (150, 50),
+            BuildingKind::Aerie => (200, 75),
+            BuildingKind::LeyNexus => (300, 100),
+            BuildingKind::MachineShop => (180, 40),
+            BuildingKind::Arsenal => (150, 40),
+            BuildingKind::RadarArray => (150, 0),
+            BuildingKind::Starport => (200, 75),
+            BuildingKind::FusionReactor => (250, 50),
+            BuildingKind::Drydock => (300, 100),
+            BuildingKind::MissileSilo => (400, 50),
         }
     }
 
@@ -1756,6 +2235,10 @@ impl Game {
             UnitKind::Worker => (40, 0),
             UnitKind::Infantry => (50, 0),
             UnitKind::Heavy => (120, 60),
+            UnitKind::Pyromancer => (60, 20),
+            UnitKind::Stormcaller => (75, 40),
+            UnitKind::Hound => (35, 0),
+            UnitKind::Javelin => (80, 30),
         }
     }
 
@@ -1797,12 +2280,12 @@ impl Game {
     /// (queued, build-progress 0..1) for the selected production building
     /// (HQ or Barracks), for the HUD.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-    pub fn selected_production(&self) -> Option<(u32, f32)> {
+    pub fn selected_production(&self) -> Option<([u8; 6], u32, f32)> {
         let (b, _) = self.selected_producer()?;
         self.curr
             .iter()
             .find(|s| s.index == b)
-            .map(|s| (s.queued, f(s.build_frac)))
+            .map(|s| (s.queue_kinds, s.queued, f(s.build_frac)))
     }
 
     /// Box-select using the on-screen rectangle (pixel coordinates), matching
@@ -1824,7 +2307,18 @@ impl Game {
             self.selected.clear();
         }
         for s in &self.curr {
-            if s.owner != 0 || !matches!(s.kind, Kind::Infantry | Kind::Worker | Kind::Heavy) {
+            if s.owner != 0
+                || !matches!(
+                    s.kind,
+                    Kind::Infantry
+                        | Kind::Worker
+                        | Kind::Heavy
+                        | Kind::Pyromancer
+                        | Kind::Stormcaller
+                        | Kind::Hound
+                        | Kind::Javelin
+                )
+            {
                 continue;
             }
             let (wx, wz) = self.lerped(s);
@@ -1877,7 +2371,12 @@ impl Game {
                     units = true;
                     workers = true;
                 }
-                Kind::Infantry | Kind::Heavy => units = true,
+                Kind::Infantry
+                | Kind::Heavy
+                | Kind::Pyromancer
+                | Kind::Stormcaller
+                | Kind::Hound
+                | Kind::Javelin => units = true,
                 _ => {}
             }
         }
@@ -1942,7 +2441,24 @@ impl Game {
                 s.owner == 0
                     && matches!(
                         s.kind,
-                        Kind::Hq | Kind::Barracks | Kind::Turret | Kind::Supply
+                        Kind::Hq
+                            | Kind::Barracks
+                            | Kind::Turret
+                            | Kind::Supply
+                            | Kind::StormWard
+                            | Kind::Bunker
+                            | Kind::Athenaeum
+                            | Kind::Crucible
+                            | Kind::Conservatory
+                            | Kind::Aerie
+                            | Kind::LeyNexus
+                            | Kind::MachineShop
+                            | Kind::Arsenal
+                            | Kind::RadarArray
+                            | Kind::Starport
+                            | Kind::FusionReactor
+                            | Kind::Drydock
+                            | Kind::MissileSilo
                     )
                     && f(s.hp) < f(s.max_hp) - 0.5
                     && {

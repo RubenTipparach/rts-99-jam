@@ -6,6 +6,7 @@
 //! compiled there.
 
 use crate::game::Faction;
+use sim::BotLevel;
 
 /// Which top-level screen the app is showing.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -19,12 +20,14 @@ pub enum Screen {
 /// Skirmish setup chosen in the lobby. `faction` and `map` (an index into the
 /// voxel battlefields, `crate::voxel`) are applied to the match on Start;
 /// `bots` (1-3) is how many bot commanders spawn (standard maps carry four
-/// spawn sites). `map_open`/`map_scroll` drive the map-select modal.
+/// spawn sites) and `ai` is their difficulty. `map_open`/`map_scroll` drive
+/// the map-select modal.
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub struct Lobby {
     pub faction: Faction,
     pub bots: u8,
+    pub ai: BotLevel,
     pub map: u8,
     pub map_open: bool,
     pub map_scroll: u8,
@@ -35,10 +38,34 @@ impl Default for Lobby {
         Lobby {
             faction: Faction::Hollowmen,
             bots: 1,
+            ai: BotLevel::Normal,
             map: 0,
             map_open: false,
             map_scroll: 0,
         }
+    }
+}
+
+/// The lobby's difficulty cycle, in climbing order (Passive is the sandbox
+/// sparring partner: full base, never attacks).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn next_ai(level: BotLevel) -> BotLevel {
+    match level {
+        BotLevel::Passive => BotLevel::Easy,
+        BotLevel::Easy => BotLevel::Normal,
+        BotLevel::Normal => BotLevel::Hard,
+        BotLevel::Hard | BotLevel::Off => BotLevel::Passive,
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn ai_label(level: BotLevel) -> &'static str {
+    match level {
+        BotLevel::Off => "AI:  OFF",
+        BotLevel::Passive => "AI:  PASSIVE",
+        BotLevel::Easy => "AI:  EASY",
+        BotLevel::Normal => "AI:  NORMAL",
+        BotLevel::Hard => "AI:  HARD",
     }
 }
 
@@ -51,6 +78,7 @@ pub enum Click {
     SetFaction(Faction),
     AddBot,
     RemoveBot,
+    CycleAi,
     OpenMap,
     CloseMap,
     PickMap(u8),
@@ -201,6 +229,16 @@ mod web {
                     44.0 * s,
                     "+",
                     lobby.bots < 3,
+                ));
+                // Bot difficulty cycler (applies to every bot commander).
+                v.push(btn(
+                    Click::CycleAi,
+                    rx,
+                    302.0 * s,
+                    380.0 * s,
+                    44.0 * s,
+                    ai_label(lobby.ai),
+                    true,
                 ));
                 // Diamond map preview draws above this; the picker opens a modal.
                 v.push(btn(
@@ -641,12 +679,17 @@ mod web {
                 let _ = ctx.fill_text(&format!("BOTS: {}", lobby.bots), rx + 70.0 * s, 278.0 * s);
                 let mi = lobby.map as usize % crate::voxel::MAP_COUNT;
                 let map = crate::voxel::MAP_NAMES[mi];
+                // The map block sits below the AI difficulty button (ends at
+                // 346): name first, then the preview. The preview image fits
+                // a 2a x 2b box around its center, so with b = 80 it spans
+                // 382..542, clear of the name above and SELECT MAP (548)
+                // below.
                 let _ = ctx.fill_text(
                     &format!("MAP:  {map}   ({}/{})", mi + 1, crate::voxel::MAP_COUNT),
                     rx,
-                    326.0 * s,
+                    370.0 * s,
                 );
-                draw_map_preview(&ctx, rx + 190.0 * s, 432.0 * s, 180.0 * s, 100.0 * s, mi);
+                draw_map_preview(&ctx, rx + 190.0 * s, 462.0 * s, 150.0 * s, 80.0 * s, mi);
             }
             Screen::InGame => {}
         }

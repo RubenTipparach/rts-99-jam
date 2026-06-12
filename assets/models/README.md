@@ -4,7 +4,9 @@ Static Wavefront OBJ/MTL models for every unit, building, and resource
 node. **These files are the source of truth**: edit them in Blender (or
 any OBJ-capable tool) and commit the result. `tools/modelgen`
 (`cargo run -p modelgen`) only scaffolds brand-new models and OVERWRITES
-everything on re-run, so never use it to "refresh" a hand-edited file.
+everything on re-run, so never use it to "refresh" a hand-edited file;
+pass model names (`cargo run -p modelgen -- hound javelin`) to scaffold
+only those and leave every other file untouched.
 
 Conventions the engine relies on (loader: `apps/client/src/model.rs`):
 

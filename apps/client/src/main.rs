@@ -372,7 +372,7 @@ impl App {
         App {
             window: None,
             gfx: None,
-            game: Game::new(1),
+            game: Game::new(1, sim::BotLevel::Normal),
             camera: Camera::default(),
             input: Input::default(),
             last_frame: Instant::now(),
@@ -437,12 +437,35 @@ impl App {
                 &rd.hq_astro,
                 &rd.hq_hollow,
                 &rd.acolytes,
+                &rd.acolyte_frames,
                 &rd.engineers,
                 &rd.engineer_frames,
                 &rd.ore_nodes,
                 &rd.carbon_nodes,
                 &rd.heavies,
                 &rd.heavy_frames,
+                &rd.pyromancers,
+                &rd.pyromancer_frames,
+                &rd.stormcallers,
+                &rd.stormcaller_frames,
+                &rd.hounds,
+                &rd.hound_frames,
+                &rd.javelins,
+                &rd.javelin_frames,
+                &rd.storm_wards,
+                &rd.bunkers,
+                &rd.athenaeums,
+                &rd.crucibles,
+                &rd.conservatories,
+                &rd.aeries,
+                &rd.ley_nexuses,
+                &rd.machine_shops,
+                &rd.arsenals,
+                &rd.radar_arrays,
+                &rd.starports,
+                &rd.fusion_reactors,
+                &rd.drydocks,
+                &rd.missile_silos,
                 &rd.turrets,
                 &rd.supplies,
                 &rd.wards_astro,
@@ -453,6 +476,7 @@ impl App {
                 &rd.carbon_pools,
                 &fx_lights,
                 &rd.rings,
+                &rd.shadows,
                 &fow,
                 vp,
                 self.camera.eye(),
@@ -668,6 +692,7 @@ impl App {
             menu::Click::SetFaction(f) => self.lobby.faction = f,
             menu::Click::AddBot => self.lobby.bots = (self.lobby.bots + 1).min(3),
             menu::Click::RemoveBot => self.lobby.bots = self.lobby.bots.saturating_sub(1).max(1),
+            menu::Click::CycleAi => self.lobby.ai = menu::next_ai(self.lobby.ai),
             menu::Click::OpenMap => {
                 self.lobby.map_open = true;
                 // Scroll so the current selection is visible.
@@ -689,7 +714,7 @@ impl App {
                 if let Some(g) = self.gfx.as_mut() {
                     g.set_world();
                 }
-                self.game = Game::new(self.lobby.bots);
+                self.game = Game::new(self.lobby.bots, self.lobby.ai);
                 self.game.set_player_faction(self.lobby.faction);
                 self.game.apply_terrain();
                 if let Some((hx, hz)) = self.game.player_hq() {
@@ -731,7 +756,7 @@ impl App {
     fn end_match_to_menu(&mut self) {
         self.outcome = None;
         self.build_mode = None;
-        self.game = Game::new(1);
+        self.game = Game::new(1, self.lobby.ai);
         self.game.apply_terrain();
         self.set_paused(false);
         #[cfg(target_arch = "wasm32")]
@@ -868,18 +893,94 @@ impl ApplicationHandler<UserEvent> for App {
                         KeyCode::KeyS | KeyCode::ArrowDown => self.input.back = down,
                         KeyCode::KeyA | KeyCode::ArrowLeft => self.input.left = down,
                         KeyCode::KeyD | KeyCode::ArrowRight => self.input.right = down,
-                        // T trains the selected building's unit: a Worker at the
-                        // HQ, Infantry at a Barracks.
+                        // T / H train the selected hall's first / second unit
+                        // (Worker at the HQ; Infantry/Heavy at a Barracks;
+                        // the specialists at their tech halls).
                         KeyCode::KeyT if down => {
-                            let kind = if self.game.selected_hq().is_some() {
-                                protocol::UnitKind::Worker
-                            } else {
-                                protocol::UnitKind::Infantry
+                            let kind = match self.game.selected_producer_kind() {
+                                Some(sim::Kind::Hq) => protocol::UnitKind::Worker,
+                                Some(sim::Kind::Athenaeum) => protocol::UnitKind::Pyromancer,
+                                Some(sim::Kind::MachineShop) => protocol::UnitKind::Hound,
+                                _ => protocol::UnitKind::Infantry,
                             };
                             self.game.train_selected(kind)
                         }
                         KeyCode::KeyH if down => {
-                            self.game.train_selected(protocol::UnitKind::Heavy)
+                            let kind = match self.game.selected_producer_kind() {
+                                Some(sim::Kind::Athenaeum) => protocol::UnitKind::Stormcaller,
+                                Some(sim::Kind::MachineShop) => protocol::UnitKind::Javelin,
+                                _ => protocol::UnitKind::Heavy,
+                            };
+                            self.game.train_selected(kind)
+                        }
+                        // Worker build kit, faction tech tier: Q/E/R/F/C
+                        // (+ Z/M for the Hollowmen), matching the card labels.
+                        // These arms sit before the train arms so a selected
+                        // worker wins the shared F/C keys.
+                        KeyCode::KeyQ
+                        | KeyCode::KeyE
+                        | KeyCode::KeyR
+                        | KeyCode::KeyZ
+                        | KeyCode::KeyM
+                            if down && self.game.has_worker_selected() =>
+                        {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            let kind = match (code, astro) {
+                                (KeyCode::KeyQ, true) => Some(protocol::BuildingKind::Athenaeum),
+                                (KeyCode::KeyE, true) => Some(protocol::BuildingKind::Crucible),
+                                (KeyCode::KeyR, true) => Some(protocol::BuildingKind::Conservatory),
+                                (KeyCode::KeyQ, false) => Some(protocol::BuildingKind::MachineShop),
+                                (KeyCode::KeyE, false) => Some(protocol::BuildingKind::Arsenal),
+                                (KeyCode::KeyR, false) => Some(protocol::BuildingKind::RadarArray),
+                                (KeyCode::KeyZ, false) => Some(protocol::BuildingKind::Drydock),
+                                (KeyCode::KeyM, false) => Some(protocol::BuildingKind::MissileSilo),
+                                _ => None,
+                            };
+                            if let Some(kind) = kind {
+                                self.arm_build(kind)
+                            }
+                        }
+                        KeyCode::KeyF if down && self.game.has_worker_selected() => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.arm_build(if astro {
+                                protocol::BuildingKind::Aerie
+                            } else {
+                                protocol::BuildingKind::Starport
+                            })
+                        }
+                        KeyCode::KeyC if down && self.game.has_worker_selected() => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.arm_build(if astro {
+                                protocol::BuildingKind::LeyNexus
+                            } else {
+                                protocol::BuildingKind::FusionReactor
+                            })
+                        }
+                        // F / C train the faction's first-wave specialists.
+                        KeyCode::KeyF if down => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.game.train_selected(if astro {
+                                protocol::UnitKind::Pyromancer
+                            } else {
+                                protocol::UnitKind::Hound
+                            })
+                        }
+                        KeyCode::KeyC if down => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.game.train_selected(if astro {
+                                protocol::UnitKind::Stormcaller
+                            } else {
+                                protocol::UnitKind::Javelin
+                            })
+                        }
+                        // X = the faction's own static defense.
+                        KeyCode::KeyX if down && self.game.has_worker_selected() => {
+                            let astro = self.game.faction_of(0) == game::Faction::Astromancer;
+                            self.arm_build(if astro {
+                                protocol::BuildingKind::StormWard
+                            } else {
+                                protocol::BuildingKind::Bunker
+                            })
                         }
                         // Worker build: B = barracks, V = turret, N = a new HQ
                         // (founds an expansion) -> placement mode (refused
